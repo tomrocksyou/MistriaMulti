@@ -1,0 +1,9 @@
+/build/*
+!/build/.gitkeep
+*.obj
+*.o
+*.pdb
+*.ilk
+*.tmp
+__pycache__/
+/test-results/

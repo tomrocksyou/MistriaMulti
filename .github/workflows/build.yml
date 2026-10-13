@@ -1,0 +1,33 @@
+name: Build and test native helpers
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y nasm binutils
+      - run: sh scripts/build-linux.sh
+      - run: python3 tests/test_transport.py build/mistrimulti-helper-linux
+      - run: python3 tests/test_packet_faults.py build/mistrimulti-helper-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mistrimulti-linux-x64
+          path: build/mistrimulti-helper-linux
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install portable NASM
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.nasm.us/pub/nasm/releasebuilds/3.02/win64/nasm-3.02-win64.zip -OutFile nasm.zip
+          Expand-Archive nasm.zip nasm-tools
+          (Get-ChildItem nasm-tools -Filter nasm.exe -Recurse | Select-Object -First 1).DirectoryName | Add-Content $env:GITHUB_PATH
+      - shell: pwsh
+        run: ./scripts/Build.ps1 -Release
+      - run: python tests/test_transport.py build/mistrimulti-helper.exe
+      - run: python tests/test_packet_faults.py build/mistrimulti-helper.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mistrimulti-windows-x64
+          path: build/mistrimulti-helper.exe

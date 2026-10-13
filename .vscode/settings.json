@@ -1,0 +1,5 @@
+{
+  "nasm.outputFormat": "win64",
+  "nasm.extraFlags": ["-I", "helper/include/"],
+  "files.associations": { "*.inc": "nasm" }
+}

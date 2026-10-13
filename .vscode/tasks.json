@@ -1,0 +1,20 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Windows ASM helper",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/Build.ps1"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test Windows transport",
+      "type": "process",
+      "command": "python",
+      "args": ["${workspaceFolder}/tests/test_transport.py", "${workspaceFolder}/build/mistrimulti-helper.exe"],
+      "problemMatcher": []
+    }
+  ]
+}
