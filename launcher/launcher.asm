@@ -20,6 +20,7 @@ extern CreateJobObjectW, SetInformationJobObject, AssignProcessToJobObject
 extern CreateWindowExW
 extern OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, GlobalAlloc, GlobalLock, GlobalUnlock
 extern WSAStartup, WSACleanup, socket, bind, WSAPoll, recvfrom, sendto, closesocket, GetComputerNameA
+extern listen, accept, inet_addr, setsockopt
 extern CoCreateGuid, GetStdHandle, AllocConsole, SetConsoleOutputCP, Sleep, GetExitCodeProcess, ReadFile, WriteFile, CloseHandle
 
 section .data
@@ -41,6 +42,9 @@ WSTR f_stamp, "\%04d%02d%02d-%02d%02d%02d"
 WSTR f_launchopt, `"%s" --steam `
 WSTR s_command, "%command%"
 WSTR clip_static, "STATIC"
+WSTR f_mpsaves_star, "%s\FieldsOfMistria\multiplayer\saves\*.sav"
+WSTR f_mpsaves_file, "%s\FieldsOfMistria\multiplayer\saves\%S"
+WSTR f_mpsaves_dir, "%s\FieldsOfMistria\multiplayer\saves"
 WSTR n_cfg, "\launcher.cfg"
 WSTR n_log, "\launcher.log"
 WSTR n_control, "\control.json"
@@ -100,6 +104,16 @@ name_table dq n_stop, n_status, n_txframe, n_txtmp, n_pid
 align 8
 
 section .bss
+tcp_sock resq 1
+ws_name resb 80
+ws_tmp resb 80
+ws_size resd 1
+ws_best resq 1
+ws_path resw 1040
+ws_from resb 32
+ws_fromlen resd 1
+ws_timeout resd 1
+disc_pfds resb 32
 disc_sock resq 1
 disc_pfd resb 16
 disc_from resb 32
@@ -165,6 +179,7 @@ names resw 1600
 section .text
 global start
 %include "winutil.inc"
+%include "world.inc"
 
 
 
@@ -924,6 +939,26 @@ FN backup_saves
 END_FN
 
 ; Starts the network helper hidden. eax=1 if it is running after a short wait
+; A joining player refreshes the host's world just before the game starts (quietly: failures are fine).
+FN join_refresh_world
+    cmp dword [cfg_mode], 2
+    jne .d
+    lea rcx, [a_host]
+    call inet_addr
+    cmp eax, -1
+    je .d
+    mov r12d, eax
+    lea rcx, [p1]
+    lea rdx, [f_mpsaves_dir]
+    lea r8, [local_app]
+    call wsprintfW
+    mov dword [wf_connect_ms], 1500
+    mov ecx, r12d
+    lea rdx, [p1]
+    call world_fetch
+.d:
+END_FN
+
 FN start_helper
     lea rcx, [p1]
     lea rdx, [f_slash]
@@ -1075,6 +1110,38 @@ FN disc_start
     test eax, eax
     jnz .fail
     mov [disc_sock], rbx
+    ; the host's world is offered on TCP 7775 (see world.inc)
+    mov qword [tcp_sock], 0
+    mov ecx, 2
+    mov edx, 1
+    mov r8d, 6
+    call socket
+    cmp rax, -1
+    je .notcp
+    mov r12, rax
+    lea rdi, [disc_from]
+    xor eax, eax
+    mov ecx, 16
+    rep stosb
+    mov word [disc_from], 2
+    mov word [disc_from+2], WF_PORT_NET
+    mov rcx, r12
+    lea rdx, [disc_from]
+    mov r8d, 16
+    call bind
+    test eax, eax
+    jnz .tcpfail
+    mov rcx, r12
+    mov edx, 1
+    call listen
+    test eax, eax
+    jnz .tcpfail
+    mov [tcp_sock], r12
+    jmp .notcp
+.tcpfail:
+    mov rcx, r12
+    call closesocket
+.notcp:
     ; prepare the fixed part of the reply
     lea rdi, [disc_resp]
     xor eax, eax
@@ -1100,21 +1167,206 @@ FN disc_start
 .d:
 END_FN
 
-; Waits for the game process (rcx handle) while answering discovery queries.
+; Newest valid multiplayer save -> eax 1, with ws_name (ASCII), ws_path (wide), ws_size
+FN world_find_newest
+    mov qword [ws_best], 0
+    mov dword [ws_size], 0
+    mov byte [ws_name], 0
+    lea rcx, [p1]
+    lea rdx, [f_mpsaves_star]
+    lea r8, [local_app]
+    call wsprintfW
+    lea rcx, [p1]
+    lea rdx, [fd]
+    call FindFirstFileW
+    cmp rax, -1
+    je .none
+    mov r13, rax
+.each:
+    test dword [fd], 0x10
+    jnz .next
+    cmp dword [fd+28], 0                ; size high word must be 0
+    jne .next
+    mov eax, [fd+32]
+    test eax, eax
+    jz .next
+    cmp eax, WF_MAX_FILE
+    ja .next
+    lea rcx, [ws_tmp]
+    lea rdx, [fd+44]
+    mov r8d, 80
+    call wide_to_ascii
+    lea rcx, [ws_tmp]
+    call wf_valid_name
+    test eax, eax
+    jz .next
+    mov rax, [fd+20]                    ; last write time
+    cmp rax, [ws_best]
+    jbe .next
+    mov [ws_best], rax
+    mov eax, [fd+32]
+    mov [ws_size], eax
+    lea rsi, [ws_tmp]
+    lea rdi, [ws_name]
+    mov ecx, 80
+    rep movsb
+.next:
+    mov rcx, r13
+    lea rdx, [fd]
+    call FindNextFileW
+    test eax, eax
+    jnz .each
+    mov rcx, r13
+    call FindClose
+    cmp qword [ws_best], 0
+    je .none
+    lea rcx, [ws_path]
+    lea rdx, [f_mpsaves_file]
+    lea r8, [local_app]
+    lea r9, [ws_name]
+    call wsprintfW
+    mov eax, 1
+    jmp .d
+.none:
+    xor eax, eax
+.d:
+END_FN
+
+; Serves one waiting connection: sends the newest multiplayer save with its SHA-256. Never reads a path from the client.
+FN world_serve
+    mov dword [ws_fromlen], 32
+    mov rcx, [tcp_sock]
+    lea rdx, [ws_from]
+    lea r8, [ws_fromlen]
+    call accept
+    cmp rax, -1
+    je .d
+    mov rbx, rax
+    mov [wf_sock], rbx
+    mov dword [ws_timeout], 15000
+    mov rcx, rbx
+    mov edx, 0xFFFF                    ; SOL_SOCKET
+    mov r8d, 0x1006                    ; SO_RCVTIMEO
+    lea r9, [ws_timeout]
+    mov qword [rsp+32], 4
+    call setsockopt
+    mov rcx, rbx
+    mov edx, 0xFFFF
+    mov r8d, 0x1005                    ; SO_SNDTIMEO
+    lea r9, [ws_timeout]
+    mov qword [rsp+32], 4
+    call setsockopt
+    lea rcx, [wf_req]
+    mov edx, 16
+    mov r8d, 3000
+    call wf_recv_exact
+    test eax, eax
+    jz .close
+    cmp dword [wf_req], 'MSWQ'
+    jne .close
+    cmp byte [wf_req+4], 1
+    jne .close
+    lea rdi, [wf_hdr]
+    xor eax, eax
+    mov ecx, 112
+    rep stosb
+    mov dword [wf_hdr], 'MSWR'
+    mov byte [wf_hdr+4], 1
+    xor r12d, r12d                     ; file buffer
+    call world_find_newest
+    test eax, eax
+    jz .nosave
+    mov r13d, [ws_size]
+    xor ecx, ecx
+    mov edx, r13d
+    mov r8d, 0x3000
+    mov r9d, 4
+    call VirtualAlloc
+    test rax, rax
+    jz .cannot
+    mov r12, rax
+    lea rcx, [ws_path]
+    mov rdx, r12
+    mov r8d, r13d
+    call read_file
+    cmp rax, r13
+    jne .cannot
+    mov rcx, r12
+    mov edx, r13d
+    lea r8, [wf_hdr+12]
+    call sha256_raw
+    test eax, eax
+    jz .cannot
+    mov [wf_hdr+8], r13d
+    lea rsi, [ws_name]
+    lea rdi, [wf_hdr+48]
+    mov ecx, 63
+    rep movsb
+    lea rcx, [wf_hdr]
+    mov edx, 112
+    call wf_send_all
+    test eax, eax
+    jz .free
+    mov rcx, r12
+    mov edx, r13d
+    call wf_send_all
+    jmp .free
+.nosave:
+    mov byte [wf_hdr+5], 1
+    jmp .sendhdr
+.cannot:
+    lea rdi, [wf_hdr+8]
+    xor eax, eax
+    mov ecx, 104
+    rep stosb
+    mov byte [wf_hdr+5], 2
+.sendhdr:
+    lea rcx, [wf_hdr]
+    mov edx, 112
+    call wf_send_all
+.free:
+    test r12, r12
+    jz .close
+    mov rcx, r12
+    xor edx, edx
+    mov r8d, 0x8000
+    call VirtualFree
+.close:
+    mov rcx, rbx
+    mov edx, 1                         ; SD_SEND
+    call shutdown
+    mov rcx, rbx
+    call closesocket
+.d:
+END_FN
+
+; Waits for the game process (rcx handle) while answering discovery queries and world downloads.
 FN disc_serve
     mov r12, rcx
 .loop:
     mov rax, [disc_sock]
-    mov [disc_pfd], rax
-    mov word [disc_pfd+8], 0x0100   ; POLLRDNORM
-    mov word [disc_pfd+10], 0
-    lea rcx, [disc_pfd]
+    mov [disc_pfds], rax
+    mov word [disc_pfds+8], 0x0100      ; POLLRDNORM
+    mov word [disc_pfds+10], 0
+    mov rax, [tcp_sock]
+    mov [disc_pfds+16], rax
+    mov word [disc_pfds+24], 0x0100
+    mov word [disc_pfds+26], 0
     mov edx, 1
+    cmp qword [tcp_sock], 0
+    je .poll
+    mov edx, 2
+.poll:
+    lea rcx, [disc_pfds]
     mov r8d, 250
     call WSAPoll
-    cmp eax, 1
-    jne .check
-    test word [disc_pfd+10], 0x0100
+    test eax, eax
+    jle .check
+    test word [disc_pfds+26], 0x0100
+    jz .udp
+    call world_serve
+.udp:
+    test word [disc_pfds+10], 0x0100
     jz .check
     mov dword [disc_fromlen], 32
     mov rcx, [disc_sock]
@@ -1150,6 +1402,12 @@ FN disc_serve
     mov rcx, [disc_sock]
     call closesocket
     mov qword [disc_sock], 0
+    mov rcx, [tcp_sock]
+    test rcx, rcx
+    jz .d
+    call closesocket
+    mov qword [tcp_sock], 0
+.d:
 END_FN
 
 ; Runs the game command line (everything after "--steam") and waits for it. Sets game_exit.
@@ -1738,6 +1996,7 @@ start:
     lea rbx, [r_helper]
     jmp .direct
 .run:
+    call join_refresh_world
     call disc_start
     call launch_game
     call stop_helper

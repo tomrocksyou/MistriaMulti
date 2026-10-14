@@ -45,6 +45,13 @@ and `transition_to` are wrapped (via `ui.menu_opened`): New Game and Load Game f
 multiplayer space; choosing Multiplayer without the helper running shows an explanatory popup.
 Any failure restores the solo folder. Quitting to the title tears the session down.
 
+## World transfer (implemented, untested in the real game)
+The host's launcher serves the newest multiplayer save over TCP 7775 (see PROTOCOL.md). **Join selected** in the manager
+downloads it into the guest's `multiplayer/saves` folder, and the guest's launcher refreshes it as the game starts. On a guest,
+**New Game -> Multiplayer** then loads that world (`LoadState.Load`) instead of creating a new one. A host with an earlier
+multiplayer world is asked whether to continue it or start a new one. The world is a copy as of the host's last save, so the
+host should save (sleep) before friends join; live state beyond terrain and players is not synchronised yet.
+
 ## Known side effects / still to do
 - `settings.json` is also resolved through `CONFIG_DIRECTORY`, so settings changed during a multiplayer session are written
   to the multiplayer folder (solo settings are untouched).

@@ -49,6 +49,7 @@ class Sandbox:
         self.saves.mkdir(parents=True)
         (self.saves / "game-1-autosave.sav").write_bytes(b"solo world")
         self.mod.mkdir(parents=True)
+        self.mp = self.local / "FieldsOfMistria" / "multiplayer" / "saves"
 
     def config(self, text):
         (self.mod / "launcher.cfg").write_text(text)
@@ -369,6 +370,125 @@ def test_scan():
         sb.cleanup()
 
 
+def world_request(payload=None, timeout=10):
+    import hashlib
+    import socket
+    sock = socket.socket()
+    sock.settimeout(timeout)
+    try:
+        sock.connect(("127.0.0.1", 7775))
+        sock.sendall(payload if payload is not None else b"MSWQ\x01" + b"\x00" * 11)
+        got = b""
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            got += chunk
+        return got
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
+def test_world_server():
+    import hashlib
+    sb = Sandbox()
+    try:
+        sb.mp.mkdir(parents=True)
+        old = os.urandom(50_000)
+        new = os.urandom(200_000)
+        (sb.mp / "game-1-autosave.sav").write_bytes(old)
+        (sb.mp / "game-2-autosave.sav").write_bytes(new)
+        (sb.mp / "game-3-autosave.old.sav").write_bytes(b"newest but not a valid save name")
+        (sb.mp / "notes.txt").write_bytes(b"x")
+        os.utime(sb.mp / "game-1-autosave.sav", (1_700_000_000, 1_700_000_000))
+        os.utime(sb.mp / "game-2-autosave.sav", (1_700_000_100, 1_700_000_100))
+        os.utime(sb.mp / "game-3-autosave.old.sav", (1_700_000_200, 1_700_000_200))
+        sb.config("mode=host\r\nport=47881\r\n")
+        proc = sb.steam(["--slow"])
+        assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
+        got = None
+        for _ in range(20):
+            got = world_request()
+            if got:
+                break
+            time.sleep(0.3)
+        assert got and len(got) == 112 + len(new), (None if got is None else len(got))
+        hdr, body = got[:112], got[112:]
+        assert hdr[:4] == b"MSWR" and hdr[4] == 1 and hdr[5] == 0, hdr[:8]
+        assert int.from_bytes(hdr[8:12], "little") == len(new)
+        assert hdr[12:44] == hashlib.sha256(new).digest() and body == new
+        assert hdr[48:112].split(b"\x00")[0] == b"game-2-autosave.sav", hdr[48:80]
+        # bad requests get nothing
+        assert world_request(b"MSWQ\x09" + b"\x00" * 11) in (b"", None)
+        assert world_request(b"XXXX\x01" + b"\x00" * 11) in (b"", None)
+        assert world_request(b"short") in (b"", None)
+        # the host still serves after the junk
+        again = world_request()
+        assert again and again[112:] == new
+        # nothing to give: status 1
+        for f in sb.mp.iterdir():
+            f.unlink()
+        none = world_request()
+        assert none and len(none) == 112 and none[5] == 1, none[:8] if none else none
+        finish(proc)
+        print("world server: newest valid save is sent with a correct checksum, look-alike files ignored, junk requests dropped, status 1 when there is nothing")
+    finally:
+        sb.cleanup()
+
+
+def test_guest_refreshes_world():
+    import hashlib
+    import socket
+    import threading
+    sb = Sandbox()
+    try:
+        data = os.urandom(120_000)
+        name = b"game-77-autosave.sav"
+        server = socket.socket()
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 7775))
+        server.listen(2)
+        server.settimeout(20)
+
+        def serve():
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            with conn:
+                conn.recv(16)
+                h = bytearray(112)
+                h[0:4] = b"MSWR"
+                h[4] = 1
+                h[8:12] = len(data).to_bytes(4, "little")
+                h[12:44] = hashlib.sha256(data).digest()
+                h[48:48 + len(name)] = name
+                conn.sendall(bytes(h) + data)
+        t = threading.Thread(target=serve, daemon=True)
+        t.start()
+        sb.config("mode=join\r\nhost=127.0.0.1\r\nplayer=2\r\nport=47891\r\n")
+        proc = sb.steam()
+        assert wait_for(lambda: (sb.mp / "game-77-autosave.sav").exists(), 20), "world was not downloaded at game start"
+        assert (sb.mp / "game-77-autosave.sav").read_bytes() == data
+        finish(proc)
+        server.close()
+        # an unreachable host must not delay or break the game start
+        sb2 = Sandbox()
+        try:
+            sb2.config("mode=join\r\nhost=10.255.255.1\r\nplayer=2\r\nport=47891\r\n")
+            t0 = time.time()
+            code = finish(sb2.steam(["--quick"]))
+            assert code == 7 and sb2.ran() is not None
+            assert time.time() - t0 < 25, "an unreachable host delayed the game too long"
+        finally:
+            sb2.cleanup()
+        print("guest: the host's world is downloaded as the game starts; an unreachable host does not block the game")
+    finally:
+        sb.cleanup()
+
+
 def test_fuzz():
     import random
     rng = random.Random(1234)
@@ -440,5 +560,7 @@ test_configure()
 test_fuzz()
 test_discovery_responder()
 test_scan()
+test_world_server()
+test_guest_refreshes_world()
 test_helper_dies_with_launcher()
 print("PASS")

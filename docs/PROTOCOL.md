@@ -61,3 +61,15 @@ is exactly 64 bytes: `MSDR`, version `1`, flags (bit 0 = the host uses a custom 
 computer name (32 bytes, NUL padded), 24 zero bytes. Anything else is ignored, and the reply is never larger than the
 query, so the responder cannot amplify traffic. Players scan with a broadcast query on every local network plus a unicast
 query to each Tailscale peer. Discovery gives no authentication: it only tells a friend where to connect.
+
+## World transfer (TCP 7775)
+
+While a host plays, the launcher also listens on TCP port 7775 and gives a joining player the host's newest multiplayer save
+(`%LOCALAPPDATA%\FieldsOfMistria\multiplayer\saves\game-<digits>-(autosave|<digits>).sav`; other names, such as `.old.sav`,
+are never sent). The client sends 16 bytes: `MSWQ`, version `1`, 11 zero bytes. The host replies with a 112-byte header and
+then the file: `MSWR`, version `1`, status (0 = ok, 1 = no world yet, 2 = cannot send), file length (u32 little-endian,
+at most 200 MB) at offset 8, SHA-256 of the file at offset 12, and the file name at offset 48 (64 bytes, NUL padded).
+The client rejects any name that does not match the pattern above, checks the length and the SHA-256, writes
+`<name>.part` and only then renames it over the old copy. The client never names a file; the host never reads a path
+from the client. Every wait is bounded (3 s request, 5 s header, 15 s data) and one connection is served at a time.
+Anyone who can reach the host's port can download the world, so use a private network (Tailscale, LAN).

@@ -61,7 +61,7 @@ if ($Target -in @('Windows','Both')) {
     $taskLauncherExe = Join-Path $taskBuildRoot 'MistriMultiLauncher.exe'
     $taskLauncherArgs = @('/nologo','/machine:x64','/subsystem:windows','/entry:start','/nodefaultlib','/incremental:no',
         "/out:$taskLauncherExe", $taskLauncherObject, "/libpath:$taskLibraries",
-        'kernel32.lib','user32.lib','shell32.lib','ole32.lib','ws2_32.lib')
+        'kernel32.lib','user32.lib','shell32.lib','ole32.lib','ws2_32.lib','bcrypt.lib')
     if (-not $Release) { $taskLauncherArgs += '/debug' }
     & $taskLinker @taskLauncherArgs
     if ($LASTEXITCODE -ne 0) { throw 'Launcher linking failed.' }

@@ -35,24 +35,32 @@ start:
     call WriteFile
     mov rcx, rsi
     call CloseHandle
-    ; "--quick" anywhere on the command line skips the sleep
+    ; "--quick" anywhere on the command line skips the sleep, "--slow" sleeps 12 seconds, otherwise 3
     mov rsi, rbx
+    mov r12d, 3000
 .scan:
     cmp word [rsi], 0
     je .sleep
     cmp dword [rsi], '-' | ('-' << 16)
     jne .next
     cmp dword [rsi+4], 'q' | ('u' << 16)
-    jne .next
+    jne .tryslow
     cmp dword [rsi+8], 'i' | ('c' << 16)
     jne .next
     cmp word [rsi+12], 'k'
     je .exit
+    jmp .next
+.tryslow:
+    cmp dword [rsi+4], 's' | ('l' << 16)
+    jne .next
+    cmp dword [rsi+8], 'o' | ('w' << 16)
+    jne .next
+    mov r12d, 12000
 .next:
     add rsi, 2
     jmp .scan
 .sleep:
-    mov ecx, 3000
+    mov ecx, r12d
     call Sleep
 .exit:
     mov ecx, 7

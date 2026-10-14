@@ -53,6 +53,15 @@ being stopped when the launcher is killed, the host's discovery responder (valid
 launcher. Build with `sh scripts/build-launcher.sh` and `sh scripts/build-updater.sh`. `python3 scripts/lint-asm.py .`
 rejects `[label+register]` addresses, which crash 64-bit Windows programs.
 
+## World transfer checks
+
+`tests/test_world.py` runs the download client (`MistriMulti.exe --fetch <ip> <folder> <result file>`) against a fake host:
+an intact 300 KB transfer, a wrong checksum (nothing replaced, no partial file), unsafe file names, "no world", truncated,
+oversized, empty and junk replies, an absent host and a host that stalls. `tests/test_launcher.py` additionally checks the
+real host: it sends the newest valid save with a correct checksum, ignores look-alike files, drops malformed requests and
+answers "no world" when there is nothing; and a joining launcher downloads the world as the game starts without being
+delayed by an unreachable host.
+
 ## Transport checks
 
 From the project folder on Windows:

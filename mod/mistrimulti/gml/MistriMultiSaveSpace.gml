@@ -22,6 +22,15 @@ function mistrimulti_savespace_armed() {
     return is_struct(cfg) && cfg[$ "enabled"] == true && (cfg[$ "mode"] == "host" || cfg[$ "mode"] == "join");
 }
 
+// "host", "join" or "" from control.json (written by the launcher for this session)
+function mistrimulti_savespace_mode() {
+    var control = mmapi_mod_data_dir("mistrimulti") + "/control.json";
+    if (!file_exists(control)) return "";
+    var cfg = try_read_json_file(control);
+    if (!is_struct(cfg) || cfg[$ "enabled"] != true) return "";
+    return is_string(cfg[$ "mode"]) ? cfg.mode : "";
+}
+
 // Rebuilds Setup.load_menu_data from the current save manager. Mirrors the list Setup's create
 // builds for the Load menu, because the game built it before this code could redirect the folder.
 function mistrimulti_savespace_rebuild_menu() {
@@ -102,8 +111,44 @@ function mistrimulti_savespace_chosen(kind, multiplayer, arg) {
     if (multiplayer && !mistrimulti_game_supported()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/offline_version_body"); return; }
     if (multiplayer && !mistrimulti_savespace_armed()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/needs_helper_body"); return; }
     if (!mistrimulti_savespace_try_set(multiplayer)) return;
-    if (kind == "new") s.orig_enter_game(arg);
-    else s.orig_transition_to(Menu.Load);
+    if (kind == "new") {
+        if (multiplayer) mistrimulti_savespace_enter_multiplayer(arg);
+        else s.orig_enter_game(arg);
+    } else s.orig_transition_to(Menu.Load);
+}
+
+// The newest world in the multiplayer folder (the host's downloaded world for a guest), or undefined.
+function mistrimulti_savespace_newest_world() {
+    var paths = Setup.save_manager.get_saves_ordered();
+    if (array_length(paths) == 0) return undefined;
+    return Setup.save_manager.manifest.get(paths[0]);
+}
+
+// New Game -> Multiplayer. A guest enters the host's world (downloaded by the manager or at game start).
+// A host with an earlier multiplayer world chooses between continuing it and starting a new one.
+function mistrimulti_savespace_enter_multiplayer(new_state) {
+    var s = __mistrimulti_savespace();
+    var world = mistrimulti_savespace_newest_world();
+    if (mistrimulti_savespace_mode() == "join") {
+        if (world == undefined) {
+            mistrimulti_savespace_try_set(false);
+            mistrimulti_savespace_popup("mistrimulti/no_world_title", "mistrimulti/no_world_body");
+            return;
+        }
+        s.orig_enter_game(LoadState.Load(world));
+        return;
+    }
+    if (world == undefined) { s.orig_enter_game(new_state); return; }
+    var mcp = new MultipleChoicePopup("mistrimulti/host_world");
+    mcp.option("mistrimulti/continue_world", mistrimulti_savespace_host_choice, [true, new_state]);
+    mcp.option("mistrimulti/new_world", mistrimulti_savespace_host_choice, [false, new_state]);
+}
+
+function mistrimulti_savespace_host_choice(continue_world, new_state) {
+    var s = __mistrimulti_savespace();
+    var world = mistrimulti_savespace_newest_world();
+    if (continue_world && world != undefined) s.orig_enter_game(LoadState.Load(world));
+    else s.orig_enter_game(new_state);
 }
 
 // Wrapper installed over TitleMenu.enter_game. New Game asks first; Continue / Load keep the current space.
@@ -159,6 +204,11 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/choose_mode": return "Singleplayer or Multiplayer?";
         case "mistrimulti/singleplayer": return "Singleplayer";
         case "mistrimulti/multiplayer": return "Multiplayer";
+        case "mistrimulti/host_world": return "Multiplayer world";
+        case "mistrimulti/continue_world": return "Continue your world";
+        case "mistrimulti/new_world": return "Start a new world";
+        case "mistrimulti/no_world_title": return "No world to join yet";
+        case "mistrimulti/no_world_body": return "Open MistriMulti, press Join a game, and pick your host. Then try again.";
         case "mistrimulti/offline_title": return "Multiplayer is offline";
         case "mistrimulti/offline_version_body": return "The game was updated and MistriMulti has not been updated for it yet.";
         case "mistrimulti/needs_helper_body": return "Multiplayer is not set up. Run Play.bat once, then start the game from Steam.";
