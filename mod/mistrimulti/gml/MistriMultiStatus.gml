@@ -2,7 +2,7 @@
 // Online  = this game version has been tested with the mod AND the network helper is running.
 // Offline = the game was updated past the tested versions, or the helper is not running.
 // Add a version here only after testing the mod against it.
-function mistrimulti_supported_versions() { return ["1.0.6"]; }
+function mistrimulti_supported_versions() { return ["1.0.6", "1.0.8"]; }
 
 function mistrimulti_game_version_text() {
     try { return version_to_string(GAME_VERSION); } catch (e) { return ""; }
