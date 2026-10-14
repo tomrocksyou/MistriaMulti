@@ -50,10 +50,13 @@ are blocked during multiplayer. The host can save its farm normally. See
    Windows executable is also included under `build/` in the supplied project.
 3. Run `Install-Mod.bat`. It copies **only this project's own mod** into your game's `mods/` folder.
 4. Open MOMI, select **MistriMulti**, and click **Install**. Close the game during installation.
-5. Everyone runs `Play.bat` once. A window asks whether you want to host (H) or join a friend (J).
-   Host: it creates an eight-digit room code that stays the same every session. Friends: enter the host's reachable
-   IPv4 address, the room code and a player number (1-7, different for each friend). Run `Play.bat` again whenever
-   those details change. (Double-clicking `MistriMultiLauncher.exe` does the same as `Play.bat`; the line to paste into Steam is copied to your clipboard.)
+5. Everyone double-clicks `MistriMultiLauncher.exe` (or `Play.bat`) once. It asks whether you want to host (H) or join
+   a friend (J). **Joining only needs the host's IP address**: with Tailscale, that is the host's Tailscale address
+   (it starts with `100.`). Port, room code and player number all have defaults; press Enter. Each friend gets a
+   player number from 1 to 7 automatically, so if two friends end up with the same one, run the setup again and
+   type a different number. A room code is optional (only useful if you want to keep strangers' packets out of a
+   session on a public IP; the host and friends must then type the same one).
+   The line to paste into Steam is copied to your clipboard when setup finishes.
 6. **Click Play in Steam from now on.** One time only: in Steam, right-click the game, Properties, Launch Options,
    and paste the line `Play.bat` prints (`"<folder>\MistriMultiLauncher.exe" --steam %command%`). Steam then runs the
    launcher, which starts the network helper from your saved details and launches the game. If anything is wrong
@@ -68,7 +71,7 @@ are blocked during multiplayer. The host can save its farm normally. See
 `MistriMultiLauncher.exe` and the helper must sit in the same folder. The mod installer (`Install-Mod.bat`) searches
 Steam libraries for the game; pass `-GameDirectory` to `scripts\Install-Mod.ps1` to choose an installation explicitly.
 
-Use a LAN or trusted private VPN first. Direct Internet connections need the host's
+Use a LAN or a private VPN such as Tailscale. Windows Firewall may ask once whether `mistrimulti-helper.exe` may use the network: allow it for the private network (and for Tailscale's adapter if it is listed as public). The default room code is not a password, so do not expose the host's port to the open Internet. Direct Internet connections need the host's
 UDP port reachable; CGNAT can prevent direct hosting. The room code separates sessions,
 and the checksum detects corruption; this protocol does **not** provide encryption or
 cryptographic authentication. No firewall or router settings are changed automatically.

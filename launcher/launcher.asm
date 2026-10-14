@@ -66,6 +66,8 @@ k_host db 5,'host='
 k_port db 5,'port='
 k_player db 7,'player='
 k_room db 5,'room='
+room_default db '4d495354',0
+host_s_dummy db 0
 a_host_s db 'host',0
 a_join_s db 'join',0
 needle_local db '"uid":"local:'
@@ -81,8 +83,10 @@ t_stop_len equ $ - t_stop
 p_mode db 'Host a game (H) or join a friend (J)? ',0
 p_ip db 'Host IPv4 address (for example 192.168.1.20): ',0
 p_port db 'Port (Enter for 7777): ',0
-p_player db 'Your player number, 1 to 7 (different for each friend): ',0
-p_room db 'Room code from the host (8 characters, 0-9 and a-f): ',0
+p_player db 'Your player number, 1 to 7, or just press Enter to pick one for you: ',0
+p_room db 'Room code (just press Enter unless your host gave you one): ',0
+t_hostinfo db 13,10,'Tell your friends your Tailscale IP address (it starts with 100.). That is all they need to join you.',13,10,0
+t_player db 'Your player number is %d (every friend needs a different one; run setup again to change it).',13,10,0
 p_close db 13,10,'Press Enter to close.',0
 t_bad db 'That value is not valid, try again.',13,10,0
 t_giveup db 'Setup was not saved.',13,10,0
@@ -95,6 +99,8 @@ name_table dq n_stop, n_status, n_txframe, n_txtmp, n_pid
 align 8
 
 section .bss
+old_mode resd 1
+old_player resd 1
 h_job resq 1
 jobinfo resb 144
 in_pos resd 1
@@ -513,6 +519,13 @@ FN load_config
     lea rdx, [a_room]
     mov r8d, 16
     call cfg_get
+    test eax, eax
+    jnz .haveRoom
+    lea rsi, [room_default]            ; no room code configured: everyone uses the built-in default
+    lea rdi, [a_room]
+    mov ecx, 9
+    rep movsb
+.haveRoom:
     lea rcx, [a_room]
     call v_room
     test eax, eax
@@ -1411,6 +1424,10 @@ configure_main:
     jz cfg_giveup
     call load_config
     mov [have_old], eax
+    mov eax, [cfg_mode]
+    mov [old_mode], eax
+    mov eax, [cfg_player]
+    mov [old_player], eax
     mov r14d, 5
 .ask_mode:
     dec r14d
@@ -1518,6 +1535,28 @@ configure_main:
     call ask
     cmp eax, -1
     je cfg_giveup
+    test eax, eax
+    jnz .player_val
+    cmp dword [old_mode], 2
+    jne .rand
+    mov eax, [old_player]
+    cmp eax, 1
+    jl .rand
+    cmp eax, 7
+    jg .rand
+    mov [cfg_player], eax
+    jmp .join_room
+.rand:
+    lea rcx, [file_buf]
+    call guid_hex
+    movzx eax, byte [guid]
+    xor edx, edx
+    mov ecx, 7
+    div ecx
+    inc edx
+    mov [cfg_player], edx
+    jmp .join_room
+.player_val:
     lea rcx, [ans]
     call a2i
     cmp eax, 1
@@ -1541,6 +1580,8 @@ configure_main:
     call ask
     cmp eax, -1
     je cfg_giveup
+    test eax, eax
+    jz .room_default
     lea rcx, [ans]
     call v_room
     test eax, eax
@@ -1550,26 +1591,31 @@ configure_main:
     mov ecx, 16
     rep movsb
     jmp .save
+.room_default:
+    lea rsi, [room_default]
+    lea rdi, [a_room]
+    mov ecx, 9
+    rep movsb
+    jmp .save
 .room_bad:
     lea rcx, [t_bad]
     call say
     jmp .ask_room
 .host_room:
-    ; a host keeps its room code between sessions, so friends never have to re-enter it
+    ; a host keeps a custom room code it already had; otherwise the shared default is used
+    cmp dword [old_mode], 1
+    jne .defroom
     cmp dword [have_old], 0
-    je .newroom
+    je .defroom
     lea rcx, [a_room]
     call v_room
     test eax, eax
     jnz .save
-.newroom:
-    lea rcx, [file_buf]
-    call guid_hex
-    lea rsi, [file_buf]
+.defroom:
+    lea rsi, [room_default]
     lea rdi, [a_room]
-    mov ecx, 8
+    mov ecx, 9
     rep movsb
-    mov byte [rdi], 0
 .save:
     lea rcx, [utf8]
     lea rdx, [cfg_fmt]
@@ -1615,12 +1661,16 @@ configure_main:
     lea rcx, [t_cmd2]
     call say
     cmp dword [cfg_mode], 1
-    jne .close
-    lea rcx, [t_roomis]
+    jne .joininfo
+    lea rcx, [t_hostinfo]
     call say
-    lea rcx, [a_room]
-    call say
-    lea rcx, [t_crlf]
+    jmp .close
+.joininfo:
+    lea rcx, [utf8]
+    lea rdx, [t_player]
+    mov r8d, [cfg_player]
+    call wsprintfA
+    lea rcx, [utf8]
     call say
 .close:
     lea rcx, [p_close]

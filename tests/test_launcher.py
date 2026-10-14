@@ -211,14 +211,18 @@ def test_configure():
     try:
         out = run(sb, "h\r\n\r\n\r\n")
         cfg = (sb.mod / "launcher.cfg").read_text()
-        assert "mode=host" in cfg and "port=7777" in cfg and "player=0" in cfg, cfg
-        room = [l for l in cfg.splitlines() if l.startswith("room=")][0][5:]
-        assert len(room) == 8 and all(c in "0123456789abcdef" for c in room), cfg
-        assert "--steam %command%" in out and "MistriMultiLauncher.exe" in out, out
-        run(sb, "h\r\n\r\n\r\n")
+        assert "mode=host" in cfg and "port=7777" in cfg and "player=0" in cfg and "room=4d495354" in cfg, cfg
+        assert "--steam %command%" in out and "MistriMultiLauncher.exe" in out and "Tailscale" in out, out
         out2 = run(sb, "h\r\n\r\n\r\n", args=())          # double-clicking the exe (no arguments) is the setup too
-        assert "already copied to your clipboard" in out2 and room in (sb.mod / "launcher.cfg").read_text(), out2
-        assert room in (sb.mod / "launcher.cfg").read_text(), "host room code must stay the same"
+        assert "already copied to your clipboard" in out2, out2
+        # a friend joins with only the host's IP: room code and player number are filled in
+        run(sb, "j\r\n100.101.102.103\r\n\r\n\r\n\r\n\r\n")
+        cfg = (sb.mod / "launcher.cfg").read_text()
+        assert "mode=join" in cfg and "host=100.101.102.103" in cfg and "port=7777" in cfg and "room=4d495354" in cfg, cfg
+        player = int([l for l in cfg.splitlines() if l.startswith("player=")][0][7:])
+        assert 1 <= player <= 7, cfg
+        run(sb, "j\r\n100.101.102.103\r\n\r\n\r\n\r\n\r\n")
+        assert f"player={player}" in (sb.mod / "launcher.cfg").read_text(), "Enter must keep the earlier player number"
         run(sb, "j\r\n192.168.1.20\r\n\r\n3\r\nABCDEF12\r\n\r\n")
         cfg = (sb.mod / "launcher.cfg").read_text()
         assert "mode=join" in cfg and "host=192.168.1.20" in cfg and "player=3" in cfg and "room=ABCDEF12" in cfg, cfg
@@ -228,7 +232,12 @@ def test_configure():
         before = (sb.mod / "launcher.cfg").read_text()
         run(sb, "j\r\nbad\r\nbad\r\nbad\r\nbad\r\nbad\r\n")
         assert (sb.mod / "launcher.cfg").read_text() == before, "invalid input must not change the saved setup"
-        print("configure: host/join prompts, validation, stable host room code, launch option printed")
+        # a config with no room code at all is valid and uses the default; a join with only an IP works end to end
+        sb.config("mode=join\r\nhost=127.0.0.1\r\nplayer=2\r\n")
+        proc = sb.steam()
+        assert wait_for(lambda: json.loads((sb.mod / "control.json").read_text())["enabled"] is True), "IP-only join did not start"
+        finish(proc)
+        print("configure: IP-only join, default room, kept player number, validation, launch option printed")
     finally:
         sb.cleanup()
 
