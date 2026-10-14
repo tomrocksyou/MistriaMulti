@@ -23,6 +23,9 @@ Implemented:
   base animations, action animations, and tool attachments.
 - Host-authoritative farm soil and watering updates, conflict correction, and bounded
   terrain snapshots for joining players, room transitions, and host day changes.
+- Host-authoritative farm objects (crops, trees, rocks, forageables, dig sites, weeds, fences, sprinklers): harvests,
+  chops and digs are decided by the host and yield to the player who acted; growth and spawns follow the host
+  (`docs/SYNC-FARM.md`, untested in the game).
 - An event layer for synced features: batched, ordered, acknowledged events per player, blobs up to
   256 KB delivered whole, and host-authoritative requests applied exactly once (`docs/EVENT-LAYER.md`,
   which includes the guide for adding a synced feature). Appearance, farm terrain and player records use it.
@@ -41,16 +44,13 @@ Implemented:
   player (`docs/SYNC-CONTAINERS.md`, experimental and not yet run in the game).
 - Per-player progress (recipes, almanac, mail, personal quests, romance and children, cosmetics, counters) is stored on the host
   beside each player's record, committed with the host's save, and one villager can be romanced by one player at a time
-  (`docs/SYNC-PROGRESS.md`; it supersedes the "not included yet" sentence below).
+  (`docs/SYNC-PROGRESS.md`).
 - F8 displays connection status in game.
 - Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
 
-This is not feature-complete co-op. Crops/harvests, shared containers and item transfers,
-resource drops, buildings, animals, quests/unlocks, NPC schedules, time/weather, cutscenes,
-mines/dungeon generation are **not synchronized** in this version. Personal quests,
-recipe/cosmetic unlocks, romance cutscene history, marriage dates and children are not
-included in the player records yet. Saving friendship points and relationship status
-does not provide a complete multiplayer romance system.
+This is not feature-complete co-op. Still **not synchronized**: NPC schedules, quests/unlocks that belong to the world,
+cutscenes, and mines/dungeon generation and combat. Everything listed above was written against the game's scripts and
+tested only against a stand-in game; none of it has been confirmed in the real game yet.
 
 Guests retain their local world's objects while the synchronized systems operate.
 Their core character progress is checkpointed on the host about every five seconds;

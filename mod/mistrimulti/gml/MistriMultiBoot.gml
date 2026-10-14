@@ -65,6 +65,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.player_restore", mistrimulti_player_restore, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.events", mistrimulti_events_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.progress", mistrimulti_debug_progress, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.farm", mistrimulti_farm_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.character", mistrimulti_debug_character, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.containers", mistrimulti_containers_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.drops", mistrimulti_drops_debug, { mod_name: "mistrimulti" });
@@ -78,6 +79,7 @@ function mistrimulti_initialize() {
 function mistrimulti_register_events() {
     mistrimulti_event_register("look", { on_event: mistrimulti_look_event, on_peer: mistrimulti_look_peer });
     mistrimulti_terrain_register_events();
+    mistrimulti_farm_register_events();
     mistrimulti_player_register_events();
     mistrimulti_clock_register_events();
     mistrimulti_containers_register_events();
@@ -138,6 +140,7 @@ function mistrimulti_tick() {
         mistrimulti_containers_tick();
         mistrimulti_drops_tick();
         mistrimulti_ranch_tick();
+        mistrimulti_farm_tick();
     } else {
         mistrimulti_remove_ghosts();
     }
@@ -316,6 +319,7 @@ function mistrimulti_register() {
     r.registered = true;
     mmapi_register(mistrimulti_tick);
     mmapi_filter("tool.targets", mistrimulti_tool_targets);
+    mistrimulti_farm_register_hooks();
     mmapi_guard("game.save_guard", mistrimulti_save_guard);
     mmapi_on("game.new_day", mistrimulti_new_day);
     mmapi_on("game.new_day", mistrimulti_drops_new_day);

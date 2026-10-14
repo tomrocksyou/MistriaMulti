@@ -181,6 +181,11 @@ stubbed: simultaneous takes, stale replicas, 21 hostile requests, a guest cut of
 request in flight (never applied twice), snapshots, drop/claim races under loss, day change, gifts, per-player shipping
 bins, seeded loot and randomised item-conservation runs.
 
+## Farm checks
+
+`python3 tests/test_farm_sync.py` (about 5 minutes) runs the real farm-object GML on the event layer at 5-10% loss: join,
+host changes and day change, guest harvest races (exactly one yield), tool swings, edits, conflicts, rejoin and hostile input.
+
 ## Ranch checks
 
 `python3 tests/test_ranch.py` runs the real animal, pet, building and home GML on the event layer (19 scenarios: paid
