@@ -34,6 +34,9 @@ Implemented:
   money, skill XP, perks, spells, friendship points and relationship status.
 - Guests load their hosted-world record on reconnect. New guests start with the game's
   starter inventory and customize their character before publishing progress.
+- Per-player progress (recipes, almanac, mail, personal quests, romance and children, cosmetics, counters) is stored on the host
+  beside each player's record, committed with the host's save, and one villager can be romanced by one player at a time
+  (`docs/SYNC-PROGRESS.md`; it supersedes the "not included yet" sentence below).
 - F8 displays connection status in game.
 
 This is not feature-complete co-op. Crops/harvests, shared containers and item transfers,

@@ -8,6 +8,7 @@ function mistrimulti_player_reset_session() {
     r.player_request = "";
     r.player_sessions = array_create(8, undefined);
     r.player_error = "";
+    mistrimulti_progress_reset_session();
     r.epoch += "_" + string(get_timer());
     // A new world session: nothing queued for the previous one may be delivered to it.
     mistrimulti_events_reset();
@@ -43,6 +44,8 @@ function mistrimulti_player_data_tick() {
             directory_create(r.world_path + "/players");
             save_text_file(r.world_path + "/world.json", json_stringify({ v: 1,
                 world: r.world_key, game_id: Game.unique_identifier, host: r.uid }));
+            // Restore the loaded save's committed records and rebuild the one-partner registry before anyone is admitted.
+            mistrimulti_progress_host_session();
             r.player_ready = true;
             r.character_pending = false;
             r.roster = {};
@@ -72,6 +75,7 @@ function mistrimulti_player_data_tick() {
             r.player_error = "Loading player progress from the host.";
         }
     }
+    mistrimulti_progress_tick();
     if (r.ticks mod 3 != 0) return;
     if (!r.player_ready || r.character_pending || MIST.is_running()) return;
     if (get_timer() - r.player_last_checkpoint >= 5000000 && mistrimulti_event_blobs_pending() == 0) {
@@ -196,8 +200,11 @@ function mistrimulti_player_receive_record(player, upload, text, meta) {
             return true;
         }
         if (upload) {
+            // One partner per NPC: a claim another player holds is downgraded before the record is saved.
+            var taken = mistrimulti_romance_arbitrate(uid, profile);
             if (!mistrimulti_player_store(uid, revision, profile)) return false;
             session.revision = revision;
+            if (array_length(taken) > 0) mistrimulti_event_emit("romance_revoke", { peer_epoch: epoch, npcs: taken }, player);
             return mistrimulti_event_emit("profile_saved", { peer_epoch: epoch, world: r.world_key, revision: session.revision }, player);
         }
         if (MIST.is_running() || ARI == undefined) return false;

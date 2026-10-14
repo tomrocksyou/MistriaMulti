@@ -807,6 +807,10 @@ class Interpreter:
         if kind == "name":
             name = target[1]
             if name not in scope:
+                # An engine global (a macro such as MAXIMUM_REACHED_DUNGEON_LEVEL) a test provides as a plain value.
+                if name in self.builtins and not callable(self.builtins[name]):
+                    self.builtins[name] = value
+                    return
                 raise GmlError(f"line {line}: assignment to undeclared variable {name} (missing var?)")
             scope[name] = value
         elif kind == "member":
@@ -908,6 +912,8 @@ class Interpreter:
             for key, value in node[1]:
                 out[key] = self.eval(value, scope)
             return out
+        if kind == "new":
+            return self.call_value(self.eval(node[1], scope), [self.eval(a, scope) for a in node[2]], node[3])
         if kind == "lambda":
             _, name, params, body = node[1]
             return Function("<anonymous>", params, body, self)

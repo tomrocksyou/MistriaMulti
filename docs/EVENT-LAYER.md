@@ -177,7 +177,9 @@ trades:
    record (or a pending-delta list kept with it).
 2. Commit both at the same moment, from `game.save_guard` (the host save).
 
-This is a feature-level design, built on this layer, still to be done.
+This is a feature-level design, built on this layer. The player records already follow its second half: each host save
+commits the players' records next to the save and loading that save restores them (`docs/SYNC-PROGRESS.md`, "Host save
+commit", using `save.game_saving` / `save.game_loaded`); a chest or trade feature adds its pending deltas to that commit.
 
 ## Limits
 
