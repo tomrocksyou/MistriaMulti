@@ -56,7 +56,7 @@ steam_running() {
 # Steam roots (real paths, no duplicates) -> $TMP/roots ; library folders -> $TMP/libs
 find_steam() {
     : > "$TMP/roots"; : > "$TMP/libs"
-    for cand in "$HOME/.steam/steam" "$HOME/.local/share/Steam" \
+    for cand in "$HOME/.steam/steam" "$HOME/.steam/debian-installation" "$HOME/.local/share/Steam" \
                 "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam" \
                 "$HOME/.var/app/com.valvesoftware.Steam/.steam/steam"; do
         [ -d "$cand/steamapps" ] || [ -d "$cand/userdata" ] || continue
@@ -311,7 +311,7 @@ find_game
 printf '%s\n' "$APPID" > "$TMP/appid"
 MANUAL=0 EDITED=0
 if [ ! -s "$TMP/roots" ]; then
-    say 'Steam was not found (looked in ~/.steam/steam, ~/.local/share/Steam and the Flatpak folder).'
+    say 'Steam was not found (looked in ~/.steam/steam, ~/.steam/debian-installation, ~/.local/share/Steam and the Flatpak folder).'
     note 'Steam not found; set the launch option by hand.'
     MANUAL=1
 elif [ "$FOUND_MANIFEST" = 0 ]; then
