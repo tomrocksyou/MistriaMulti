@@ -1422,7 +1422,8 @@ function __mistrimulti_ranch_build_local(rec) {
     var ok = false;
     rc.applying++;
     try {
-        var size = NODE_PROTOTYPES[rec.o].size;
+        var size = NODE_PROTOTYPES[rec.o][$ "size"];
+        if (!is_struct(size) || !is_real(size[$ "x"]) || !is_real(size[$ "y"])) size = { x: 2, y: 2 };    // not every prototype has one
         for (var dx = 0; dx < size.x; dx++) {
             for (var dy = 0; dy < size.y; dy++) {
                 var ni = farm.try_node_index_for_cell(rec.x + dx, rec.y + dy);

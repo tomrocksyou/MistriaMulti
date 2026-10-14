@@ -364,12 +364,20 @@ function mistrimulti_farm_rotation(id, cardinal_index) {
     return 0;
 }
 
+// A node prototype's footprint in cells. Not every prototype has a size in the real game (crops, grass): those are 2x2.
+function mistrimulti_node_size(id) {
+    var size = NODE_PROTOTYPES[id][$ "size"];
+    if (!is_struct(size) || !is_real(size[$ "x"]) || !is_real(size[$ "y"])) return { x: 2, y: 2 };
+    return size;
+}
+
 // Removes the synchronised nodes in the way of a node about to be written (a stale copy of the same area).
 function mistrimulti_farm_clear(ls, id, x, y) {
     var cat = object_id_to_object_category(id);
     if (cat == ObjectCategory.Furniture) return;
-    var sx = cat == ObjectCategory.Tree ? 6 : NODE_PROTOTYPES[id].size.x;
-    var sy = cat == ObjectCategory.Tree ? 6 : NODE_PROTOTYPES[id].size.y;
+    var size = mistrimulti_node_size(id);
+    var sx = cat == ObjectCategory.Tree ? 6 : size.x;
+    var sy = cat == ObjectCategory.Tree ? 6 : size.y;
     for (var xx = 0; xx < sx; xx++) {
         for (var yy = 0; yy < sy; yy++) {
             if (cat == ObjectCategory.Tree && (xx < 2 || xx > 3) && (yy < 2 || yy > 3)) continue; // the tree's corners stay free

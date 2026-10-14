@@ -25,6 +25,15 @@ function mistrimulti_data_dir() {
     return global.__mistrimulti_data_dir;
 }
 
+// A diagnostic line for the real-game tests, at most 30 per key and session, so the log stays small.
+function mistrimulti_trace(key, text, limit = 30) {
+    if (global[$ "__mistrimulti_trace"] == undefined) global.__mistrimulti_trace = {};
+    var n = global.__mistrimulti_trace[$ key] ?? 0;
+    if (n >= limit) return;
+    global.__mistrimulti_trace[$ key] = n + 1;
+    try { mmapi_log_info("mistrimulti", "trace " + key + ": " + text); mmapi_log_flush("mistrimulti"); } catch (e) {}
+}
+
 function __mistrimulti_init_stop(reason) {
     try { mmapi_log_warn("mistrimulti", "Multiplayer not started: " + reason); mmapi_log_flush("mistrimulti"); } catch (e) {}
 }
@@ -89,7 +98,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.5 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.6 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -166,9 +175,25 @@ function mistrimulti_tick() {
     mistrimulti_guestsave_tick();
     mistrimulti_drops_frame(); // every frame: the game's item pickup is checked against the host's claims
     if (r.ticks mod 3 != 0) return; // 20 Hz bridge; actors animate at the game frame rate.
+    // A room change is settled once the location and the engine room stayed the same for a second: nothing is created
+    // (other players, shared items, farm nodes) while the game is still tearing down the old room or building the new one.
+    var room_now = "";
+    try { room_now = instance_exists(obj_ari) && GRID != undefined ? mistrimulti_room_key() : ""; } catch (e) {}
+    try { room_now += "@" + string(room); } catch (e) {}    // the engine room, if the mod runtime exposes it
+    if (r[$ "room_seen"] != room_now) {
+        mistrimulti_trace("room", "tick " + string(r.ticks) + " [" + string(r[$ "room_seen"]) + "] -> [" + room_now + "] ari " + string(instance_exists(obj_ari)), 500);
+        r.room_seen = room_now;
+        r.room_seen_at = r.ticks;
+    }
+    if (r[$ "room_was_settled"] != (r.ticks - r.room_seen_at >= 60)) {
+        r.room_was_settled = r.ticks - r.room_seen_at >= 60;
+        if (r.room_was_settled) mistrimulti_trace("room", "tick " + string(r.ticks) + " settled in [" + room_now + "]", 500);
+    }
+    r.room_settled = r.ticks - r.room_seen_at >= 60;
+    var settled = r.room_settled;
     if (ARI != undefined && GRID != undefined) mistrimulti_read_peers();
     mistrimulti_events_tick();
-    var active = instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
+    var active = settled && instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
     if (active) {
         mistrimulti_watch_changes();
         if (r.ticks mod 60 == 0 || r.mask != r.last_mask) mistrimulti_update_look();
@@ -259,7 +284,7 @@ function mistrimulti_read_peers() {
         // Delivers this peer's new events, in order, to the registered handlers.
         mistrimulti_events_receive(i, p);
         if (remember) mistrimulti_remember_peer(i);
-        if (p[$ "active"] == true) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
+        if (p[$ "active"] == true && r[$ "room_settled"] == true) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
     }
 }
 
@@ -417,5 +442,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.5");
+mmapi_mod_declare("mistrimulti", "0.2.6");
 mistrimulti_register();

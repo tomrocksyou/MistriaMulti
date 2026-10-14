@@ -9,6 +9,11 @@ function mistrimulti_terrain_tile(grid, x, y) {
 
 function mistrimulti_tool_targets(value, ctx) {
     var r = __mistrimulti_runtime();
+    try {
+        mistrimulti_trace("tool_targets", r.mode + " tool " + string(ctx.item.prototype.tool_type) + " cells " + string(value.count())
+            + " enabled " + string(r.enabled) + " depth " + string(r.apply_depth) + " mask " + string(r.mask)
+            + " loc " + string(CURRENT_LOCATION_ID) + " farm " + string(LocationId.Farm));
+    } catch (e) { mistrimulti_trace("tool_targets", "trace failed: " + string(e)); }
     if (!r.enabled || r.apply_depth > 0 || r.mask == 0 || GRID == undefined) return undefined;
     if (CURRENT_LOCATION_ID != LocationId.Farm || GRID.dyn_index != undefined) return undefined;
     var tool = ctx.item.prototype.tool_type;
@@ -42,6 +47,8 @@ function mistrimulti_watch_changes() {
             var data = { tiles: [after], before: watch.before };
             var sent = r.mode == "host" ? mistrimulti_event_emit("terrain_commit", data)
                 : mistrimulti_event_request("terrain", data) != undefined;
+            mistrimulti_trace("terrain_send", r.mode + " " + string(watch.x) + "," + string(watch.y) + " " + json_stringify(watch.before)
+                + " -> " + json_stringify(after) + (sent ? " sent" : " NOT sent"));
             if (sent) {
                 if (r.mode == "join") r.dirty_world = true;
                 array_delete(r.watches, i, 1);
@@ -78,7 +85,7 @@ function mistrimulti_apply_terrain(tile) {
         r.dirty_world = r.mode == "join" || r.dirty_world;
     } catch (e) {
         r.apply_depth--;
-        mmapi_warn_rate_limited("mistrimulti_terrain", "mistrimulti", "A farm update could not be applied.");
+        mmapi_warn_rate_limited("mistrimulti_terrain", "mistrimulti", "A farm update could not be applied: " + string(e));
         return false;
     }
     r.apply_depth--;
@@ -97,19 +104,21 @@ function mistrimulti_terrain_request(player, data, ctx) {
     var r = __mistrimulti_runtime();
     var none = { tiles: [] };
     var peer = r.peers[player];
-    if (player == r.id || !is_struct(peer) || peer[$ "active"] != true || !is_struct(data)) return none;
-    if (!is_array(data[$ "tiles"]) || array_length(data.tiles) != 1 || GRIDS == undefined) return none;
+    if (player == r.id || !is_struct(peer) || peer[$ "active"] != true || !is_struct(data)) { mistrimulti_trace("terrain_req", "refused: player " + string(player) + " not active"); return none; }
+    if (!is_array(data[$ "tiles"]) || array_length(data.tiles) != 1 || GRIDS == undefined) { mistrimulti_trace("terrain_req", "refused: bad tiles"); return none; }
     var farm = GRIDS[LocationId.Farm];
     if (farm == undefined) return none;
     var tile = data.tiles[0];
     var before = data[$ "before"];
-    if (!mistrimulti_valid_tile(tile, farm) || !mistrimulti_valid_tile(before, farm)) return none;
-    if (peer.room != location_id_to_string(LocationId.Farm) + ":" + string(undefined)) return none;
-    if (point_distance(peer.x, peer.y, tile.x*8, tile.y*8) > 256) return none;
+    if (!mistrimulti_valid_tile(tile, farm) || !mistrimulti_valid_tile(before, farm)) { mistrimulti_trace("terrain_req", "refused: invalid tile " + json_stringify(data)); return none; }
+    if (peer.room != location_id_to_string(LocationId.Farm) + ":" + string(undefined)) { mistrimulti_trace("terrain_req", "refused: guest room " + string(peer.room)); return none; }
+    if (point_distance(peer.x, peer.y, tile.x*8, tile.y*8) > 256) { mistrimulti_trace("terrain_req", "refused: too far " + string(peer.x) + "," + string(peer.y) + " tile " + string(tile.x) + "," + string(tile.y)); return none; }
     var current = mistrimulti_terrain_tile(farm, tile.x, tile.y);
-    if (current == undefined) return none;
+    if (current == undefined) { mistrimulti_trace("terrain_req", "refused: no ground at " + string(tile.x) + "," + string(tile.y)); return none; }
     // Conflicting predictions are corrected to the existing host state.
-    if (current.g == before.g && current.w == before.w) mistrimulti_apply_terrain(tile);
+    var applied = false;
+    if (current.g == before.g && current.w == before.w) applied = mistrimulti_apply_terrain(tile);
+    mistrimulti_trace("terrain_req", "host " + json_stringify(current) + " guest before " + json_stringify(before) + " after " + json_stringify(tile) + (applied ? " applied" : " NOT applied"));
     var committed = mistrimulti_terrain_tile(farm, tile.x, tile.y);
     return committed == undefined ? none : { tiles: [committed] };
 }

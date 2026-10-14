@@ -17,6 +17,7 @@ global.__mistrimulti_peer_object = object_create("obj_mistrimulti_peer", undefin
         self.remote_modifier = -1;
     },
     step: function() {
+        try {
         if (point_distance(self.x, self.y, self.target_x, self.target_y) > 96) {
             self.x = self.target_x;
             self.y = self.target_y;
@@ -29,8 +30,10 @@ global.__mistrimulti_peer_object = object_create("obj_mistrimulti_peer", undefin
         self.shadow.x = self.x;
         self.shadow.y = self.y;
         self.shadow.depth = self.depth + 1;
+        } catch (e) { mmapi_warn_rate_limited("mistrimulti_ghost_step", "mistrimulti", "Other player's character (step) failed: " + string(e)); }
     },
     draw: function(draw_x, draw_y, frame_alpha) {
+        try {
         // frame_alpha controls interpolation; par.alpha must stay at 1.
         if (global[$ "__mistrimulti_debug_on"] == true) {
             self.draw_count++;
@@ -38,9 +41,12 @@ global.__mistrimulti_peer_object = object_create("obj_mistrimulti_peer", undefin
             self.opacity_max = max(self.opacity_max, self.par.alpha);
         }
         self.par.draw(draw_x + self.par_offset.x, draw_y + self.par_offset.y + self.z);
+        } catch (e) { mmapi_warn_rate_limited("mistrimulti_ghost_draw", "mistrimulti", "Other player's character (draw) failed: " + string(e)); }
     },
     cleanup: function() {
-        ds_priority_destroy(self.par.priority);
+        try { mistrimulti_trace("ghost", "cleanup " + string(self.id), 200); } catch (e) {}
+        try { ds_priority_destroy(self.par.priority); }
+        catch (e) { mmapi_warn_rate_limited("mistrimulti_ghost_cleanup", "mistrimulti", "Other player's character (cleanup) failed: " + string(e)); }
     },
 });
 
@@ -49,7 +55,10 @@ function mistrimulti_hide_peer(id) {
     var p = r.peers[id];
     if (!is_struct(p)) return;
     var ghost = p[$ "ghost"];
-    if (ghost != undefined && instance_exists(ghost)) instance_destroy(ghost);
+    if (ghost != undefined && instance_exists(ghost)) {
+        mistrimulti_trace("ghost", "hide player " + string(id) + " instance " + string(ghost), 200);
+        instance_destroy(ghost);
+    }
     p.ghost = undefined;
 }
 
@@ -70,7 +79,9 @@ function mistrimulti_update_peer(id) {
             mmapi_warn_rate_limited("mistrimulti_object", "mistrimulti", "Remote character object is unavailable.");
             return;
         }
+        mistrimulti_trace("ghost", "create player " + string(id) + " at " + string(p.x) + "," + string(p.y) + " room " + string(p.room), 200);
         ghost = instance_create_depth(p.x, p.y, get_instance_depth(p.y), kind);
+        mistrimulti_trace("ghost", "created instance " + string(ghost), 200);
         p.ghost = ghost;
         if (is_struct(p[$ "look"])) mistrimulti_apply_peer_look(ghost, p.look);
     }

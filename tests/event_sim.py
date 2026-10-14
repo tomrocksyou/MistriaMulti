@@ -91,7 +91,7 @@ class GmlNode:
         builtins = {
             "__mistrimulti_runtime": lambda: self.rt,
             "get_timer": clock.micros,
-            "mmapi_warn_rate_limited": lambda key, mod, text: log(key, text),
+            "mmapi_warn_rate_limited": lambda key, mod, text: log(key, text), "mistrimulti_trace": lambda *a: None,
         }
         builtins.update(self.builtins())
         self.interp = gml.Interpreter(builtins)

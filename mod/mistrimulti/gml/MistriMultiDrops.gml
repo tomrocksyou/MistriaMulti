@@ -153,6 +153,7 @@ function __mistrimulti_dr_remove(dr, id) {
     struct_remove(dr.bound, key);
     if (inst == undefined) return;
     struct_remove(dr.recs, string(inst));
+    mistrimulti_trace("item", "remove shared item " + key + " instance " + string(inst), 200);
     if (instance_exists(inst)) instance_destroy(inst);
 }
 
@@ -163,6 +164,7 @@ function __mistrimulti_dr_spawn(dr, e) {
     if (known != undefined && instance_exists(known)) return;
     var units = __mistrimulti_dr_units(e);
     if (array_length(units) == 0) return;
+    mistrimulti_trace("item", "spawn shared item " + string(e.id) + " at " + string(e.x) + "," + string(e.y) + " loc " + string(e.loc), 200);
     var inst = instance_create_layer(e.x, e.y, "Instances", obj_item);
     inst.setup(ListFromArray(units));
     inst.final_x = e.x;
@@ -269,6 +271,7 @@ function mistrimulti_drops_frame() {
             if (rec.state == "new" || rec.state == "local" || !instance_exists(rec.inst)) continue;
             var inst = rec.inst;
             if (inst.kill_timer == -1 || inst.kill_target != obj_ari) continue;
+            mistrimulti_trace("item", "cancel pickup of " + string(rec.wid) + " state " + rec.state, 200);
             inst.kill_timer = -1;
             inst.lerping_to_player = false;
             inst.v = 0;
