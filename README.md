@@ -51,6 +51,9 @@ Implemented:
   (`docs/SYNC-PROGRESS.md`).
 - A guest's game never saves (its character lives on the host); a save attempt or opening the settings menu sends the character
   to the host, a lost or closed host returns the guest to the title screen with a message (`docs/SYNC-GUESTSAVE.md`).
+- **Everything is chosen in the game**: after the install you only start the game from Steam. New Game or Load Game, then
+  Multiplayer, then **Host a game** (shows the addresses to give friends) or **Join a game** (finds hosts, asks for a password,
+  downloads the host's world). No host/join step to run first (`docs/SYNC-MENU.md`; not yet run in the real game).
 - F8 displays connection status in game.
 - Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
 - Mines: one shared run (same itinerary and floors for everyone), host-owned monster health with one kill and one drop set, and shared rocks, chests and ladders (`docs/SYNC-DUNGEON.md`, not yet run in the game).
@@ -78,27 +81,29 @@ are blocked during multiplayer. The host can save its farm normally. See
 4. Open MOMI, select **MistriMulti**, and click **Install** (the manager's **Open MOMI** button opens MOMI and lists these
    steps; it asks you once where MOMI is). Close the game during installation. MistriMulti cannot press MOMI's Install for
    you: see `docs/RELEASES.md` for why.
-5. Everyone opens `MistriMulti.exe` (the manager window) once:
-   - **Host a game**: one click. It shows the addresses to give your friends (your Tailscale IP, which starts with `100.`,
-     and your local-network IP).
-   - **Join a game...**: opens a list of hosts and **scans for them** when it opens; **Refresh** scans again. Select a host
-     and press **Join selected**. The scan uses broadcast on your local network and the peer list of Tailscale (if it is
-     installed); it does not sweep IP ranges. If your host is not listed, type its IP in the box and press **Join this IP**.
-     Port, room code and player number are filled in for you (each friend needs a different player number, 1-7: change
-     it in the box if two friends end up with the same one). A room code is only needed if the host chose one.
-   - **Steam setup...**: copies the launch line (see step 6) to the clipboard.
-   (Without the manager, double-clicking `MistriMultiLauncher.exe` or `Play.bat` asks the same questions in a console.)
-6. **Click Play in Steam from now on.** One time only: in Steam, right-click the game, Properties, Launch Options,
-   and paste the launch line (`"<folder>\MistriMultiLauncher.exe" --steam %command%`; the manager's **Steam setup...** button copies it). Steam then runs the
-   launcher, which starts the network helper from your saved details and launches the game. If anything is wrong
-   with the multiplayer setup the game still starts normally; the reason is written to
+5. **Once**, in Steam: right-click the game, Properties, Launch Options, and paste the launch line
+   (`"<folder>\MistriMultiLauncher.exe" --steam %command%`; the manager's **Steam setup...** button copies it to the clipboard).
+   That is the only setup. Nobody has to choose "host" or "join" outside the game any more.
+6. **Click Play in Steam.** Steam runs the launcher, which waits quietly (no helper, no open port) and starts the game. If
+   anything is wrong the game still starts normally; the reason is written to
    `%LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti\launcher.log`.
-7. A badge at the bottom right shows **Multiplayer Online** (green) or **Multiplayer Offline** (red: the game was
-   updated past the versions this mod was tested on, the helper is not running, or setup was not done).
-8. **Joining a friend downloads their world.** Pressing **Join selected** (and starting the game) copies the host's latest
-   saved world to your PC. In the game choose **New Game**, then **Multiplayer**: you enter the host's world. The host should
-   save (sleep) before friends join, because friends get the world as of the host's last save.
-9. In the game choose **New Game** or **Load Game**, then **Singleplayer** or **Multiplayer**. Saves are labelled
+7. In the game choose **New Game** or **Load Game**, then **Multiplayer**, then:
+   - **Host a game**: **Start hosting** (optionally **Set a password** first). The game shows the addresses to give your friends
+     (your Tailscale IP, which starts with `100.`, and your local-network IP), then **Start playing**. Hosts answer scans only
+     while they host.
+   - **Join a game**: the game scans your local network (broadcast) and your Tailscale peers (if installed) and lists the hosts
+     found (`[password]` marks hosts that need one); pick one, type the password if asked, and the game downloads the host's
+     latest saved world and opens it. **Refresh** scans again; **Type an address** joins an IP that is not listed. The player
+     number is chosen for you.
+   The host should save (sleep) before friends join, because friends get the world as of the host's last save.
+8. A badge at the bottom right shows **Multiplayer: Online** (green), **Idle** (amber: ready, nothing hosted or joined) or
+   **Offline** (red, with the reason: the game was updated past the versions this mod was tested on, the launcher is not
+   running because the game was not started through the Steam launch option, the helper program is missing...). F8 shows the
+   same text with the reason.
+   (`MistriMulti.exe`'s **Host a game** / **Join a game...** buttons, `Play.bat` and `MistriMultiLauncher.exe --configure` still
+   exist as optional advanced tools: they pre-set a role in `launcher.cfg` that then starts by itself. The in-game menu replaces
+   them for normal use.)
+9. Choosing **Singleplayer** or **Multiplayer** in the game keeps the saves apart: they are labelled
    `[Single]` or `[Multi]` and are kept in separate folders. After a game update, add the new version to
    `mistrimulti_supported_versions()` in `MistriMultiStatus.gml` once you have tested the mod with it.
 
@@ -131,24 +136,24 @@ calls, no C runtime, no Python). Keep them together in one folder, for example `
 
 | Program | What it does |
 | --- | --- |
-| `mistrimulti-launcher` | The Steam launch wrapper (`--steam %command%`) and the `--configure` questions. Starts the helper, writes `control.json`, backs up your solo saves, runs the game, answers host discovery (UDP 7776) and serves the world (TCP 7775) while you host, and refreshes the host's world when you join. The game always starts, whatever fails. |
-| `mistrimulti-manager` | Console version of the manager window: `host`, `join [IP]`, `scan`, `steam-setup`, `save-solo`. |
+| `mistrimulti-launcher` | The Steam launch wrapper (`--steam %command%`). It always starts in standby (nothing hosted or joined, no port open) and does what the in-game Multiplayer menu asks: hosts (starts the helper, answers host discovery on UDP 7776, serves the world on TCP 7775), scans, joins and downloads the host's world. It also backs up your solo saves and runs the game; the game always starts, whatever fails. A saved `launcher.cfg` (optional) still starts its role by itself. `--configure` asks the optional pre-set questions. |
+| `mistrimulti-manager` | Optional console tools: `host`, `join [IP]`, `scan`, `steam-setup`, `save-solo`. |
 | `mistrimulti-helper-linux` | The network helper (unchanged). The launcher starts it and ties its life to its own. |
 
 1. Install the GML mod through the Linux MOMI build (MOMI **0.16.5**, game **1.0.6**, same as Windows).
 2. Build with `sh scripts/build-linux.sh` (needs `nasm` and `binutils`; the output is in `build/`), or take the
    `mistrimulti-linux-x64` artifact from CI. `chmod +x` the three programs.
-3. **Host**: `./mistrimulti-manager host` shows the addresses (your Tailscale IP, your local-network IP) to give your friends.
-   **Join**: `./mistrimulti-manager join` scans the local network (broadcast) and your Tailscale peers (`tailscale status --json`,
-   if the `tailscale` command exists), lists the hosts, and joins the one you choose; `./mistrimulti-manager join 100.101.102.103`
-   joins an address directly. The port, a player number (1-7, kept between runs) and the default room code are filled in for you;
-   add `--player N`, `--room CODE` or `--port N` to change them. Joining also downloads the host's latest saved world.
-   (`./mistrimulti-launcher --configure` asks the same questions as the Windows setup and writes the same `launcher.cfg`.)
-4. **Once**, in Steam: right-click the game, Properties, Launch Options, and paste the line printed by
-   `./mistrimulti-manager steam-setup`, which looks like
-   `"/home/deck/mistrimulti/mistrimulti-launcher" --steam %command%`. Then click Play, as on Windows. It also works for the
-   Proton (Windows build) version of the game, because `%command%` simply expands to Proton's command line.
-5. The badge, the **New Game -> Multiplayer** flow, world download and save separation work exactly as in the Windows steps above.
+3. **Once**, in Steam (`./install.sh` does this for you): right-click the game, Properties, Launch Options, and paste the line
+   printed by `./mistrimulti-manager steam-setup`, which looks like
+   `"/home/deck/mistrimulti/mistrimulti-launcher" --steam %command%`. It also works for the Proton (Windows build) version of
+   the game, because `%command%` simply expands to Proton's command line.
+4. **Click Play in Steam.** There is nothing to run before the game. In the game choose New Game or Load Game, then
+   **Multiplayer**, then **Host a game** (shows the Tailscale and local-network addresses to give your friends) or
+   **Join a game** (scans the local network and your Tailscale peers, lists the hosts, asks for a password if the host set one,
+   downloads the host's world and opens it; you can also type an address). See `docs/SYNC-MENU.md`.
+   (Optional and advanced: `./mistrimulti-manager host` / `join [IP]` and `./mistrimulti-launcher --configure` pre-set a role
+   in `launcher.cfg` that then starts without the menu. Delete `launcher.cfg` to get back to the menu.)
+5. The badge, the **New Game -> Multiplayer** menu, world download and save separation work exactly as in the Windows steps above.
    Why multiplayer did not start (if the game opened normally) is written to
    `<game folder>/mod_data/mistrimulti/launcher.log`; the helper's own messages are in `helper.log` next to it.
 6. `./mistrimulti-manager save-solo` copies your solo saves to `~/Documents/MistriMulti Backups/<UTC time>/`
@@ -196,7 +201,8 @@ Open `build/mistrimulti-helper.exe` in x64dbg; break on `mistria_main`, `read_lo
 `receive_fragment`, or `send_record`. Start with `docs/ASM-TOUR.md`.
 
 Game bridge data lives under the game's configuration folder:
-`mod_data/mistrimulti/control.json` and `mod_data/mistrimulti/bridge_<id>/`.
+`mod_data/mistrimulti/control.json`, `mod_data/mistrimulti/bridge_<id>/` and, for the in-game menu,
+`mod_data/mistrimulti/menu/cmd.txt` + `status.json` (`docs/SYNC-MENU.md`).
 Each launcher owns its helper process; it never terminates another helper by process name.
 
 MOMI preflight must use an **absolute** mod path. Relative paths can make its collector

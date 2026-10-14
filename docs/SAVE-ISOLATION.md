@@ -43,8 +43,10 @@ restores cleanly.
 `mod/mistrimulti/gml/MistriMultiSaveSpace.gml`. Every title entry starts in the solo space. The title menu's `enter_game`
 and `transition_to` are wrapped (via `ui.menu_opened`): New Game and Load Game first ask "Singleplayer or Multiplayer?"
 (the game's own `MultipleChoicePopup`, text supplied through `local.missing`). The choice points `CONFIG_DIRECTORY` at
-`<config>/saves` or `<config>/multiplayer/saves` and rebuilds the save list. The multiplayer runtime only starts inside the
-multiplayer space; choosing Multiplayer without the helper running shows an explanatory popup.
+`<config>/saves` or `<config>/multiplayer/saves` and rebuilds the save list. Choosing Multiplayer then shows "Host a game / Join a game" (`MistriMultiMenu.gml`, `docs/SYNC-MENU.md`); the save space
+switches to the multiplayer folder only when the player starts playing (host) or the host's world has been downloaded (guest).
+The multiplayer runtime only starts inside the multiplayer space; choosing Multiplayer without the launcher running (or its helper
+missing) shows an explanatory popup in plain words.
 Any failure restores the solo folder. Quitting to the title tears the session down.
 
 ## World transfer (implemented, untested in the real game)
@@ -59,8 +61,9 @@ host should save (sleep) before friends join; live state beyond terrain and play
   to the multiplayer folder (solo settings are untouched).
 - A guest's game never saves: every save is vetoed and the attempt sends the character to the host instead, a lost host returns the
   guest to the title, and no multiplayer save may land in the solo folder (`docs/SYNC-GUESTSAVE.md`).
-- A mod cannot launch programs, so the helper is started by `MistriMultiLauncher.exe --steam` (the Steam launch option),
-  or by `mistrimulti-launcher --steam` on Linux (same behaviour; backup folder names are UTC there).
+- A mod cannot launch programs, so the launcher (`MistriMultiLauncher.exe --steam`, the Steam launch option, or `mistrimulti-launcher --steam`
+  on Linux; same behaviour, backup folder names are UTC there) is always started by Steam, waits in standby and starts the helper
+  when the in-game menu asks to host or join.
 - If there are no solo saves the title screen has no Load Game button, so existing multiplayer worlds are unreachable until one solo save exists.
 - Untested: wrapping the title menu's methods, popup text injection, and teardown on quit-to-title.
-- Host-world transfer to guests (helper file transfer) is not built.
+- Host-world transfer to guests is built (TCP 7775, see above); the guest's menu downloads the world right after the host accepted the join.

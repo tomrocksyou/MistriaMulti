@@ -47,6 +47,7 @@ WSTR mp_e_extra, "MISTRIMULTI_SCAN_EXTRA"
 WSTR mp_e_openjoin, "MISTRIMULTI_OPEN_JOIN"
 WSTR mp_s_command, "%command%"
 WSTR s_scan, "--scan"
+WSTR s_addrs, "--addrs"
 WSTR s_fetch, "--fetch"
 WSTR mp_f_mpsaves, "%s\FieldsOfMistria\multiplayer\saves"
 WSTR mp_s_download, "Downloading the host's world..."
@@ -60,7 +61,7 @@ WSTR mp_t_lan, "This network: "
 WSTR mp_t_empty_w, ""
 WSTR mp_t_crlf, `\r\n`
 mp_f_joinmsg: dw __utf16__(`Saved. Now start Fields of Mistria from Steam and choose Multiplayer on New Game or Load Game.\r\n\r\nJoining: `), 0
-mp_f_steammsg: dw __utf16__(`The launch line has been copied to your clipboard.\r\n\r\nOne time only: in Steam, right-click Fields of Mistria > Properties > Launch Options, press Ctrl+V, and close the window.\r\n\r\nSteam then starts multiplayer automatically every time you press Play.`), 0
+mp_f_steammsg: dw __utf16__(`The launch line has been copied to your clipboard.\r\n\r\nOne time only: in Steam, right-click Fields of Mistria > Properties > Launch Options, press Ctrl+V, and close the window.\r\n\r\nFrom then on just press Play in Steam. In the game choose New Game or Load Game, then Multiplayer, then Host a game or Join a game: you do not need this window to host or join.`), 0
 mp_f_cfg_join db 'mode=join',13,10,'host=%s',13,10,'port=%d',13,10,'player=%d',13,10,'room=%s',13,10,0
 mp_f_cfg_pass db 'password=%s',13,10,0
 mp_f_cfg_host_pass db 'mode=host',13,10,'port=7777',13,10,'player=0',13,10,'room=',13,10,'password=%s',13,10,0
@@ -71,6 +72,7 @@ mp_k_player db 'player='
 mp_k_player_len equ $ - mp_k_player
 mp_f_ascii_entry db '%s %d %d %s',13,10,0
 mp_f_ascii_ip db '%d.%d.%d.%d',0
+mp_f_addr_line db '%s',13,10,0
 mp_t_custom db '   [needs a room code]',0
 mp_t_pw db '   [needs a password]',0
 mp_t_both db '   [needs a room code and a password]',0
@@ -120,6 +122,7 @@ mp_guid resb 16
 mp_big resw 1500
 mp_msg resw 1400
 mp_scan_flag resd 1
+mp_dump_len resd 1
 
 section .text
 
@@ -1307,5 +1310,54 @@ FN mp_dump_scan
     mov rcx, r14
     lea rdx, [http_buf]
     mov r8d, r13d
+    call write_file
+END_FN
+
+; Used by the launcher's in-game menu:  MistriMulti.exe --addrs <file>  writes this PC's addresses, one per line
+; (the Tailscale address first, self-assigned 169.254.x.x ones left out).
+FN mp_emit_addr                 ; ecx = IPv4: appends "a.b.c.d" CR LF to http_buf at [mp_dump_len]
+    lea rdx, [mp_ascii]
+    call mp_ip_text
+    lea rcx, [http_buf]
+    mov eax, [mp_dump_len]
+    add rcx, rax
+    lea rdx, [mp_f_addr_line]
+    lea r8, [mp_ascii]
+    call wsprintfA
+    add [mp_dump_len], eax
+END_FN
+
+FN mp_dump_addrs
+    mov r14, rcx
+    mov dword [mp_tgt_count], 0
+    mov dword [mp_dump_len], 0
+    call mp_collect_adapters
+    call mp_tailscale
+    mov ecx, [mp_ts_self]
+    test ecx, ecx
+    jz .locals
+    call mp_emit_addr
+.locals:
+    xor r12d, r12d
+.l: cmp r12d, [mp_local_count]
+    jae .write
+    cmp dword [mp_dump_len], 3000
+    jae .write
+    lea rax, [mp_local_ips]
+    mov ecx, [rax+r12*4]
+    mov eax, ecx
+    and eax, 0xFFFF
+    cmp eax, 0xFEA9                 ; 169.254.x.x
+    je .nx
+    cmp ecx, [mp_ts_self]
+    je .nx
+    call mp_emit_addr
+.nx:
+    inc r12d
+    jmp .l
+.write:
+    mov rcx, r14
+    lea rdx, [http_buf]
+    mov r8d, [mp_dump_len]
     call write_file
 END_FN

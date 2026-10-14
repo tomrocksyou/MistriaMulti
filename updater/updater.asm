@@ -1280,6 +1280,21 @@ start:
     xor ecx, ecx
     call ExitProcess
 .noscan:
+    ; hook for the launcher's in-game menu:  --addrs <file>
+    cmp dword [argc], 3
+    jb .noaddrs
+    mov rax, [argv]
+    mov rcx, [rax+8]
+    lea rdx, [s_addrs]
+    call wequal
+    test eax, eax
+    jz .noaddrs
+    mov rax, [argv]
+    mov rcx, [rax+16]
+    call mp_dump_addrs
+    xor ecx, ecx
+    call ExitProcess
+.noaddrs:
     ; game + installed version
     call find_game
     mov [have_game], eax

@@ -118,8 +118,10 @@ class InstallTests(unittest.TestCase):
         mod = home / ".local/share/Steam/steamapps/common/Fields of Mistria/mods/mistrimulti"
         self.assertTrue((mod / "manifest.toml").exists())
         self.assertTrue((mod / "gml").is_dir())
-        self.assertIn("mistrimulti-manager host", r.stdout)
-        self.assertIn("mistrimulti-manager join", r.stdout)
+        self.assertIn("choose New Game or Load Game, then Multiplayer", r.stdout)     # the whole story: nothing to run before the game
+        self.assertIn("Host a game", r.stdout)
+        self.assertIn("Join a game", r.stdout)
+        self.assertNotIn("To host run", r.stdout)
         self.assertIn("MOMI", r.stdout)
 
     def test_no_existing_option_in_app_block(self):

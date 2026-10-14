@@ -1,5 +1,6 @@
 #!/bin/sh
 # MistriMulti installer for Linux (Debian/Ubuntu, Steam Deck desktop mode).  Run it once:   ./install.sh
+# After that you only start the game from Steam: hosting and joining are chosen in the game's own Multiplayer menu.
 #
 #   ./install.sh               install (safe to run again)
 #   ./install.sh --dry-run     show what would be done, change nothing
@@ -382,7 +383,10 @@ else
     say "To install the mod: open MOMI (Mods of Mistria installer), add the folder $SRC/mod/mistrimulti, and click Install."
 fi
 say ''
-say 'Run Steam, press Play, choose Multiplayer on New Game.'
-say "To host run:  $DIR/mistrimulti-manager host"
-say "To join run:  $DIR/mistrimulti-manager join"
+say 'That is all the setup. Start Fields of Mistria from Steam (press Play), choose New Game or Load Game, then Multiplayer:'
+say '  - Host a game  shows the addresses to give your friends (Tailscale or this network), then starts your world.'
+say '  - Join a game  looks for hosts (or type an address), asks for a password if the host set one, downloads the'
+say '                 host'"'"'s world and enters it.'
+say 'The badge at the bottom right says Multiplayer: Idle / Online / Offline, with the reason when it is Offline.'
+say "(Advanced and optional: $DIR/mistrimulti-manager host|join pre-sets a role that starts without the menu.)"
 exit 0

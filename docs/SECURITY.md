@@ -159,13 +159,15 @@ Pick 1 to 64 letters, digits and punctuation, **without spaces or accents**. Tel
 
 | Where | How |
 | --- | --- |
+| **In the game** (normal way) | Multiplayer -> **Host a game** -> **Set a password (optional)**. Friends type it when they pick the host (the list shows `[password]`). The launcher keeps it only in the helper's `auth.cfg`; the command file that carries it is deleted as soon as it is read (`docs/SYNC-MENU.md`). The password is checked by the join handshake **before** the world is downloaded. |
 | `launcher.cfg` (any system) | add a line `password=your-secret-here` (the file is in `mod_data/mistrimulti/`). Remove the line to switch it off. |
 | Linux / Steam Deck manager | `mistrimulti-manager host --password SECRET`. Friends: `mistrimulti-manager join IP --password SECRET`, or just `join` and type it when the list shows `[needs a password]`. Running `host` or `join` rewrites `launcher.cfg`: give the password again. |
 | Windows manager | Join window: **Room password** field (masked). Hosts: add the `password=` line by hand once; **Host a game** keeps it. |
 | `mistrimulti-launcher --configure` / `MistriMultiLauncher.exe --configure` | keep an existing `password=` line; they do not ask for one. |
 
 A password that is too long, has a space, a control character or a non-ASCII character stops multiplayer from starting
-(the game itself starts normally, the reason is in `launcher.log`). The launcher also refuses to start the helper if it
+(the game itself starts normally, the reason is in `launcher.log`; a bad `launcher.cfg` now leaves the launcher in standby, where
+nothing is hosted or open, and the in-game menu is still available; the in-game menu refuses such a password before sending it). The launcher also refuses to start the helper if it
 cannot write the password to `auth.cfg`. The helper stops with exit code 4 if it is handed a bad password. It never
 falls back to an open room.
 

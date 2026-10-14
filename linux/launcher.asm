@@ -13,6 +13,7 @@ section .text
 %include "sha256.inc"
 %include "config.inc"
 %include "net.inc"
+%include "menu.inc"
 
 section .data
 s_steam db '--steam',0
@@ -68,6 +69,7 @@ t_stop_len equ $ - t_stop
 h_host db 'host',0
 h_join db 'join',0
 h_zero db '0',0
+h_idle db 'idle',0
 r_exe db 'Multiplayer not started: the game command does not name FieldsOfMistria. The game was started normally.',10,0
 r_flag db 'Multiplayer not started: --mistrimulti-direct was given. The game was started normally.',10,0
 r_paths db 'Multiplayer not started: could not find the folder where the game keeps its files (set MISTRIMULTI_DATA_DIR). The game was started normally.',10,0
@@ -91,6 +93,7 @@ t_saved db 10,'Saved.',10,'One time only: in Steam, right-click Fields of Mistri
 t_cmd1 db '"',0
 t_cmd2 db '" --steam %command%',10,10,0
 t_nl db 10,0
+t_optional db 'Optional setup: you can skip it. Start the game from Steam and choose Multiplayer, then Host a game or Join a game, in the game itself.',10,'This pre-sets a role (saved in launcher.cfg) that starts by itself.',10,10,0
 align 8
 name_table dq n_stop, n_status, n_txframe, n_txtmp, n_pid
 
@@ -430,6 +433,9 @@ FN write_control
     cmp dword [cfg_mode], 1
     je .m
     lea rcx, [h_join]
+    cmp dword [cfg_mode], 2
+    je .m
+    lea rcx, [h_idle]
 .m: call pb_str
     lea rcx, [j_id]
     call pb_str
@@ -1249,6 +1255,7 @@ FN disc_serve
     mov [rsp+40], rax
     call sys_sendto
 .check:
+    call sv_poll                        ; commands from the in-game menu (linux/menu.inc)
     mov edx, [sig_flag]
     test edx, edx
     jz .nosig
@@ -1261,6 +1268,12 @@ FN disc_serve
     cmp rax, -1
     je .loop
     mov [game_exit], eax
+    call disc_stop
+.d:
+END_FN
+
+; Closes the discovery answer (UDP 7776) and the world server (TCP 7775): nothing listens when no host session runs.
+FN disc_stop
     mov rcx, [disc_sock]
     test rcx, rcx
     jz .t
@@ -1360,6 +1373,8 @@ configure_main:
     jnz .keeppass
     mov byte [a_pass], 0               ; no usable old setup: nothing to keep (an invalid password is never written back)
 .keeppass:
+    lea rcx, [t_optional]
+    call say
     mov eax, [cfg_mode]
     mov [old_mode], eax
     mov eax, [cfg_player]
@@ -1690,12 +1705,24 @@ program_main:
     test r12d, r12d
     jz .direct
     call load_config
-    lea rbx, [r_config]
-    test eax, eax
-    jz .direct
+    mov [sv_legacy], eax              ; 1: a valid launcher.cfg (optional, advanced): that role starts by itself, as before
     call get_uid
     lea rcx, [epoch_a]
     call guid_hex
+    cmp dword [sv_legacy], 0
+    jne .legacy
+    ; No launcher.cfg: standby. Nothing is hosted or joined and no port opens; the in-game Multiplayer menu decides.
+    lea rbx, [r_control]
+    call menu_init
+    test eax, eax
+    jz .direct
+    lea rax, [r_standby]
+    mov [reason], rax
+    call log_reason
+    call backup_saves
+    jmp .run
+.legacy:
+    call menu_prepare
     call prepare_bridge
     call write_auth
     lea rbx, [r_auth]
@@ -1712,18 +1739,30 @@ program_main:
     call backup_saves
     call start_helper
     test eax, eax
-    jnz .run
+    jnz .legacy_up
     xor ecx, ecx
     call write_control
     lea rbx, [r_helper]
     jmp .direct
-.run:
+.legacy_up:
+    mov eax, [cfg_mode]
+    mov [sv_session], eax
     call join_refresh_world
     call disc_start
+    mov ecx, ST_READY
+    cmp dword [cfg_mode], 1
+    jne .legacy_state
+    call sv_collect_addrs
+    mov ecx, ST_HOSTING
+.legacy_state:
+    xor edx, edx
+    call sv_set
+.run:
     call launch_game
-    call stop_helper
-    xor ecx, ecx
-    call write_control
+    call sess_stop
+    mov ecx, ST_STOPPED
+    xor edx, edx
+    call sv_set
     mov ecx, [game_exit]
     call sys_exit
 .direct:

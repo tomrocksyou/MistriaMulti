@@ -3,8 +3,8 @@
 // Solo saves live in <config>/saves. Multiplayer worlds live in <config>/multiplayer/saves.
 // The game finds saves through one global (CONFIG_DIRECTORY), so switching spaces = pointing it at
 // the other folder and rebuilding Setup's save list. The title screen always starts in the solo space.
-// New Game and Load Game ask "Singleplayer or Multiplayer?" first; Multiplayer needs the helper to be
-// running (Play.bat), because a mod cannot start programs.
+// New Game and Load Game ask "Singleplayer or Multiplayer?" first. Multiplayer then shows "Host a game / Join a game"
+// (MistriMultiMenu.gml), which asks the launcher (started by Steam) to host or join; nothing has to be set up beforehand.
 function __mistrimulti_savespace() {
     if (global[$ "__mistrimulti_savespace"] == undefined) {
         global.__mistrimulti_savespace = {
@@ -91,6 +91,7 @@ function mistrimulti_savespace_try_set(multiplayer) {
     }
 }
 
+// Text arguments are local keys; pass literal text through mistrimulti_menu_t().
 function mistrimulti_savespace_popup(title_key, body_key) {
     var popup = popup_creator(title_key, body_key);
     popup.create_button("misc_local/cancel");
@@ -111,15 +112,33 @@ function mistrimulti_savespace_chosen(kind, multiplayer, arg) {
     var s = __mistrimulti_savespace();
     s.choosing = false;
     if (multiplayer && !mistrimulti_game_supported()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/offline_version_body"); return; }
-    if (multiplayer && !mistrimulti_savespace_armed()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/needs_helper_body"); return; }
-    var mode_before = multiplayer ? mistrimulti_savespace_mode() : "";
-    try { mmapi_log_info("mistrimulti", "Multiplayer chosen, mode from control.json: [" + mode_before + "]"); } catch (e) {}
-    if (!mistrimulti_savespace_try_set(multiplayer)) return;
+    if (multiplayer) {
+        // Host a game / Join a game; the flow calls mistrimulti_savespace_enter when the player starts playing.
+        try { mistrimulti_menu_begin(kind, arg); }
+        catch (e) {
+            s.choosing = false;
+            mmapi_log_error("mistrimulti", "Multiplayer menu failed: " + string(e));
+            mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/menu_failed_body");
+        }
+        return;
+    }
+    if (!mistrimulti_savespace_try_set(false)) return;
+    if (kind == "new") s.orig_enter_game(arg);
+    else s.orig_transition_to(Menu.Load);
+}
+
+// The player chose to start playing (the launcher hosts, or the host's world was downloaded): switch to the multiplayer saves.
+function mistrimulti_savespace_enter(kind, arg) {
+    var s = __mistrimulti_savespace();
+    var mode_before = mistrimulti_savespace_mode();   // read before the save folder switch, kept for the session
+    if (!mistrimulti_savespace_try_set(true)) {
+        mistrimulti_menu_send("stop", undefined);
+        mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/menu_failed_body");
+        return;
+    }
     s.mode = mode_before;
-    if (kind == "new") {
-        if (multiplayer) mistrimulti_savespace_enter_multiplayer(arg);
-        else s.orig_enter_game(arg);
-    } else s.orig_transition_to(Menu.Load);
+    if (kind == "new") mistrimulti_savespace_enter_multiplayer(arg);
+    else s.orig_transition_to(Menu.Load);
 }
 
 // The newest world in the multiplayer folder (the host's downloaded world for a guest), or undefined.
@@ -137,6 +156,7 @@ function mistrimulti_savespace_enter_multiplayer(new_state) {
     if (mistrimulti_savespace_mode() == "join") {
         if (world == undefined) {
             mistrimulti_savespace_try_set(false);
+            mistrimulti_menu_send("stop", undefined);
             mistrimulti_savespace_popup("mistrimulti/no_world_title", "mistrimulti/no_world_body");
             return;
         }
@@ -200,6 +220,8 @@ function mistrimulti_title_entered(ctx) {
     var rt = __mistrimulti_runtime();
     rt.enabled = false;
     rt.initialized = false;
+    try { mistrimulti_menu_title_entered(); }      // stops a host / join that is still running, closes menu screens
+    catch (e) { mmapi_log_error("mistrimulti", "Menu reset failed: " + string(e)); }
     if (s.active) { mistrimulti_savespace_try_set(false); return; }
     try { mistrimulti_savespace_rebuild_menu(); }   // tag the solo list with [Single]
     catch (e) { mmapi_log_error("mistrimulti", "Could not label the solo save list: " + string(e)); }
@@ -214,10 +236,11 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/continue_world": return "Continue your world";
         case "mistrimulti/new_world": return "Start a new world";
         case "mistrimulti/no_world_title": return "No world to join yet";
-        case "mistrimulti/no_world_body": return "Open MistriMulti, press Join a game, and pick your host. Then try again.";
+        case "mistrimulti/no_world_body": return "The host's world was not found on this computer. Choose Multiplayer and Join a game again.";
         case "mistrimulti/offline_title": return "Multiplayer is offline";
         case "mistrimulti/offline_version_body": return "The game was updated and MistriMulti has not been updated for it yet.";
-        case "mistrimulti/needs_helper_body": return "Multiplayer is not set up. Run Play.bat once, then start the game from Steam.";
+        case "mistrimulti/menu_failed_body": return "The multiplayer menu could not start. Singleplayer is not affected. Details are in the MistriMulti log.";
     }
+    if (is_string(ctx.key) && string_copy(ctx.key, 1, 14) == "mistrimulti/t/") return mistrimulti_menu_text_for_key(ctx.key);   // texts made by MistriMultiMenu.gml
     return undefined;
 }

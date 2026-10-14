@@ -113,6 +113,9 @@ function mistrimulti_tick() {
         r.tick_seen = true;
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
+    // The Host / Join menu and the badge's watchdog work on the title screen too, before any multiplayer world exists.
+    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); }
+    catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
     // Multiplayer starts only after the player picked the multiplayer save space.
     if (!r.initialized && !__mistrimulti_savespace().active) return;
     if (!r.initialized) {
@@ -308,6 +311,15 @@ function mistrimulti_room_changed(ctx) {
 
 function mistrimulti_show_status() {
     var r = __mistrimulti_runtime();
+    if (!r.enabled) {
+        // No multiplayer session yet: say what the badge says and why (the same words are in the log).
+        var n = __mistrimulti_netstatus();
+        mistrimulti_netstatus_refresh();
+        var shown = mistrimulti_status_text().text;
+        var reason = n.why != "" ? n.why : __mistrimulti_menu().why;
+        create_notification(ANCHOR.wrap_for_local(shown + (reason != "" ? " (" + reason + ")" : "")));
+        return;
+    }
     var count = 0;
     for (var i = 0; i < 8; i++) if ((r.mask & (1 << i)) != 0) count++;
     var text = "MistriMulti: " + r.mode + " | " + string(count) + " connected";

@@ -44,6 +44,8 @@ class Sandbox:
         shutil.copy(helper, self.bin / "mistrimulti-helper.exe")
         shutil.copy(fake, self.game / "FieldsOfMistria.exe")
         shutil.copy(fake, self.game / "OtherGame.exe")
+        if updater_exe is not None:
+            shutil.copy(updater_exe, self.bin / "MistriMulti.exe")      # the launcher asks it to scan and to list addresses
         self.mod = self.local / "FieldsOfMistria" / "mod_data" / "mistrimulti"
         self.saves = self.local / "FieldsOfMistria" / "saves"
         self.saves.mkdir(parents=True)
@@ -62,8 +64,8 @@ class Sandbox:
         exe = str(self.bin / "MistriMultiLauncher.exe")
         return ([exe] if on_windows else ["xvfb-run", "-a", WINE, exe]) + args
 
-    def steam(self, extra=(), exe="FieldsOfMistria.exe"):
-        return subprocess.Popen(self.cmd(["--steam", wpath(self.game / exe), *extra]), env=self.env(),
+    def steam(self, extra=(), exe="FieldsOfMistria.exe", env=None):
+        return subprocess.Popen(self.cmd(["--steam", wpath(self.game / exe), *extra]), env=env if env is not None else self.env(),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def ran(self):
@@ -90,6 +92,17 @@ def wait_for(cond, secs=15):
 def finish(proc):
     out, err = proc.communicate(timeout=60)
     return proc.returncode
+
+
+def assert_standby(sb, name):
+    """No valid launcher.cfg: the game started, nothing is hosted or joined, no helper, no bridge, a status the menu can read."""
+    ctl = json.loads((sb.mod / "control.json").read_text())
+    assert ctl["enabled"] is False and ctl["mode"] == "idle", f"{name}: control.json {ctl}"
+    assert not list(sb.mod.glob("bridge_*")), f"{name}: bridge created"
+    log = (sb.mod / "launcher.log").read_bytes().decode(errors="replace")
+    assert "Waiting for Host or Join" in log, (name, log)
+    st = json.loads((sb.mod / "menu" / "status.json").read_text())
+    assert st["state"] in ("idle", "stopped") and st["session"] == "none" and st["helper"] == 1, (name, st)
 
 
 def test_host():
@@ -159,8 +172,7 @@ def test_fallbacks():
             code = finish(sb.steam())
             assert code == 7, f"{name}: game must still start, exit {code}"
             assert sb.ran() is not None, f"{name}: game did not run"
-            assert not (sb.mod / "control.json").exists(), f"{name}: control.json written"
-            assert not list(sb.mod.glob("bridge_*")), f"{name}: bridge created"
+            assert_standby(sb, name)
         finally:
             sb.cleanup()
     print("fallbacks: game always starts, nothing multiplayer is enabled for", ", ".join(cases))
@@ -512,7 +524,8 @@ def test_fuzz():
             ctl = sb.mod / "control.json"
             if ctl.exists():
                 cfg = json.loads(ctl.read_text())
-                assert cfg["mode"] in ("host", "join") and 0 <= cfg["id"] <= 7, (case, cfg)
+                assert cfg["mode"] in ("host", "join", "idle") and 0 <= cfg["id"] <= 7, (case, cfg)
+                assert cfg["mode"] != "idle" or cfg["enabled"] is False, (case, cfg)
         finally:
             sb.cleanup()
     print("fuzz: 24 malformed configuration files, the game always started and control.json stayed valid")
@@ -529,7 +542,7 @@ def test_password():
             sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\n" + text + "\r\n")
             code = finish(sb.steam())
             assert code == 7 and sb.ran() is not None, f"{name}: game must still start"
-            assert not (sb.mod / "control.json").exists() and not list(sb.mod.glob("bridge_*")), f"{name}: multiplayer started"
+            assert_standby(sb, f"{name}: bad password in launcher.cfg")       # the room is never opened with an unusable password
         finally:
             sb.cleanup()
 
@@ -614,8 +627,361 @@ def test_helper_dies_with_launcher():
         sb.cleanup()
 
 
+# ---------------------------------------------------------------- the in-game menu: standby launcher + commands (launcher/menu.inc)
+_menu_seq = {}
+
+
+def menu_cmd(sb, **fields):
+    """What the mod does: write cmd.txt atomically (key=value lines), seq counting up per sandbox."""
+    seq = _menu_seq[sb.root] = _menu_seq.get(sb.root, 0) + 1
+    fields = {"seq": seq, **fields}
+    tmp = sb.mod / "menu" / "cmd.tmp"
+    tmp.write_text("".join(f"{k}={v}\n" for k, v in fields.items()))
+    os.replace(tmp, sb.mod / "menu" / "cmd.txt")
+    return seq
+
+
+def menu_status(sb):
+    return json.loads((sb.mod / "menu" / "status.json").read_text())
+
+
+def menu_wait(sb, seq, states=("idle", "hosting", "ready", "error", "stopped"), secs=40):
+    got = []
+
+    def done():
+        st = menu_status(sb)
+        got.append(st)
+        return st["seq"] == seq and st["state"] in states
+
+    assert wait_for(done, secs), ("no answer to command", seq, got[-1] if got else None)
+    return got[-1]
+
+
+def start_menu_game(sb, env=None):
+    proc = sb.steam(["--slow"], env=env)
+    assert wait_for(lambda: (sb.mod / "menu" / "status.json").exists(), 30), "the launcher did not publish a menu status"
+    return proc
+
+
+def port_open_tcp(port):
+    import socket
+    s = socket.socket()
+    s.settimeout(1)
+    try:
+        s.connect(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def port_free_udp(port):
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def test_menu_standby():
+    """No launcher.cfg: nothing hosted or joined and nothing listening until the player picks Host or Join."""
+    sb = Sandbox()
+    try:
+        proc = start_menu_game(sb)
+        st = menu_status(sb)
+        assert st["v"] == 1 and st["state"] == "idle" and st["session"] == "none" and st["helper"] == 1 and st["seq"] == 0, st
+        assert st["hosts"] == [], st
+        ctl = json.loads((sb.mod / "control.json").read_text())
+        assert ctl["enabled"] is False and ctl["mode"] == "idle", ctl
+        assert not port_open_tcp(7775) and port_free_udp(7776) and port_free_udp(7777), "standby must not listen on any port"
+        assert query_host(0.7) is None, "standby must not answer discovery"
+        assert not list(sb.mod.glob("bridge_*")), "no helper bridge in standby"
+        beats = {menu_status(sb)["hb"]}
+        assert wait_for(lambda: beats.add(menu_status(sb)["hb"]) or len(beats) >= 3, 8), "the launcher's heartbeat does not move"
+        assert finish(proc) == 7
+        assert menu_status(sb)["state"] == "stopped", menu_status(sb)
+        (sb.mod / "menu" / "cmd.txt").write_text("seq=5\ncmd=host\n")
+        proc = start_menu_game(sb)
+        time.sleep(2)
+        assert menu_status(sb)["state"] == "idle" and not (sb.mod / "menu" / "cmd.txt").exists(), "a stale command was applied"
+        finish(proc)
+        print("menu standby: no launcher.cfg needed, idle status with a moving heartbeat, nothing listens, stale commands dropped, 'stopped' at exit")
+    finally:
+        sb.cleanup()
+
+
+def test_menu_host_and_stop():
+    import socket
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import mmauth
+    sb = Sandbox()
+    try:
+        sb.mp.mkdir(parents=True)
+        (sb.mp / "game-1-autosave.sav").write_bytes(b"hosted world")
+        proc = start_menu_game(sb)
+        seq = menu_cmd(sb, cmd="host", password="pa$$w0rd!")
+        st = menu_wait(sb, seq, ("hosting", "error"))
+        assert st["state"] == "hosting" and st["err"] == 0 and st["session"] == "host" and st["port"] == 7777, st
+        assert not (sb.mod / "menu" / "cmd.txt").exists(), "the command file must be consumed"
+        ctl = json.loads((sb.mod / "control.json").read_text())
+        assert ctl["enabled"] is True and ctl["mode"] == "host" and ctl["id"] == 0 and ctl["bridge"].endswith("/mod_data/mistrimulti/bridge_0"), ctl
+        bridge = sb.mod / "bridge_0"
+        assert wait_for(lambda: json.loads((bridge / "status.json").read_text())["running"], 30), "helper did not start"
+        reply = None
+        for _ in range(10):
+            reply = query_host(0.5)
+            if reply:
+                break
+        assert reply and reply[:4] == b"MSDR" and reply[5] == 2 and int.from_bytes(reply[6:8], "little") == 7777, reply and reply[:8]
+        assert world_request()[:4] == b"MSWR", "the world server must run while hosting"
+        # the password applies: the real helper accepts it and refuses a wrong one
+        assert "pass=pa$$w0rd!" in (bridge / "auth.cfg").read_bytes().decode()
+        leaks = [str(p) for p in sb.mod.rglob("*") if p.is_file() and p.name != "auth.cfg" and b"pa$$w0rd!" in p.read_bytes()]
+        assert not leaks, f"the password leaked into {leaks}"
+
+        def handshake(password, slot=1, port=7777):
+            guest = mmauth.Guest(0x4D495354, slot, password=password)
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(3)
+            try:
+                s.sendto(guest.hello(), ("127.0.0.1", port))
+                challenge = s.recvfrom(256)[0]
+                s.sendto(guest.proof(challenge), ("127.0.0.1", port))
+                return "ok" if guest.welcome(s.recvfrom(256)[0]) else "refused"
+            finally:
+                s.close()
+        assert handshake(b"wrong") == "refused" and handshake(b"pa$$w0rd!") == "ok"
+        seq = menu_cmd(sb, cmd="stop")
+        st = menu_wait(sb, seq, ("idle",))
+        assert st["session"] == "none" and st["addrs"] == [], st
+        assert not port_open_tcp(7775) and port_free_udp(7776) and query_host(0.7) is None, "stop must close the discovery answer and world server"
+        assert json.loads((sb.mod / "control.json").read_text())["enabled"] is False
+        assert (bridge / "stop.flag").exists()
+        seq = menu_cmd(sb, cmd="host", port="47931", room="A1B2C3D4")
+        st = menu_wait(sb, seq, ("hosting", "error"))
+        assert st["state"] == "hosting" and st["port"] == 47931, st
+        for _ in range(10):
+            reply = query_host(0.5)
+            if reply:
+                break
+        assert reply and reply[5] == 1 and int.from_bytes(reply[6:8], "little") == 47931, reply and reply[:8]
+        assert finish(proc) == 7
+        assert menu_status(sb)["state"] == "stopped" and json.loads((sb.mod / "control.json").read_text())["enabled"] is False
+        assert not port_open_tcp(7775), "the world server must stop with the game"
+        print("menu host: hosting from a command (password enforced by the helper and only in auth.cfg), discovery and world server "
+              "only while hosting, stop and game exit close everything")
+    finally:
+        sb.cleanup()
+
+
+def test_menu_scan_and_addresses():
+    """scan runs MistriMulti.exe --scan (the manager's own code); a fake host on UDP 7776 is listed with a cleaned name."""
+    import socket
+    import threading
+    if updater_exe is None:
+        print("menu scan: skipped (pass the updater exe as the fourth argument)")
+        return
+    sb = Sandbox()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    stop = threading.Event()
+    try:
+        sock.bind(("127.0.0.1", 7776))
+        sock.settimeout(0.3)
+
+        def serve():
+            while not stop.is_set():
+                try:
+                    data, addr = sock.recvfrom(256)
+                except OSError:
+                    continue
+                if len(data) == 64 and data[:4] == b"MSDQ":
+                    name = b'Tom "the" \\PC\x01'
+                    sock.sendto(b"MSDR\x01\x03" + (4242).to_bytes(2, "little") + name.ljust(32, b"\x00") + b"\x00" * 24, addr)
+        t = threading.Thread(target=serve, daemon=True)
+        t.start()
+        proc = start_menu_game(sb, env=dict(sb.env(), MISTRIMULTI_SCAN_EXTRA="127.0.0.1"))
+        seq = menu_cmd(sb, cmd="scan")
+        st = menu_wait(sb, seq, ("idle", "error"), 60)
+        assert st["state"] == "idle" and st["scan"] == 1 and len(st["hosts"]) == 1, st
+        h = st["hosts"][0]
+        assert h["ip"] == "127.0.0.1" and h["port"] == 4242 and h["flags"] == 3 and h["name"] == "Tom _the_ _PC?", h
+        stop.set()
+        seq = menu_cmd(sb, cmd="scan")
+        st = menu_wait(sb, seq, ("idle", "error"), 60)
+        assert st["scan"] == 2 and st["hosts"] == [], st
+        finish(proc)
+        # this computer's addresses (MistriMulti.exe --addrs): valid dotted addresses only, one per line
+        out = sb.root / "addrs.txt"
+        exe = str(updater_exe)
+        subprocess.run(([exe] if on_windows else ["xvfb-run", "-a", WINE, exe]) + ["--addrs", wpath(out)], env=sb.env(), timeout=60, check=True, capture_output=True)
+        assert out.exists()
+        for line in out.read_text().splitlines():
+            parts = line.split(".")
+            assert len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts) and not line.startswith("169.254."), line
+        print("menu scan: the launcher lists hosts found by MistriMulti.exe --scan (names cleaned), counts finished scans, --addrs writes valid addresses")
+    finally:
+        stop.set()
+        sock.close()
+        sb.cleanup()
+
+
+def test_menu_join():
+    """A real helper hosts with a password (started like a friend's computer would), a fake world server gives the world."""
+    import hashlib
+    import socket
+    import threading
+    sb = Sandbox()
+    host_helper = None
+    server = socket.socket()
+    try:
+        data = os.urandom(120_000)
+        name = b"game-77-autosave.sav"
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 7775))
+        server.listen(4)
+        server.settimeout(1)
+        stop = threading.Event()
+
+        def serve():
+            while not stop.is_set():
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    continue
+                with conn:
+                    conn.recv(16)
+                    h = bytearray(112)
+                    h[0:4] = b"MSWR"
+                    h[4] = 1
+                    h[8:12] = len(data).to_bytes(4, "little")
+                    h[12:44] = hashlib.sha256(data).digest()
+                    h[48:48 + len(name)] = name
+                    conn.sendall(bytes(h) + data)
+        threading.Thread(target=serve, daemon=True).start()
+        hostdir = sb.root / "hostbridge"
+        hostdir.mkdir()
+        (hostdir / "auth.cfg").write_bytes(b"pass=tops3cret\r\n")
+        exe = str(sb.bin / "mistrimulti-helper.exe")
+        host_helper = subprocess.Popen(([exe] if on_windows else ["xvfb-run", "-a", WINE, exe]) + ["host", "7777", "0", "4d495354", wpath(hostdir)],
+                                       env=sb.env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert wait_for(lambda: (hostdir / "status.json").exists(), 30), "the host helper did not start"
+        proc = start_menu_game(sb)
+        seq = menu_cmd(sb, cmd="join", host="127.0.0.1", port="7777")
+        st = menu_wait(sb, seq, ("error", "ready"), 60)
+        assert st["state"] == "error" and st["err"] == 26, st                      # the host needs a password
+        assert not (sb.mp / "game-77-autosave.sav").exists()
+        seq = menu_cmd(sb, cmd="join", host="127.0.0.1", password="wrong")
+        st = menu_wait(sb, seq, ("error", "ready"), 60)
+        assert st["state"] == "error" and st["err"] == 21, st
+        assert not (sb.mp / "game-77-autosave.sav").exists(), "nothing may be downloaded after a refused join"
+        seq = menu_cmd(sb, cmd="join", host="127.0.0.1", password="tops3cret")
+        st = menu_wait(sb, seq, ("error", "ready"), 60)
+        assert st["state"] == "ready" and st["session"] == "join" and st["err"] == 0, st
+        assert (sb.mp / "game-77-autosave.sav").read_bytes() == data, "world not downloaded intact"
+        ctl = json.loads((sb.mod / "control.json").read_text())
+        assert ctl["enabled"] is True and ctl["mode"] == "join" and 1 <= ctl["id"] <= 7, ctl
+        assert wait_for(lambda: json.loads((sb.mod / f"bridge_{ctl['id']}" / "status.json").read_text())["auth"] == 2, 30), "guest helper not authenticated"
+        seq = menu_cmd(sb, cmd="stop")
+        st = menu_wait(sb, seq, ("idle",))
+        assert st["session"] == "none" and json.loads((sb.mod / "control.json").read_text())["enabled"] is False
+        finish(proc)
+        stop.set()
+        print("menu join: a missing or wrong password is refused before any download, the right one joins and downloads the world; stop leaves")
+    finally:
+        if host_helper:
+            (hostdir / "stop.flag").write_bytes(b"stop")
+            try:
+                host_helper.communicate(timeout=20)
+            except Exception:
+                host_helper.kill()
+        server.close()
+        sb.cleanup()
+
+
+def test_menu_command_validation():
+    sb = Sandbox()
+    try:
+        proc = start_menu_game(sb)
+
+        def refused(label, **fields):
+            seq = menu_cmd(sb, **fields)
+            st = menu_wait(sb, seq, ("error", "hosting", "joining", "ready", "idle"), 30)
+            assert st["state"] == "error" and st["err"] == 3 and st["session"] == "none", (label, st)
+            assert not list(sb.mod.glob("bridge_*")), f"{label}: a helper bridge was created"
+            assert json.loads((sb.mod / "control.json").read_text())["enabled"] is False, label
+
+        refused("bad ip", cmd="join", host="999.1.1.1")
+        refused("short ip", cmd="join", host="1.2.3")
+        refused("no ip", cmd="join")
+        refused("ip with text", cmd="join", host="1.2.3.4 evil")
+        refused("password with a space", cmd="host", password="a b")
+        refused("password too long", cmd="host", password="x" * 65)
+        refused("bad room", cmd="join", host="1.2.3.4", room="zzzz")
+        refused("room injection", cmd="host", room='abcd1234" evil')
+        refused("port zero", cmd="host", port="0")
+        refused("port too big", cmd="join", host="1.2.3.4", port="70000")
+        refused("host port too big", cmd="host", port="70000")
+        seq = menu_cmd(sb, cmd="explode")
+        menu_wait(sb, seq, ("error", "idle"))
+        (sb.mod / "menu" / "cmd.txt").write_text(f"seq={seq}\ncmd=host\n")           # a repeated sequence number
+        time.sleep(2)
+        assert menu_status(sb)["session"] == "none" and not (sb.mod / "menu" / "cmd.txt").exists()
+        for junk in (b"", b"seq=0\ncmd=host\n", b"cmd=host\n", b"seq=abc\ncmd=host\n", b"\xff\xfe" * 300, b"seq=99999999999\ncmd=host\n"):
+            (sb.mod / "menu" / "cmd.txt").write_bytes(junk)
+            time.sleep(1)
+            assert menu_status(sb)["session"] == "none", junk[:20]
+        assert finish(proc) == 7
+        print("menu commands: invalid addresses, ports, rooms, passwords and injected lines are refused without side effects; "
+              "unknown commands, repeated sequence numbers and junk files are harmless")
+    finally:
+        sb.cleanup()
+
+
+def test_menu_helper_missing():
+    sb = Sandbox()
+    try:
+        (sb.bin / "mistrimulti-helper.exe").unlink()
+        proc = start_menu_game(sb)
+        st = menu_status(sb)
+        assert st["helper"] == 0 and st["state"] == "error" and st["err"] == 1, st
+        seq = menu_cmd(sb, cmd="host")
+        st = menu_wait(sb, seq, ("error",))
+        assert st["err"] == 1 and st["session"] == "none" and not port_open_tcp(7775), st
+        assert finish(proc) == 7 and sb.ran() is not None, "the game must run whatever happens to the helper"
+        print("menu helper missing: reported to the menu (err 1), nothing listens, the game still runs")
+    finally:
+        sb.cleanup()
+
+
+def test_menu_overrides_launcher_cfg():
+    """An optional launcher.cfg still starts its role by itself (older setups); the menu can stop it and host with the defaults."""
+    sb = Sandbox()
+    try:
+        sb.config("mode=host\r\nport=47811\r\nroom=a1b2c3d4\r\n")
+        proc = start_menu_game(sb)
+        st = menu_status(sb)
+        assert st["state"] == "hosting" and st["session"] == "host" and st["port"] == 47811, st
+        seq = menu_cmd(sb, cmd="stop")
+        menu_wait(sb, seq, ("idle",))
+        assert not port_open_tcp(7775) and query_host(0.7) is None
+        seq = menu_cmd(sb, cmd="host")
+        st = menu_wait(sb, seq, ("hosting",))
+        assert st["port"] == 7777, st
+        finish(proc)
+        print("menu vs launcher.cfg: a saved role still starts by itself; the menu can stop it and host with the defaults")
+    finally:
+        sb.cleanup()
+
+
 ALL = [test_host, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune, test_configure, test_fuzz,
-       test_discovery_responder, test_scan, test_world_server, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password]
+       test_discovery_responder, test_scan, test_world_server, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password,
+       test_menu_standby, test_menu_host_and_stop, test_menu_scan_and_addresses, test_menu_join, test_menu_command_validation,
+       test_menu_helper_missing, test_menu_overrides_launcher_cfg]
 only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_password runs just those
 for fn in ALL:
     if not only or fn.__name__ in only:
