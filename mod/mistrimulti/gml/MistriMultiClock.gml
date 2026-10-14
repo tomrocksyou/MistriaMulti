@@ -589,7 +589,6 @@ function mistrimulti_clock_draw(resize) {
     try {
         var scale = is_real(resize) ? resize : 1;
         draw_set_font(ANCHOR.get_text_font());
-        draw_set_alpha(1);
         for (var i = 0; i < array_length(lines); i++) {
             var xx = NORMAL_MINSPEC_WIDTH * scale - string_width(lines[i]) * scale - 8 * scale;
             mistrimulti_clock_text(xx, (62 + 12 * i) * scale, lines[i], scale);

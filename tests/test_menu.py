@@ -87,7 +87,7 @@ class Env:
             "string_lower": str.lower, "string_pos": lambda needle, hay: hay.find(needle) + 1,
             "version_to_string": lambda v: v, "GAME_VERSION": "1.0.6", "instance_exists": lambda o: True, "Setup": GStruct(),
             "Menu": GStruct(Load=3), "string_width": lambda t: len(t) * 6, "string_height": lambda t: 12,
-            "draw_set_font": lambda f: None, "draw_set_alpha": lambda a: None, "draw_set_color": lambda c: self.draws.append(("color", c)),
+            "draw_set_font": lambda f: None, "draw_set_color": lambda c: self.draws.append(("color", c)),
             "draw_text_transformed": lambda x, y, t, sx, sy, a: self.draws.append(("text", t)), "c_white": 16777215,
             "NORMAL_MINSPEC_WIDTH": 480, "NORMAL_MINSPEC_HEIGHT": 270,
             "mistrimulti_savespace_enter": lambda kind, arg: self.entered.append((kind, arg)),

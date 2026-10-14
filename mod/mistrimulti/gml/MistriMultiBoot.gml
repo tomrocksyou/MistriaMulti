@@ -82,7 +82,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.1 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.2 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -109,7 +109,7 @@ function mistrimulti_room_key() {
 
 function mistrimulti_tick() {
     var r = __mistrimulti_runtime();
-    if (!variable_struct_exists(r, "tick_seen")) {
+    if (r[$ "tick_seen"] == undefined) {
         r.tick_seen = true;
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
@@ -393,5 +393,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.1");
+mmapi_mod_declare("mistrimulti", "0.2.2");
 mistrimulti_register();

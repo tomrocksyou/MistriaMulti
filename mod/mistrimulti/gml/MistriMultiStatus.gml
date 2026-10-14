@@ -112,7 +112,6 @@ function mistrimulti_draw_status(resize) {
         var gui_h = 270;
         try { gui_w = NORMAL_MINSPEC_WIDTH; gui_h = NORMAL_MINSPEC_HEIGHT; } catch (e) {}
         try { draw_set_font(ANCHOR.get_text_font()); } catch (e) {}
-        draw_set_alpha(1);
         var x = gui_w * scale - string_width(status.text) * scale - 8 * scale;
         var y = gui_h * scale - string_height(status.text) * scale - 6 * scale;
         draw_set_color(c_white);
