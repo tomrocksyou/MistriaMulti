@@ -338,6 +338,7 @@ function mistrimulti_register() {
     mmapi_guard("game.save_guard", mistrimulti_save_guard);
     mmapi_on("game.new_day", mistrimulti_new_day);
     mmapi_on("game.room_changed", mistrimulti_room_changed);
+    mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
 }
 

@@ -31,6 +31,19 @@ Grounded in the game's own scripts (read-only reference, not stored in this repo
 4. **Safety net (done).** `scripts/SaveGuard.ps1` backs up solo saves before every launch and restores
    guest changes afterwards, so a bug in 1-3 cannot lose solo progress.
 
-## Open questions (tested by `probes/mmprobe_saves`)
-- Can mod code read `CONFIG_DIRECTORY` and `Setup.save_manager`?
-- Can it assign `CONFIG_DIRECTORY` and rebuild the manager cleanly, and restore it?
+## Verified
+`probes/mmprobe_saves` on the real game (title screen, `game.title_entered`): `CONFIG_DIRECTORY` is readable and
+assignable, `Setup.save_manager = new SaveManager()` rebuilds the list from the new folder (1 save -> 0 saves) and
+restores cleanly.
+
+## Implemented
+`mod/mistrimulti/gml/MistriMultiSaveSpace.gml`: when `control.json` arms a host/join session, the title-entry hook points
+`CONFIG_DIRECTORY` at `<config>/multiplayer`, rebuilds the save manager and the Load-menu list. Any failure restores the
+solo folder. Solo and multiplayer worlds therefore never share a save list.
+
+## Known side effects / still to do
+- `settings.json` is also resolved through `CONFIG_DIRECTORY`, so settings changed during a multiplayer session are written
+  to the multiplayer folder (solo settings are untouched).
+- Guest saves are still vetoed (`game.save_guard`) until the host-world transfer exists.
+- No Multiplayer button yet: multiplayer is chosen by launching with Host.bat / Join.bat.
+- Host-world transfer to guests (helper file transfer) is not built.
