@@ -203,8 +203,8 @@ def test_backup_prune():
 
 
 def test_configure():
-    def run(sb, text):
-        p = subprocess.run(sb.cmd(["--configure"]), input=text.encode(), env=sb.env(), capture_output=True, timeout=60)
+    def run(sb, text, args=("--configure",)):
+        p = subprocess.run(sb.cmd(list(args)), input=text.encode(), env=sb.env(), capture_output=True, timeout=60)
         return p.stdout.decode(errors="replace")
 
     sb = Sandbox()
@@ -216,6 +216,8 @@ def test_configure():
         assert len(room) == 8 and all(c in "0123456789abcdef" for c in room), cfg
         assert "--steam %command%" in out and "MistriMultiLauncher.exe" in out, out
         run(sb, "h\r\n\r\n\r\n")
+        out2 = run(sb, "h\r\n\r\n\r\n", args=())          # double-clicking the exe (no arguments) is the setup too
+        assert "already copied to your clipboard" in out2 and room in (sb.mod / "launcher.cfg").read_text(), out2
         assert room in (sb.mod / "launcher.cfg").read_text(), "host room code must stay the same"
         run(sb, "j\r\n192.168.1.20\r\n\r\n3\r\nABCDEF12\r\n\r\n")
         cfg = (sb.mod / "launcher.cfg").read_text()

@@ -17,6 +17,8 @@ extern CreateProcessW, WaitForSingleObject, TerminateProcess, GetExitCodeProcess
 extern DeleteFileW, CopyFileW, FindFirstFileW, FindNextFileW, FindClose, RemoveDirectoryW, GetLocalTime
 extern WideCharToMultiByte, lstrlenW, lstrlenA, lstrcmpiW, wsprintfW, wsprintfA
 extern CreateJobObjectW, SetInformationJobObject, AssignProcessToJobObject
+extern CreateWindowExW
+extern OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, GlobalAlloc, GlobalLock, GlobalUnlock
 extern CoCreateGuid, GetStdHandle, AllocConsole, SetConsoleOutputCP, Sleep, GetExitCodeProcess, ReadFile, WriteFile, CloseHandle
 
 section .data
@@ -35,6 +37,9 @@ WSTR f_probecmd, `"%s" "%s"`
 WSTR f_helpercmd_host, `"%s\\mistrimulti-helper.exe" host %d %d %s "%s"`
 WSTR f_helpercmd_join, `"%s\\mistrimulti-helper.exe" join %d %d %s "%s" %s %d`
 WSTR f_stamp, "\%04d%02d%02d-%02d%02d%02d"
+WSTR f_launchopt, `"%s" --steam `
+WSTR s_command, "%command%"
+WSTR s_static, "STATIC"
 WSTR n_cfg, "\launcher.cfg"
 WSTR n_log, "\launcher.log"
 WSTR n_control, "\control.json"
@@ -83,7 +88,7 @@ t_bad db 'That value is not valid, try again.',13,10,0
 t_giveup db 'Setup was not saved.',13,10,0
 t_roomis db 'Room code (give this to your friends): ',0
 t_crlf db 13,10,0
-t_saved db 13,10,'Saved. One time only: in Steam, right-click Fields of Mistria > Properties > Launch Options and paste this line:',13,10,13,10,0
+t_saved db 13,10,'Saved. The line below is already copied to your clipboard.',13,10,'One time only: in Steam, right-click Fields of Mistria > Properties > Launch Options, press Ctrl+V, and close the window.',13,10,13,10,0
 t_cmd1 db '"',0
 t_cmd2 db '" --steam %command%',13,10,0
 name_table dq n_stop, n_status, n_txframe, n_txtmp, n_pid
@@ -1238,6 +1243,64 @@ FN launch_game
 .d:
 END_FN
 
+; Puts  "<launcher>" --steam %command%  on the clipboard so it can simply be pasted into Steam. Failures are ignored.
+FN copy_launch_option
+    lea rcx, [names]
+    lea rdx, [f_launchopt]
+    lea r8, [exe_path]
+    call wsprintfW
+    lea rcx, [names]
+    lea rdx, [s_command]
+    lea r8, [p2]
+    call join_wide
+    lea rcx, [p2]
+    call lstrlenW
+    lea r13, [rax*2+2]
+    mov ecx, 2                      ; GMEM_MOVEABLE
+    mov rdx, r13
+    call GlobalAlloc
+    test rax, rax
+    jz .d
+    mov r12, rax
+    mov rcx, r12
+    call GlobalLock
+    test rax, rax
+    jz .d
+    mov rdi, rax
+    lea rsi, [p2]
+    mov rcx, r13
+    rep movsb
+    mov rcx, r12
+    call GlobalUnlock
+    ; the clipboard needs an owner window: a hidden message-only window of the built-in STATIC class
+    xor ecx, ecx
+    lea rdx, [s_static]
+    xor r8d, r8d
+    xor r9d, r9d
+    mov qword [rsp+32], 0
+    mov qword [rsp+40], 0
+    mov qword [rsp+48], 0
+    mov qword [rsp+56], 0
+    mov qword [rsp+64], -3          ; HWND_MESSAGE
+    mov qword [rsp+72], 0
+    mov qword [rsp+80], 0
+    mov qword [rsp+88], 0
+    call CreateWindowExW
+    test rax, rax
+    jz .d
+    mov rbx, rax
+    mov rcx, rbx
+    call OpenClipboard
+    test eax, eax
+    jz .d
+    call EmptyClipboard
+    mov ecx, 13                     ; CF_UNICODETEXT
+    mov rdx, r12
+    call SetClipboardData
+    call CloseClipboard
+.d:
+END_FN
+
 ; ---------------- console (configure) ----------------
 FN say                          ; rcx ASCII
     mov r12, rcx
@@ -1542,6 +1605,7 @@ configure_main:
     mov qword [rsp+48], 0
     mov qword [rsp+56], 0
     call WideCharToMultiByte
+    call copy_launch_option
     lea rcx, [t_saved]
     call say
     lea rcx, [t_cmd1]
@@ -1673,7 +1737,7 @@ start:
     call CommandLineToArgvW
     mov [argv], rax
     cmp dword [argc], 2
-    jb .exit1
+    jb configure_main                 ; double-clicked: run the setup
     mov rax, [argv]
     mov rcx, [rax+8]
     lea rdx, [s_configure]

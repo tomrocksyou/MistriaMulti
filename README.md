@@ -53,7 +53,7 @@ are blocked during multiplayer. The host can save its farm normally. See
 5. Everyone runs `Play.bat` once. A window asks whether you want to host (H) or join a friend (J).
    Host: it creates an eight-digit room code that stays the same every session. Friends: enter the host's reachable
    IPv4 address, the room code and a player number (1-7, different for each friend). Run `Play.bat` again whenever
-   those details change.
+   those details change. (Double-clicking `MistriMultiLauncher.exe` does the same as `Play.bat`; the line to paste into Steam is copied to your clipboard.)
 6. **Click Play in Steam from now on.** One time only: in Steam, right-click the game, Properties, Launch Options,
    and paste the line `Play.bat` prints (`"<folder>\MistriMultiLauncher.exe" --steam %command%`). Steam then runs the
    launcher, which starts the network helper from your saved details and launches the game. If anything is wrong
