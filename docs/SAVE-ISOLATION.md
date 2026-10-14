@@ -37,13 +37,18 @@ assignable, `Setup.save_manager = new SaveManager()` rebuilds the list from the 
 restores cleanly.
 
 ## Implemented
-`mod/mistrimulti/gml/MistriMultiSaveSpace.gml`: when `control.json` arms a host/join session, the title-entry hook points
-`CONFIG_DIRECTORY` at `<config>/multiplayer`, rebuilds the save manager and the Load-menu list. Any failure restores the
-solo folder. Solo and multiplayer worlds therefore never share a save list.
+`mod/mistrimulti/gml/MistriMultiSaveSpace.gml`. Every title entry starts in the solo space. The title menu's `enter_game`
+and `transition_to` are wrapped (via `ui.menu_opened`): New Game and Load Game first ask "Singleplayer or Multiplayer?"
+(the game's own `MultipleChoicePopup`, text supplied through `local.missing`). The choice points `CONFIG_DIRECTORY` at
+`<config>/saves` or `<config>/multiplayer/saves` and rebuilds the save list. The multiplayer runtime only starts inside the
+multiplayer space; choosing Multiplayer without the helper running (Host.bat / Join.bat) shows an explanatory popup.
+Any failure restores the solo folder. Quitting to the title tears the session down.
 
 ## Known side effects / still to do
 - `settings.json` is also resolved through `CONFIG_DIRECTORY`, so settings changed during a multiplayer session are written
   to the multiplayer folder (solo settings are untouched).
 - Guest saves are still vetoed (`game.save_guard`) until the host-world transfer exists.
-- No Multiplayer button yet: multiplayer is chosen by launching with Host.bat / Join.bat.
+- The helper must still be started by Host.bat / Join.bat (a mod cannot launch programs).
+- If there are no solo saves the title screen has no Load Game button, so existing multiplayer worlds are unreachable until one solo save exists.
+- Untested: wrapping the title menu's methods, popup text injection, and teardown on quit-to-title.
 - Host-world transfer to guests (helper file transfer) is not built.

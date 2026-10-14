@@ -75,6 +75,8 @@ function mistrimulti_room_key() {
 
 function mistrimulti_tick() {
     var r = __mistrimulti_runtime();
+    // Multiplayer starts only after the player picked the multiplayer save space.
+    if (!r.initialized && !__mistrimulti_savespace().active) return;
     if (!r.initialized) {
         try { mistrimulti_initialize(); }
         catch (e) {
@@ -339,6 +341,8 @@ function mistrimulti_register() {
     mmapi_on("game.new_day", mistrimulti_new_day);
     mmapi_on("game.room_changed", mistrimulti_room_changed);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
+    mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
+    mmapi_filter("local.missing", mistrimulti_local_missing);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
 }
 
