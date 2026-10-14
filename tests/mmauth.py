@@ -107,12 +107,13 @@ class Guest:
         self.cnonce = os.urandom(16)
         return hello(self.code, self.slot, self.cnonce)
 
-    def proof(self, challenge, password=None):
-        """Builds the PROOF for a CHALLENGE packet; returns None when it is not one for this guest."""
+    def proof(self, challenge, password=None, cookie=None):
+        """Builds the PROOF for a CHALLENGE packet; returns None when it is not one for this guest.
+        `cookie` replaces the host's cookie (a test for a guest that never received one)."""
         if len(challenge) != 64 or challenge[:6] != header(2)[:6] or challenge[48:64] != self.cnonce:
             return None
         flags, window = struct.unpack_from("<II", challenge, 8)
-        cookie, self.hfp = challenge[16:32], challenge[32:48]
+        cookie, self.hfp = cookie or challenge[16:32], challenge[32:48]
         pw = self.password if password is None else password
         pwk = stretch(pw, self.hfp) if flags & 1 else bytes(32)
         k = guest_key(self.ik, self.hfp)

@@ -412,6 +412,14 @@ def test_replay_and_tamper(env):
     except socket.timeout:
         pass
     assert host.auth(1)["gen"] == gen
+    # a perfectly signed PROOF whose cookie was never issued to this address and nonce (blind or spoofed) is ignored
+    blind = new_wire(host, 4)
+    blind.send(blind.guest.hello())
+    challenge = blind.recv()
+    blind.send(blind.guest.proof(challenge, cookie=os.urandom(16)))
+    assert blind.recv(0.8) is None, "a PROOF with an unissued cookie must not be answered"
+    assert host.settle()["mask"] == 2 and host.auth(4) is None
+    blind.close()
     # old data packets are useless after a new session (new key); within a session the sequence check applies
     old = wire.guest.seal(10, b'{"active":true,"n":"old"}')
     again = Wire(host.port, 1, install_key=wire.guest.ik)

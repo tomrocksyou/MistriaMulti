@@ -243,7 +243,7 @@ def test_unverified_and_limits_on_identities():
     assert len(host.trust()["bound"]) <= 256
     for n in range(20):
         host.verdict(1, f"{n + 1000:032x}")
-        host.interp.call("mistrimulti_trust_admit", 1, "local:" + f"{n + 100:032x}", "x", {"world": "w", "uid": "x"})
+        host.interp.call("mistrimulti_trust_admit", 1, "local:" + f"{100 + n % 4:032x}", "x", {"world": "w", "uid": "x"})
     assert len(host.rt["trust"]["pending"]) <= 8
     print("PASS: unverified slots get nothing; identities per install, bindings and open approvals are bounded")
 

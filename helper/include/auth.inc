@@ -1883,8 +1883,14 @@ FN peer_drop
     mov ecx, ebx
     mov rdx, r12
     call publish_record
+    cmp dword [mode_host], 0
+    jne .publish
+    test ebx, ebx                       ; a guest only publishes the state of the host (slot 0)
+    jnz .done
+.publish:
     mov ecx, ebx
     call publish_auth
+.done:
 END_FN
 
 ; Writes <bridge>/auth_<slot>.json: {"fp":"..","gen":N,"state":S,"reject":R}. Hosts publish the verified

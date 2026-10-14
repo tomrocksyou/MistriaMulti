@@ -552,7 +552,7 @@ def test_password():
         proc = sb.steam(["--quick"])
         bridge = sb.mod / "bridge_0"
         assert wait_for(lambda: (bridge / "auth.cfg").exists() and (bridge / "status.json").exists()), "helper did not start"
-        lines = (bridge / "auth.cfg").read_text().split("\r\n")
+        lines = (bridge / "auth.cfg").read_bytes().decode().split("\r\n")
         assert lines[0].startswith("key=") and lines[0].endswith("mistrimulti\\install.key"), lines
         assert lines[1].endswith("mistrimulti\\trust_keys.txt") and lines[2].endswith("mistrimulti\\deny.txt"), lines
         assert lines[3] == "pass=s3cret!pw", lines
@@ -565,10 +565,16 @@ def test_password():
         finish(proc)
         sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\n")
         proc = sb.steam(["--quick"])
-        assert wait_for(lambda: (bridge / "status.json").exists() and "pass=" not in (bridge / "auth.cfg").read_text()), "stale password"
-        time.sleep(1)
-        challenge, result = handshake(b"")
-        assert result == "ok" and challenge[32:48] == hfp, "the host fingerprint must survive a restart"
+        assert wait_for(lambda: (bridge / "status.json").exists() and "pass=" not in (bridge / "auth.cfg").read_bytes().decode()), "stale password"
+        assert wait_for(lambda: json.loads((bridge / "status.json").read_text())["running"]), "second helper did not start"
+        challenge = result = None
+        for _ in range(30):                  # Wine starts slowly: the first datagrams may find nobody listening yet
+            try:
+                challenge, result = handshake(b"")
+                break
+            except socket.timeout:
+                time.sleep(0.5)
+        assert result == "ok" and challenge[32:48] == hfp, ("the host fingerprint must survive a restart", result)
         finish(proc)
         print("password: unusable ones stop multiplayer, valid ones reach the helper (auth.cfg), wrong ones are refused, stable host fingerprint")
     finally:
@@ -608,17 +614,10 @@ def test_helper_dies_with_launcher():
         sb.cleanup()
 
 
-test_host()
-test_join_and_identity_reuse()
-test_fallbacks()
-test_direct_and_wrong_exe()
-test_backup_prune()
-test_configure()
-test_fuzz()
-test_discovery_responder()
-test_scan()
-test_world_server()
-test_guest_refreshes_world()
-test_helper_dies_with_launcher()
-test_password()
+ALL = [test_host, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune, test_configure, test_fuzz,
+       test_discovery_responder, test_scan, test_world_server, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password]
+only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_password runs just those
+for fn in ALL:
+    if not only or fn.__name__ in only:
+        fn()
 print("PASS")

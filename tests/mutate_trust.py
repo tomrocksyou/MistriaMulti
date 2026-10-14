@@ -44,8 +44,8 @@ MUTATIONS = [
     ("guest takes data from any address", CORE, "    cmp rax, [host_address]\n    jne .bad\n    lea rdx, [g_sk]", "    cmp rax, [host_address]\n    nop\n    nop\n    lea rdx, [g_sk]",
      "helper", ["test_guest_join"]),
     ("bad password opens the room", AUTH, "    cmp dword [pass_len], -1\n    je .badpass", "    cmp dword [pass_len], -1\n    nop\n    nop", "helper", ["test_config"]),
-    ("unchecked argument", CORE, "    call pl_arg\n    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer\n    jz .bad\n    cmp dword [rax], 'host'",
-     "    call pl_arg\n    cmp dword [rax], 'host'", "helper-windows", ["test_config"]),
+    ("unchecked argument", CORE, "    mov ecx, 5\n    call pl_arg\n    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer\n    jz .bad\n    mov r13, rax",
+     "    mov ecx, 5\n    call pl_arg\n    mov r13, rax", "helper-windows", ["test_config"]),
     ("launcher forgets the password", LAUNCHER, "    cmp byte [a_pass], 0\n    je .nopass\n    lea rcx, [t_auth_pass]", "    cmp byte [a_pass], 0\n    jmp .nopass\n    lea rcx, [t_auth_pass]",
      "launcher", ["test_password"]),
     ("another install takes the identity", TRUST, "        if (bound.fp == fp) return { ok: true };", "        if (true) return { ok: true };", "gml", ["test_claim_by_another_install"]),
@@ -65,6 +65,13 @@ MUTATIONS = [
     ("hostile event data crashes the layer", EVENTS, "    var e = is_struct(frame) ? frame[$ \"ev\"] : undefined;\n    if (slot == r.id || !__mistrimulti_ev_valid(e)) return;",
      "    var e = frame[$ \"ev\"];\n    if (slot == r.id) return;", "gml", ["test_hostile_frames"]),
 ]
+
+
+def isolated(command):
+    """The command inside a private network namespace with loopback up (the launcher tests use fixed ports)."""
+    code = ("import fcntl,socket,struct,os,sys;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);"
+            "fcntl.ioctl(s,0x8914,struct.pack('16sH14s',b'lo',0x41,b'\\0'*14));os.execvp(sys.argv[1],sys.argv[1:])")
+    return ["unshare", "-n", sys.executable, "-c", code] + command
 
 
 def run(command, env=None, timeout=1800):
@@ -105,8 +112,8 @@ def main():
             elif kind == "launcher":
                 run(["sh", "scripts/build-linux.sh"])
                 env = dict(os.environ, ONLY=",".join(tests))
-                result = run([sys.executable, "tests/test_launcher_linux.py", "build/mistrimulti-launcher", "build/mistrimulti-helper-linux",
-                              "build/fakegame-linux", "build/mistrimulti-manager"], env=env)
+                result = run(isolated([sys.executable, "-I", "tests/test_launcher_linux.py", "build/mistrimulti-launcher",
+                                       "build/mistrimulti-helper-linux", "build/fakegame-linux", "build/mistrimulti-manager"]), env=env)
             else:
                 result = run([sys.executable, "tests/test_trust_gml.py"] + tests)
         finally:
