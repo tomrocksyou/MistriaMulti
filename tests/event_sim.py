@@ -74,6 +74,7 @@ _PROGRAM = None
 class GmlNode:
     kind = "gml"
     extra_files = ()            # further mod files to load (feature tests)
+    prelude = ()                # GML source loaded first (macros the engine would define, for example)
 
     def builtins(self):
         """Engine functions and globals a subclass provides to the loaded files."""
@@ -94,6 +95,8 @@ class GmlNode:
         }
         builtins.update(self.builtins())
         self.interp = gml.Interpreter(builtins)
+        for source in self.prelude:
+            self.interp.load(source, "prelude")
         if _PROGRAM is None:
             _PROGRAM = EVENTS_GML.read_text(encoding="utf-8")
         self.interp.load(_PROGRAM, EVENTS_GML.name)

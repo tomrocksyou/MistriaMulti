@@ -192,6 +192,13 @@ host changes and day change, guest harvest races (exactly one yield), tool swing
 adopt/sell/buy requests answered once, refunds, pooled barn products, snapshots, host restart, hostile data).
 `python3 tests/mutate_ranch.py` breaks the GML in 12 ways and fails if any test still passes.
 
+## Story checks
+
+`python3 tests/test_story.py` (about a minute) runs the real story, villager and cutscene GML on the event layer (25 scenarios: steps
+by host and guest, three players taking one step, world and private cutscenes, late join, rejoin, host restart with claims in
+flight, a cutscene holding only its own game, 100 steps through a full send queue, hostile input, the villagers' day plan).
+`python3 tests/mutate_story.py` breaks the GML in 20 ways and fails if any test still passes. See `docs/SYNC-STORY.md`.
+
 ## Transport checks
 
 From the project folder on Windows:

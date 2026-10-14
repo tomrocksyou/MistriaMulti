@@ -70,6 +70,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.containers", mistrimulti_containers_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.drops", mistrimulti_drops_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.ranch", mistrimulti_ranch_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -86,6 +87,7 @@ function mistrimulti_register_events() {
     mistrimulti_drops_register_events();
     mistrimulti_ranch_register_events();
     mistrimulti_progress_register_events();
+    mistrimulti_story_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -141,6 +143,7 @@ function mistrimulti_tick() {
         mistrimulti_drops_tick();
         mistrimulti_ranch_tick();
         mistrimulti_farm_tick();
+        mistrimulti_story_tick();
     } else {
         mistrimulti_remove_ghosts();
     }

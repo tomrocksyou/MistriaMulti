@@ -47,6 +47,8 @@ Implemented:
   (`docs/SYNC-PROGRESS.md`).
 - F8 displays connection status in game.
 - Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
+- World story (story quests, the cutscenes and facts that open the map), villager schedules steered by the host, cutscenes as private
+  viewings, festivals as a function of the shared date (`docs/SYNC-STORY.md`, not yet tried in the game).
 
 This is not feature-complete co-op. Still **not synchronized**: NPC schedules, quests/unlocks that belong to the world,
 cutscenes, and mines/dungeon generation and combat. Everything listed above was written against the game's scripts and
