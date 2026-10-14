@@ -65,6 +65,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.player_restore", mistrimulti_player_restore, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.events", mistrimulti_events_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.character", mistrimulti_debug_character, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.ranch", mistrimulti_ranch_debug, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -75,6 +76,7 @@ function mistrimulti_register_events() {
     mistrimulti_event_register("look", { on_event: mistrimulti_look_event, on_peer: mistrimulti_look_peer });
     mistrimulti_terrain_register_events();
     mistrimulti_player_register_events();
+    mistrimulti_ranch_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -125,6 +127,7 @@ function mistrimulti_tick() {
         if (r.mode == "host" && (r.mask & ~r.last_mask) != 0) r.snapshot_pending = true;
         r.last_mask = r.mask;
         mistrimulti_stream_terrain();
+        mistrimulti_ranch_tick();
     } else {
         mistrimulti_remove_ghosts();
     }
@@ -302,6 +305,7 @@ function mistrimulti_register() {
     mmapi_on("ui.draw_gui", mistrimulti_draw_status);
     mmapi_filter("local.missing", mistrimulti_local_missing);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
+    mistrimulti_ranch_register_hooks();
 }
 
 mmapi_mod_declare("mistrimulti", "0.2.0");
