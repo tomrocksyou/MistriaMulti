@@ -1,7 +1,13 @@
-// Probe E: can a mod see the game's save list, and can it redirect the save folder?
-// Phase 1 (always): read-only report of CONFIG_DIRECTORY and the save manifest, at the title screen.
-// Phase 2 (automatic, right after the first report): point CONFIG_DIRECTORY at an empty
-// folder, rebuild the save list, report, then ALWAYS restore.
+// Probe E: can a mod redirect the game's save folder from the title screen?
+// game.title_entered fires from Setup's create, after the save list is built and before the
+// title menu's own start chain runs. At every title entry this probe reports the save list,
+// points CONFIG_DIRECTORY at an empty folder, rebuilds the save manager, reports, then restores.
+// Only logging is used here (file IO is not safe before the first frame).
+function __mmprobe_saves_runtime() {
+    if (global[$ "__mmprobe_saves"] == undefined) global.__mmprobe_saves = { registered_hooks: undefined };
+    return global.__mmprobe_saves;
+}
+
 function mmprobe_saves_say(text) { mmapi_log_info("mmprobe_saves", text); mmapi_log_flush("mmprobe_saves"); }
 
 function mmprobe_saves_report(tag) {
@@ -14,19 +20,13 @@ function mmprobe_saves_report(tag) {
     } catch (e) { mmprobe_saves_say(tag + " manifest FAIL " + string(e)); }
 }
 
-function mmprobe_saves_tick() {
-    if (global[$ "__mmprobe_saves"] == undefined) global.__mmprobe_saves = { ticks: 0, reports: 0, swapped: false };
-    var r = global.__mmprobe_saves;
-    r.ticks++;
-    if (r.ticks mod 600 != 0 || r.reports >= 3) return;
-    r.reports++;
-    mmprobe_saves_report("report" + string(r.reports));
-    if (r.swapped) return;
-    r.swapped = true;
+function mmprobe_saves_title_entered(ctx) {
+    mmprobe_saves_say("title_entered from_game=" + string(ctx.from_game));
+    mmprobe_saves_report("BEFORE");
     var original = CONFIG_DIRECTORY;
     try {
         vault_close_all_vaults();
-        CONFIG_DIRECTORY = mmapi_mod_data_dir("mmprobe_saves") + "/alt_config";
+        CONFIG_DIRECTORY = original + "/mmprobe_alt";
         Setup.save_manager = new SaveManager();
         mmprobe_saves_report("SWAPPED");
     } catch (e) { mmprobe_saves_say("swap FAIL " + string(e)); }
@@ -38,7 +38,12 @@ function mmprobe_saves_tick() {
     } catch (e) { mmprobe_saves_say("RESTORE FAIL " + string(e)); }
 }
 
-mmapi_mod_declare("mmprobe_saves", "0.0.1");
-mmapi_register(mmprobe_saves_tick);
-mmapi_log_info("mmprobe_saves", "loaded");
-mmapi_log_flush("mmprobe_saves");
+function mmprobe_saves_register() {
+    var r = __mmprobe_saves_runtime();
+    if (r.registered_hooks != undefined) return;
+    r.registered_hooks = true;
+    mmapi_on("game.title_entered", mmprobe_saves_title_entered);
+}
+
+mmapi_mod_declare("mmprobe_saves", "0.0.2");
+mmprobe_saves_register();
