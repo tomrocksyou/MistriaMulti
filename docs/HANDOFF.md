@@ -17,6 +17,8 @@ real game (the stand-in tests could not catch them; keep them in mind for every 
 - **`mmapi_mod_data_dir` follows `CONFIG_DIRECTORY`**, which the multiplayer save space moves to `<config>/multiplayer`. Use
   `mistrimulti_data_dir()` (read once at load). MMAPI's own log for the mod may also move into
   `<config>/multiplayer/mod_data/mistrimulti/logs` while in a multiplayer world: check both logs.
+- `ui.draw_gui` fires per drawn frame and the game draws at 300+ FPS: the tick is paced to 60 Hz with `get_timer()`
+  (0.2.7). Before that, every tick-counted timing ran ~6x too fast (the guest's watering watch expired before the water landed).
 - Info lines do appear in the mod log (the earlier "warnings only" note was wrong).
 - Next: walk the `docs/SYNC-*.md` checklists in the real game (clock first), then the badge.
 

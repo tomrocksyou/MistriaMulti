@@ -98,7 +98,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.6 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.7 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -400,9 +400,21 @@ function mistrimulti_installer() {
     try { mmapi_log_info("mistrimulti", "Installer called (the mod runs from the draw hook)."); mmapi_log_flush("mistrimulti"); } catch (e) {}
 }
 
+// The draw hook fires once per drawn frame, and the game draws as fast as it can (300+ FPS seen), while every timing in
+// the mod counts 60 ticks a second. So the tick runs on a 60 Hz clock: at most two catch-up ticks per drawn frame, and
+// a long stall (loading, a slow frame) is skipped instead of replayed.
+#macro MISTRIMULTI_TICK_US 16667
 function mistrimulti_draw_gui(resize) {
-    try { mistrimulti_tick(); }
-    catch (e) { mmapi_warn_rate_limited("mistrimulti_tick", "mistrimulti", "Mod tick failed: " + string(e)); }
+    var r = __mistrimulti_runtime();
+    var now = get_timer();
+    if (r[$ "next_tick_at"] == undefined || now - r.next_tick_at > 250000) r.next_tick_at = now;
+    var runs = 0;
+    while (now >= r.next_tick_at && runs < 2) {
+        r.next_tick_at += MISTRIMULTI_TICK_US;
+        runs++;
+        try { mistrimulti_tick(); }
+        catch (e) { mmapi_warn_rate_limited("mistrimulti_tick", "mistrimulti", "Mod tick failed: " + string(e)); }
+    }
     mistrimulti_draw_status(resize);
 }
 
@@ -442,5 +454,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.6");
+mmapi_mod_declare("mistrimulti", "0.2.7");
 mistrimulti_register();
