@@ -381,8 +381,19 @@ function mistrimulti_trust_status_text() {
     var r = __mistrimulti_runtime();
     if (!is_struct(r[$ "trust"])) return "";
     if (r.mode == "host") {
+        // Each connected guest with the first eight characters of its install fingerprint: the code to put in deny.txt
+        // (the whole fingerprint is in <bridge>/auth_<slot>.json) and the code shown to a guest who needs approval.
+        var text = "";
+        for (var i = 1; i < 8; i++) {
+            var peer = r.peers[i];
+            var auth = (r.mask & (1 << i)) != 0 ? mistrimulti_trust_slot(i) : undefined;
+            if (auth == undefined || auth.state != 1) continue;
+            var who = is_struct(peer) && is_string(peer[$ "name"]) ? string_copy(peer.name, 1, 16) : "player";
+            text += (text == "" ? "" : ", ") + who + " " + string_copy(auth.fp, 1, 8);
+        }
         var waiting = array_length(r.trust.pending);
-        return waiting > 0 ? string(waiting) + " waiting for approval (F7)" : "";
+        if (waiting > 0) text += (text == "" ? "" : " | ") + string(waiting) + " waiting for approval (F7)";
+        return text;
     }
     var auth = mistrimulti_trust_slot(0);
     if (r.trust.warning != "") return r.trust.warning;

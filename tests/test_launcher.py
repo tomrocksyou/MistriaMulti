@@ -518,6 +518,63 @@ def test_fuzz():
     print("fuzz: 24 malformed configuration files, the game always started and control.json stayed valid")
 
 
+def test_password():
+    """launcher.cfg password=: unusable ones stop multiplayer, valid ones reach the real helper through auth.cfg."""
+    import socket
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import mmauth
+    for name, text in {"space": "password=two words", "too long": "password=" + "x" * 65, "control": "password=ab\x01"}.items():
+        sb = Sandbox()
+        try:
+            sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\n" + text + "\r\n")
+            code = finish(sb.steam())
+            assert code == 7 and sb.ran() is not None, f"{name}: game must still start"
+            assert not (sb.mod / "control.json").exists() and not list(sb.mod.glob("bridge_*")), f"{name}: multiplayer started"
+        finally:
+            sb.cleanup()
+
+    def handshake(password, slot=1, port=47911):
+        guest = mmauth.Guest(0xA1B2C3D4, slot, password=password)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(3)
+        try:
+            s.sendto(guest.hello(), ("127.0.0.1", port))
+            challenge = s.recvfrom(256)[0]
+            s.sendto(guest.proof(challenge), ("127.0.0.1", port))
+            reply = s.recvfrom(256)[0]
+            return challenge, ("ok" if guest.welcome(reply) else ("reject", reply[8]))
+        finally:
+            s.close()
+
+    sb = Sandbox()
+    try:
+        sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\npassword=s3cret!pw\r\n")
+        proc = sb.steam(["--quick"])
+        bridge = sb.mod / "bridge_0"
+        assert wait_for(lambda: (bridge / "auth.cfg").exists() and (bridge / "status.json").exists()), "helper did not start"
+        lines = (bridge / "auth.cfg").read_text().split("\r\n")
+        assert lines[0].startswith("key=") and lines[0].endswith("mistrimulti\\install.key"), lines
+        assert lines[1].endswith("mistrimulti\\trust_keys.txt") and lines[2].endswith("mistrimulti\\deny.txt"), lines
+        assert lines[3] == "pass=s3cret!pw", lines
+        assert wait_for(lambda: (sb.mod / "install.key").exists() and (sb.mod / "install.key").stat().st_size == 32), "no install key"
+        challenge, result = handshake(b"s3cret!pw")
+        assert result == "ok", result
+        hfp = challenge[32:48]
+        assert handshake(b"wrong")[1] == ("reject", 1)
+        assert handshake(b"")[1] == ("reject", 1)
+        finish(proc)
+        sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\n")
+        proc = sb.steam(["--quick"])
+        assert wait_for(lambda: (bridge / "status.json").exists() and "pass=" not in (bridge / "auth.cfg").read_text()), "stale password"
+        time.sleep(1)
+        challenge, result = handshake(b"")
+        assert result == "ok" and challenge[32:48] == hfp, "the host fingerprint must survive a restart"
+        finish(proc)
+        print("password: unusable ones stop multiplayer, valid ones reach the helper (auth.cfg), wrong ones are refused, stable host fingerprint")
+    finally:
+        sb.cleanup()
+
+
 def test_helper_dies_with_launcher():
     sb = Sandbox()
     try:
@@ -563,4 +620,5 @@ test_scan()
 test_world_server()
 test_guest_refreshes_world()
 test_helper_dies_with_launcher()
+test_password()
 print("PASS")

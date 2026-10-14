@@ -377,6 +377,8 @@ FN parse_arguments
     mov r12d, eax
     mov ecx, 1
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     cmp dword [rax], 'host'
     je .host
     cmp dword [rax], 'join'
@@ -395,6 +397,8 @@ FN parse_arguments
 .port:
     mov ecx, 2
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_decimal
     jc .bad
@@ -407,6 +411,8 @@ FN parse_arguments
     mov [local_address+2], ax
     mov ecx, 3
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_decimal
     jc .bad
@@ -424,12 +430,16 @@ FN parse_arguments
     mov [local_id], eax
     mov ecx, 4
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_hex
     jc .bad
     mov [session_code], eax
     mov ecx, 5
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov r13, rax
     mov rcx, rax
     call text_length
@@ -456,11 +466,15 @@ FN parse_arguments
     je .good
     mov ecx, 6
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_ip
     jc .bad
     mov ecx, 7
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_decimal
     jc .bad

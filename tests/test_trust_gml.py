@@ -100,6 +100,8 @@ def test_first_use_binds():
     world.run(3000)
     assert guest.calls == [("fresh",)] and guest.errors() == "", guest.errors()
     assert host.trust()["bound"][uid]["fp"] == FP_A
+    text = host.interp.call("mistrimulti_trust_status_text")
+    assert "Friend1 " + FP_A[:8] in text, text          # F8 shows each guest with the code to put in deny.txt
     # the same install, new session (re-entering the world): still admitted, nothing to approve
     guest.interp.call("mistrimulti_player_reset_session")
     guest.calls.clear()
@@ -364,9 +366,97 @@ def test_guest_pins_the_host():
     print("PASS: a guest pins each hosted world to the host's verified identity and says why a join was refused")
 
 
+def junk(rng, depth=0):
+    """Any JSON value a hostile guest might put anywhere in a frame."""
+    kind = rng.randrange(12 if depth < 3 else 8)
+    if kind == 0:
+        return None
+    if kind == 1:
+        return rng.choice([True, False])
+    if kind == 2:
+        return rng.choice([0, 1, -1, 7, 8, 255, 2 ** 31, 2 ** 53, 1e308, -1e308, 0.5, -0.0, 1e-308])
+    if kind == 3:
+        return rng.choice(["", "x", "profile_request", "~q", "~b", "~r", "terrain", "look", "steam:1", "local:" + "a" * 32,
+                           "x" * rng.choice([64, 65, 500, 9000]), "日本", "\x00", "$", "{}"])
+    if kind == 4:
+        return rng.randrange(-5, 40)
+    if kind == 5:
+        return rng.choice(["world_1", "1-abc-1", "s"])
+    if kind == 6:
+        return rng.randrange(0, 9)
+    if kind == 7:
+        return []
+    if kind == 8:
+        return [junk(rng, depth + 1) for _ in range(rng.randrange(0, 6))]
+    if kind == 9:
+        return {rng.choice(["k", "d", "x", "n", "i", "l", "e", "h", "m", "f", "uid", "world", "peer_epoch", "revision"]): junk(rng, depth + 1)
+                for _ in range(rng.randrange(0, 5))}
+    if kind == 10:
+        return [rng.randrange(-3, 6) for _ in range(rng.choice([0, 7, 8, 9]))]
+    return {}
+
+
+def hostile_item(rng, seq):
+    kinds = ["profile_request", "profile_update", "~q", "~b", "~r", "terrain", "look", "romance_claim", "farm", "nonsense", None, 7]
+    item = {"s": seq if rng.random() < 0.8 else junk(rng), "k": rng.choice(kinds), "d": junk(rng)}
+    if rng.random() < 0.3:
+        item["t"] = junk(rng)
+    if rng.random() < 0.3:
+        item["ts"] = junk(rng)
+    if item["k"] == "~q" and rng.random() < 0.7:
+        item["d"] = {"k": rng.choice(["terrain", "profile_request", "flood", "x"]), "n": junk(rng), "i": junk(rng), "d": junk(rng)}
+    if item["k"] == "~b" and rng.random() < 0.7:
+        item["d"] = {"k": rng.choice(["profile_update", "x"]), "i": junk(rng), "n": junk(rng), "x": junk(rng), "l": junk(rng),
+                     "e": junk(rng), "h": junk(rng), "m": junk(rng)}
+    return item
+
+
+def test_hostile_frames():
+    """Nothing a guest puts in an event frame may raise out of the event layer or the trust code on the host."""
+    import random
+    rng = random.Random(77)
+    world = make_world(51)
+    host, guest, other = (world.games[i].node for i in range(3))
+    connected(world, host)
+    seen = []
+    host.call("mistrimulti_event_register", "flood", host.handlers(on_request=lambda p, d, c: seen.append(p) or {}))
+    errors = 0
+    for n in range(4000):
+        slot = rng.choice([1, 1, 2, 2, 3, 0, 7, 8])
+        stream = rng.choice(["stream-a", "stream-b", junk(rng), "x" * 100, ""])
+        base = rng.randrange(1, 6)
+        items = [hostile_item(rng, base + i) for i in range(rng.randrange(0, 8))]
+        ev = {"s": stream, "b": base if rng.random() < 0.9 else junk(rng), "q": items,
+              "a": [rng.randrange(0, 4) for _ in range(8)] if rng.random() < 0.9 else junk(rng),
+              "c": [rng.choice(["", "stream-a", host.rt["ev"]["stream"]]) for _ in range(8)] if rng.random() < 0.9 else junk(rng)}
+        frame = {"v": 2, "id": slot if rng.random() < 0.9 else junk(rng), "epoch": rng.choice(["e1", "e2", junk(rng)]),
+                 "uid": rng.choice([guest.rt["uid"], other.rt["uid"], junk(rng)]), "active": junk(rng) if rng.random() < 0.3 else True,
+                 "name": junk(rng), "ev": ev if rng.random() < 0.95 else junk(rng)}
+        data = host.data(frame)
+        if 0 <= slot < 8 and slot != 0:
+            host.set_peer(slot, data)
+        try:
+            host.call("mistrimulti_events_receive", slot if 0 <= slot < 8 else 1, data)
+            if n % 7 == 0:
+                host.call("mistrimulti_events_tick")
+        except Exception as error:
+            errors += 1
+            raise AssertionError(f"frame {n} raised {error!r}: {json.dumps(frame)[:400]}") from error
+    # the host still works afterwards: a normal guest request is answered and the trust rules still hold
+    for slot in (1, 2):
+        host.set_peer(slot, None)
+    world.run(8000)
+    host.verdict(2, FP_B)
+    assert host.call("mistrimulti_event_emit", "look", {"x": 1}) in (True, False)
+    uid = guest.rt["uid"]
+    verdict = host.interp.call("mistrimulti_trust_admit", 2, uid, "n", None)
+    assert verdict["ok"] in (True, False)
+    print("PASS: 4000 hostile event frames (wrong types, huge values, lies about streams and sequence numbers) raise nothing")
+
+
 TESTS = [test_first_use_binds, test_claim_by_another_install, test_refuse_bans, test_legacy_record_needs_approval,
          test_upload_requires_the_verified_install, test_unverified_and_limits_on_identities, test_damaged_trust_file,
-         test_rate_limits, test_blob_rate, test_guest_pins_the_host]
+         test_rate_limits, test_blob_rate, test_guest_pins_the_host, test_hostile_frames]
 
 if __name__ == "__main__":
     import sys

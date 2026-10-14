@@ -72,6 +72,31 @@ example `json_parse` number types, `json_stringify` key order, or array copy-on-
 time with a full window, and anything about the real hooks, menus or saves. `test_live_game.py` and
 `test_player_data.py` (below) speak the new protocol through the same model but need the real game.
 
+## Trust checks (join authentication, identity binding, abuse limits)
+
+```sh
+python3 tests/test_trust.py build/mistrimulti-helper-linux      # re-runs itself in `unshare -n`; about 3 minutes
+python3 tests/test_trust.py build/mistrimulti-helper.exe        # Windows, or Wine on Linux
+python3 tests/test_trust_gml.py                                 # real MistriMultiTrust.gml, no ports
+```
+
+`tests/mmauth.py` is the reference implementation of the handshake (`docs/PROTOCOL.md`); it is the guest in front of the real host
+helper and the host in front of the real guest helper. `test_trust.py` covers: joins with and without a password (and that neither
+the password nor its hash crosses the wire); a wrong or missing password; slot hijack, stolen fingerprints and two slots for one
+install; datagrams without a handshake and in the old unauthenticated format; replayed PROOFs and old-session packets; a bit flip
+in every byte of a packet; identity keys (registration, known identity with garbage in the registration field, stable host
+fingerprint, damaged and oversized key stores); the deny list (fingerprints, addresses, comments, junk, removal); rate limits
+(snapshot bursts, a packet flood, a HELLO flood, reply sizes); 3 700 hostile datagrams including correctly tagged ones with
+impossible headers; the guest side (missing and wrong passwords, a host without the right tag, RESYNC, a silent host);
+`auth.cfg` parsing and absurd arguments. `test_trust_gml.py` covers binding, approval, refusal and bans, legacy records, uploads
+from a slot that changed hands, bounded identities, a damaged `trust.json`, per-guest event limits (nothing lost, nobody starved),
+host pinning on the guest, and 4 000 hostile event frames. `test_launcher*.py` check that `password=` reaches `auth.cfg` and the
+real helper, and that an unusable one stops multiplayer.
+
+What these do not prove: the game's real file reading of `auth_<slot>.json`, `trust.json` and `deny.txt`; the F7 / Shift+F7 hotkeys
+and notifications; behaviour on a real network (NAT, MTU, packet loss during the handshake beyond the proxy tests). The manual
+checklist is in `docs/SECURITY.md`.
+
 ## Progress checks
 
 ```sh

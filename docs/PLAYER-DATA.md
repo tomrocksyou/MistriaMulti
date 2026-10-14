@@ -23,6 +23,9 @@ mod_data/mistrimulti/worlds/<world-key>/
     commits/discarded.json                    records replaced by the last rollback
 ```
 
+The identity bindings (`trust.json`), the guest key store (`trust_keys.txt`) and the ban list (`deny.txt`) live one level up,
+in `mod_data/mistrimulti/`, and apply to every world the host plays.
+
 These files accompany the game save; they are not embedded in its `.sav` archive.
 Back up or copy the matching world directory when moving the farm to another
 computer. They contain account identifiers and character data and do not belong
@@ -43,8 +46,8 @@ and other seen flags, counters, daily flags); see `docs/SYNC-PROGRESS.md` for th
 what is still copied from the host's save. The two records together are a character
 checkpoint, not a complete standalone game save. Chests and shared item transfers still need
 host-controlled transactions. Client-reported progress is validated for shape and
-bounds; gameplay actions are not yet recomputed on the host, and the UDP transport
-does not authenticate a claimed remote Steam ID.
+bounds; gameplay actions are not yet recomputed on the host. A uid (Steam ID or local id) is only a claim:
+the host binds it to the install fingerprint its helper verified (`docs/SECURITY.md`), so another install cannot use it.
 
 ## Joining and saving
 
@@ -55,7 +58,9 @@ again. A new player receives starter items and a new character's progress and op
 character creator; inventory and money from another local save are not imported.
 A world whose players only have core records (made before the progress record existed) keeps
 working: the core record is restored as before and the progress starts fresh and is then stored. The same identity cannot occupy two guest slots simultaneously,
-and a guest cannot claim the host's identity.
+and a guest cannot claim the host's identity. An identity is bound to one install on first use (`trust.json` next to the
+world folders): a different install claiming it, or a record that has no binding yet, waits for the host's approval (F7),
+and an upload is stored only while the slot still reports the bound install.
 
 Checkpoints run about every five seconds while the character is ready. The first
 checkpoint also runs after character creation. Only changed records are sent, and of the

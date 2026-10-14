@@ -335,6 +335,17 @@ def test_hijack(env):
         return bytes(body) + tag + bytes(12)
     assert thief.join(steal) == ("reject", mmauth.REJECT_AUTH)
     assert host.settle()["authfail"] >= 1
+    # a fingerprint that is not the hash of the key it comes with is refused: nobody can squat a name
+    squatter = new_wire(host, 4)
+
+    def squat(guest, proof):
+        body = bytearray(proof[:100])
+        body[52:68] = os.urandom(16)
+        k = mmauth.guest_key(guest.ik, guest.hfp)
+        tag = mmauth.hm(mmauth.hm(bytes(32), k), b"MMPROOF1", bytes(body[8:100]), guest.hfp)[:16]
+        return bytes(body) + tag + bytes(12)
+    assert squatter.join(squat) == ("reject", mmauth.REJECT_AUTH)
+    squatter.close()
     # the same install cannot hold two slots
     twin = Wire(host.port, 3, install_key=friend.guest.ik)
     assert twin.join() == ("reject", mmauth.REJECT_BUSY)
@@ -808,6 +819,18 @@ def test_config(env):
             raise AssertionError("an invalid password must stop the helper, not open the room: " + repr(blob))
         assert code == 4, (code, blob)
         node.process = None
+    # arguments: absurdly long ones (on Windows an argument that cannot be converted used to become a null pointer)
+    for length in (2001, 4095, 4200, 20000):
+        command = ([WINE] if env.wine else []) + [str(env.exe), "host", str(available_port()), "0", CODE_TEXT, "a" * length]
+        result = subprocess.run(command, env=dict(os.environ, WINEDEBUG="-all"), capture_output=True, timeout=20)
+        assert result.returncode == 2 and b"Invalid arguments" in result.stdout, (length, result.returncode, result.stdout[:100])
+    for bad in (["host", "0", "0", CODE_TEXT, "x"], ["host", "99999", "0", CODE_TEXT, "x"], ["host", "5000", "3", CODE_TEXT, "x"],
+                ["join", "5000", "0", CODE_TEXT, "x", "1.2.3.4", "5000"], ["join", "5000", "9", CODE_TEXT, "x", "1.2.3.4", "5000"],
+                ["join", "5000", "1", "zzzzzzzz", "x", "1.2.3.4", "5000"], ["join", "5000", "1", CODE_TEXT, "x", "1.2.3.4.5", "5000"],
+                ["host", "5000", "0", CODE_TEXT], ["frobnicate"], []):
+        command = ([WINE] if env.wine else []) + [str(env.exe)] + bad
+        result = subprocess.run(command, env=dict(os.environ, WINEDEBUG="-all"), capture_output=True, timeout=20)
+        assert result.returncode in (0, 2), (bad, result.returncode)      # 0 is the usage text for no arguments
     # a very long file, no newline at the end, unknown keys, CRLF, a key path that is a folder
     junk = b"unknown=1\r\n" + b"k" * 5000 + b"\r\nkey=" + b"/" * 2000 + b"\r\nkeys=\r\ndeny=\r\npass=a!b#c"
     node = Node(env, "host", 0, config=junk).start()
@@ -823,8 +846,27 @@ def test_config(env):
     passed("auth.cfg: a malformed password stops the helper (exit 4), junk and bad paths are survived")
 
 
+def test_cookie_expiry(env):
+    """A CHALLENGE is good for 20 to 40 seconds; a PROOF that waits longer gets no answer (slow: about 50 s)."""
+    host = Node(env, "host", 0).start()
+    wire = new_wire(host, 1)
+    wire.send(wire.guest.hello())
+    challenge = wire.recv()
+    proof = wire.guest.proof(challenge)
+    time.sleep(46)
+    wire.send(proof)
+    assert wire.recv(1.0) is None, "a PROOF with an expired cookie must be ignored"
+    assert host.status()["mask"] == 0
+    fresh = new_wire(host, 1)
+    assert fresh.join() == "ok", "a fresh handshake still works"
+    wire.close()
+    fresh.close()
+    host.stop()
+    passed("a PROOF that waited longer than the cookie window (20 to 40 s) is ignored")
+
+
 TESTS = [test_basic_join, test_no_handshake, test_hijack, test_password, test_replay_and_tamper, test_identity_keys,
-         test_deny, test_limits, test_fuzz, test_guest_join, test_guest_rejections, test_guest_resync, test_config]
+         test_cookie_expiry, test_deny, test_limits, test_fuzz, test_guest_join, test_guest_rejections, test_guest_resync, test_config]
 
 
 def main():
