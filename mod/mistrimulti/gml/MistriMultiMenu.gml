@@ -24,7 +24,7 @@ function __mistrimulti_menu() {
 
 // ---------------------------------------------------------------- the launcher's status file
 
-function mistrimulti_menu_dir() { return mmapi_mod_data_dir("mistrimulti") + "/menu"; }
+function mistrimulti_menu_dir() { return mistrimulti_data_dir() + "/menu"; }
 
 function mistrimulti_menu_valid_ip(text) {
     if (!is_string(text) || string_length(text) < 7 || string_length(text) > 15) return false;

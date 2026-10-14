@@ -18,6 +18,13 @@ function __mistrimulti_runtime() {
     return global.__mistrimulti;
 }
 
+// The mod's data folder (control.json, bridges, menu, worlds). mmapi_mod_data_dir follows the game's CONFIG_DIRECTORY, which
+// the multiplayer save space moves to <config>/multiplayer, so the folder is read once at load, before any switch, and kept.
+function mistrimulti_data_dir() {
+    if (global[$ "__mistrimulti_data_dir"] == undefined) global.__mistrimulti_data_dir = mmapi_mod_data_dir("mistrimulti");
+    return global.__mistrimulti_data_dir;
+}
+
 function __mistrimulti_init_stop(reason) {
     try { mmapi_log_warn("mistrimulti", "Multiplayer not started: " + reason); mmapi_log_flush("mistrimulti"); } catch (e) {}
 }
@@ -26,9 +33,9 @@ function mistrimulti_initialize() {
     var r = __mistrimulti_runtime();
     r.initialized = true;
     r.boot_stage = "control";
-    mmapi_log_info("mistrimulti", "Data directory: " + mmapi_mod_data_dir("mistrimulti"));
+    mmapi_log_info("mistrimulti", "Data directory: " + mistrimulti_data_dir());
     mmapi_log_flush("mistrimulti");
-    var control = mmapi_mod_data_dir("mistrimulti") + "/control.json";
+    var control = mistrimulti_data_dir() + "/control.json";
     if (!file_exists(control)) { __mistrimulti_init_stop("control.json not found at " + control); return; }
     var cfg = try_read_json_file(control);
     if (!is_struct(cfg) || cfg[$ "enabled"] != true) { __mistrimulti_init_stop("control.json is unreadable or not enabled"); return; }
@@ -37,7 +44,7 @@ function mistrimulti_initialize() {
     if ((cfg.mode == "host") != (cfg.id == 0)) { __mistrimulti_init_stop("mode " + string(cfg.mode) + " does not match player id " + string(cfg.id)); return; }
     if (!is_string(cfg[$ "epoch"]) || !is_string(cfg[$ "bridge"])) { __mistrimulti_init_stop("control.json has no epoch or bridge"); return; }
     // Bridge paths are confined to this mod's own data folder.
-    var native_root = mmapi_mod_data_dir("mistrimulti") + "/bridge_";
+    var native_root = mistrimulti_data_dir() + "/bridge_";
     var root = string_replace_all(native_root, "\\", "/");
     var bridge = string_replace_all(cfg.bridge, "\\", "/");
     if (string_lower(bridge) != string_lower(root + string(cfg.id))) { __mistrimulti_init_stop("bridge path [" + bridge + "] differs from the expected [" + root + string(cfg.id) + "]"); return; }
@@ -82,7 +89,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.4 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.5 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -378,6 +385,7 @@ function mistrimulti_register() {
     var r = __mistrimulti_runtime();
     if (r.registered) return;
     r.registered = true;
+    mistrimulti_data_dir();
     mmapi_register(mistrimulti_installer);
     mmapi_filter("tool.targets", mistrimulti_tool_targets);
     mistrimulti_farm_register_hooks();
@@ -409,5 +417,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.4");
+mmapi_mod_declare("mistrimulti", "0.2.5");
 mistrimulti_register();

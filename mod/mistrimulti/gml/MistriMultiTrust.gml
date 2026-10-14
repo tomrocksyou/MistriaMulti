@@ -31,7 +31,7 @@ function mistrimulti_trust_valid_fp(fp) {
 }
 
 function __mistrimulti_trust_path() {
-    return mmapi_mod_data_dir("mistrimulti") + "/trust.json";
+    return mistrimulti_data_dir() + "/trust.json";
 }
 
 function __mistrimulti_trust_notify(text) {
@@ -242,7 +242,7 @@ function mistrimulti_trust_deny(fp, name) {
     array_push(r.trust.denied, { fp: fp, name: is_string(name) ? string_copy(name, 1, 64) : "" });
     mistrimulti_trust_save();
     // deny.txt keeps whatever the host wrote by hand; the fingerprint is appended on its own line.
-    var path = mmapi_mod_data_dir("mistrimulti") + "/deny.txt";
+    var path = mistrimulti_data_dir() + "/deny.txt";
     var text = "";
     if (file_exists(path)) {
         try { text = read_text_file(path); } catch (e) { text = ""; }
@@ -328,7 +328,7 @@ function mistrimulti_trust_host_ok() {
     var auth = mistrimulti_trust_slot(0);
     if (auth == undefined || auth.state != 2 || !mistrimulti_trust_valid_fp(auth[$ "fp"]) || r.world_key == "") return false;
     if (r.trust.host_pin == auth.fp) return true;
-    var path = mmapi_mod_data_dir("mistrimulti") + "/known_hosts.json";
+    var path = mistrimulti_data_dir() + "/known_hosts.json";
     var known = file_exists(path) ? try_read_json_file(path) : undefined;
     if (!is_struct(known) || !is_struct(known[$ "hosts"])) known = { v: 1, hosts: {} };
     var pinned = known.hosts[$ r.world_key];
@@ -363,7 +363,7 @@ function mistrimulti_trust_accept_host() {
     var r = __mistrimulti_runtime();
     var auth = mistrimulti_trust_slot(0);
     if (r.mode != "join" || auth == undefined || auth.state != 2 || r.world_key == "") return false;
-    var path = mmapi_mod_data_dir("mistrimulti") + "/known_hosts.json";
+    var path = mistrimulti_data_dir() + "/known_hosts.json";
     var known = file_exists(path) ? try_read_json_file(path) : undefined;
     if (!is_struct(known) || !is_struct(known[$ "hosts"])) known = { v: 1, hosts: {} };
     known.hosts[$ r.world_key] = auth.fp;

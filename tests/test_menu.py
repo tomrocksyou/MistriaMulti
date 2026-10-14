@@ -77,6 +77,7 @@ class Env:
         self.launcher = None
         b = {
             "get_timer": self.get_timer, "mmapi_mod_data_dir": lambda name: MOD if disk is None else str(disk),
+            "mistrimulti_data_dir": lambda: MOD if disk is None else str(disk),
             "file_exists": self.file_exists, "try_read_json_file": self.read_json, "save_text_file": self.save,
             "file_rename": self.rename, "MultipleChoicePopup": self.mcp, "popup_creator": self.popup_creator,
             "text_input_popup": self.text_input, "create_notification": self.notes.append,

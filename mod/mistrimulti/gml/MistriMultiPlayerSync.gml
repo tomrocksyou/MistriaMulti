@@ -39,8 +39,8 @@ function mistrimulti_player_data_tick() {
         r.world_path = "";
         if (r.mode == "host") {
             r.world_key = string_replace_all(r.uid, ":", "_") + "_" + string(Game.unique_identifier);
-            r.world_path = mmapi_mod_data_dir("mistrimulti") + "/worlds/" + r.world_key;
-            directory_create(mmapi_mod_data_dir("mistrimulti") + "/worlds");
+            r.world_path = mistrimulti_data_dir() + "/worlds/" + r.world_key;
+            directory_create(mistrimulti_data_dir() + "/worlds");
             directory_create(r.world_path);
             directory_create(r.world_path + "/players");
             save_text_file(r.world_path + "/world.json", json_stringify({ v: 1,

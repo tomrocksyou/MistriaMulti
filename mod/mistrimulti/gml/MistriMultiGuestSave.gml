@@ -244,7 +244,7 @@ function mistrimulti_guestsave_exit_now() {
 // mistrimulti_guestsave_import, which puts the character into a world this player hosts.
 
 function mistrimulti_guestsave_export_dir() {
-    return mmapi_mod_data_dir("mistrimulti") + "/exports";
+    return mistrimulti_data_dir() + "/exports";
 }
 
 function mistrimulti_guestsave_export_name(world_key, uid) {

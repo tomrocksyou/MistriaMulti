@@ -16,7 +16,7 @@ function __mistrimulti_savespace() {
 }
 
 function mistrimulti_savespace_armed() {
-    var control = mmapi_mod_data_dir("mistrimulti") + "/control.json";
+    var control = mistrimulti_data_dir() + "/control.json";
     if (!file_exists(control)) return false;
     var cfg = try_read_json_file(control);
     return is_struct(cfg) && cfg[$ "enabled"] == true && (cfg[$ "mode"] == "host" || cfg[$ "mode"] == "join");
@@ -26,7 +26,7 @@ function mistrimulti_savespace_armed() {
 function mistrimulti_savespace_mode() {
     var kept = __mistrimulti_savespace();
     if (kept.active && is_string(kept[$ "mode"]) && kept.mode != "") return kept.mode;   // read before the save folder switch
-    var control = mmapi_mod_data_dir("mistrimulti") + "/control.json";
+    var control = mistrimulti_data_dir() + "/control.json";
     if (!file_exists(control)) return "";
     var cfg = try_read_json_file(control);
     if (!is_struct(cfg) || cfg[$ "enabled"] != true) return "";

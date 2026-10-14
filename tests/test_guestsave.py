@@ -472,7 +472,7 @@ def test_wiring():
     builtins = {
         "mmapi_register": lambda fn: None, "mmapi_filter": rec("filter"), "mmapi_guard": rec("guard"), "mmapi_on": rec("on"),
         "mmapi_override": rec("override"), "mmapi_hotkey_register": lambda *a: None, "mmapi_hotkey_vk_from_name": lambda n: 0,
-        "mmapi_hotkey_register_binding": lambda *a: None, "mmapi_hotkey_binding_from_name": lambda n: 0,
+        "mmapi_hotkey_register_binding": lambda *a: None, "mmapi_mod_data_dir": lambda name: "mod", "mmapi_hotkey_binding_from_name": lambda n: 0,
                 "create_notification": notes.append,
         "ANCHOR": GStruct(wrap_for_local=lambda t: t), "MIST": GStruct(is_running=lambda: False), "string_lower": str.lower,
     }

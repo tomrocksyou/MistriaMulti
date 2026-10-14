@@ -28,7 +28,7 @@ function mistrimulti_character_profile() {
     profile = file_exists(path + ".bak") ? try_read_json_file(path + ".bak") : undefined;
     if (mistrimulti_valid_character(profile) && profile[$ "uid"] == r.uid) return profile;
     // Claim a legacy device profile for one identity only.
-    var root = mmapi_mod_data_dir("mistrimulti");
+    var root = mistrimulti_data_dir();
     var owner_path = root + "/legacy_character_owner.json";
     var owner = file_exists(owner_path) ? try_read_json_file(owner_path) : undefined;
     if (is_struct(owner) && owner[$ "uid"] != r.uid) return undefined;

@@ -39,7 +39,7 @@ function mistrimulti_netstatus_refresh() {
     n.mode = "";
     n.why = "";
     mistrimulti_menu_poll();
-    var control = mmapi_mod_data_dir("mistrimulti") + "/control.json";
+    var control = mistrimulti_data_dir() + "/control.json";
     if (!file_exists(control)) { n.why = "no control.json"; return; }
     var cfg = try_read_json_file(control);
     if (!is_struct(cfg) || cfg[$ "enabled"] != true || !is_string(cfg[$ "bridge"])) { n.why = "no session is enabled"; return; }

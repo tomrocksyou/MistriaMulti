@@ -17,7 +17,7 @@ function mistrimulti_identity_initialize(cfg) {
     var r = __mistrimulti_runtime();
     r.uid = cfg[$ "uid"];
     if (!mistrimulti_valid_uid(r.uid)) {
-        var path = mmapi_mod_data_dir("mistrimulti") + "/local_identity.json";
+        var path = mistrimulti_data_dir() + "/local_identity.json";
         var saved = file_exists(path) ? try_read_json_file(path) : undefined;
         if (is_struct(saved) && mistrimulti_valid_uid(saved[$ "uid"])) r.uid = saved.uid;
         else {
@@ -26,7 +26,7 @@ function mistrimulti_identity_initialize(cfg) {
             save_text_file(path, json_stringify({ uid: r.uid }));
         }
     }
-    var folder = mmapi_mod_data_dir("mistrimulti") + "/characters";
+    var folder = mistrimulti_data_dir() + "/characters";
     directory_create(folder);
     r.character_path = folder + "/" + string_replace_all(r.uid, ":", "_") + ".json";
     r.roster = {};

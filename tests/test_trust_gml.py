@@ -30,6 +30,7 @@ class TrustNode(FeatureNode):
         out.update({
             "file_exists": self.file_exists, "try_read_json_file": self.read_json, "save_text_file": self.save,
             "file_rename": self.rename, "read_text_file": self.read_text, "mmapi_mod_data_dir": lambda name: "mod",
+            "mistrimulti_data_dir": lambda: "mod",
             "create_notification": self.notes.append, "ANCHOR": gml.GStruct(wrap_for_local=lambda text: text),
             "mistrimulti_player_path": lambda uid: "players/" + uid,
         })

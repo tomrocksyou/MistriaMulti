@@ -413,6 +413,7 @@ class ProgressNode(GmlNode):
         b.update({
             "file_exists": fs.exists, "save_text_file": fs.save, "file_rename": fs.rename, "try_read_json_file": fs.read,
             "directory_create": lambda path: None, "mmapi_mod_data_dir": lambda mod: "data",
+            "mistrimulti_data_dir": lambda: "data",
             "Game": GStruct(unique_identifier=777), "GRID": GStruct(), "obj_ari": 1, "instance_exists": lambda o: True,
             "mmapi_log_warn": lambda *a: self.warnings.append(a[-1]), "mmapi_log_error": lambda *a: self.warnings.append(a[-1]),
         })
