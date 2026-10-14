@@ -82,7 +82,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.2 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.3 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -114,6 +114,8 @@ function mistrimulti_tick() {
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
     // The Host / Join menu and the badge's watchdog work on the title screen too, before any multiplayer world exists.
+    // In the real game this tick does not run on the title screen; mistrimulti_draw_gui drives the menu there.
+    __mistrimulti_menu().tick_alive = true;
     try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); }
     catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
     // Multiplayer starts only after the player picked the multiplayer save space.
@@ -358,6 +360,22 @@ function mistrimulti_debug_inspect() {
         object_kind: string(global.__mistrimulti_peer_object) };
 }
 
+// ui.draw_gui fires every frame, also on the title screen where mistrimulti_tick does not run. It moves the menu along
+// whenever the tick did not run since the last draw, so the menu never advances twice in one frame.
+function mistrimulti_draw_gui(resize) {
+    var m = __mistrimulti_menu();
+    if (m[$ "tick_alive"] == true) m.tick_alive = false;
+    else {
+        if (m[$ "draw_driven"] == undefined) {
+            m.draw_driven = true;
+            try { mmapi_log_warn("mistrimulti", "Menu is driven by the draw hook (the mod tick is not running here)."); mmapi_log_flush("mistrimulti"); } catch (e) {}
+        }
+        try { mistrimulti_menu_tick(); }
+        catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
+    }
+    mistrimulti_draw_status(resize);
+}
+
 function mistrimulti_register() {
     var r = __mistrimulti_runtime();
     if (r.registered) return;
@@ -380,7 +398,7 @@ function mistrimulti_register() {
     mmapi_guard("dialogue.romance_prompt_guard", mistrimulti_romance_prompt_guard);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
-    mmapi_on("ui.draw_gui", mistrimulti_draw_status);
+    mmapi_on("ui.draw_gui", mistrimulti_draw_gui);
     mmapi_filter("local.missing", mistrimulti_local_missing);
     mistrimulti_clock_register_hooks();
     mistrimulti_guestsave_register_hooks();
@@ -393,5 +411,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.2");
+mmapi_mod_declare("mistrimulti", "0.2.3");
 mistrimulti_register();

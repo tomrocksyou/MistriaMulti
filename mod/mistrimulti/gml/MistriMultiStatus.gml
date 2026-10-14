@@ -114,13 +114,13 @@ function mistrimulti_draw_status(resize) {
         try { draw_set_font(ANCHOR.get_text_font()); } catch (e) {}
         var x = gui_w * scale - string_width(status.text) * scale - 8 * scale;
         var y = gui_h * scale - string_height(status.text) * scale - 6 * scale;
-        draw_set_color(c_white);
+        try { draw_set_color(c_white); } catch (e) {}    // missing in the game's mod runtime: plain text then
         for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
             if (dx != 0 || dy != 0) draw_text_transformed(x + dx * scale, y + dy * scale, status.text, scale, scale, 0);
         }
-        draw_set_color(mistrimulti_status_color(status.level));
+        try { draw_set_color(mistrimulti_status_color(status.level)); } catch (e) {}    // missing in the game's mod runtime: plain text then
         draw_text_transformed(x, y, status.text, scale, scale, 0);
-        draw_set_color(c_white);
+        try { draw_set_color(c_white); } catch (e) {}    // missing in the game's mod runtime: plain text then
         if (!n.drawn) { n.drawn = true; mmapi_log_info("mistrimulti", "Status badge: drawn for the first time at " + string(x) + "," + string(y) + " scale " + string(scale)); mmapi_log_flush("mistrimulti"); }
     } catch (e) {
         if (!n.warned) { n.warned = true; mmapi_log_error("mistrimulti", "Status badge failed: " + string(e)); }
