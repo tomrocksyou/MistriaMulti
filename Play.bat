@@ -1,3 +1,7 @@
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Play.ps1"
-pause
+rem Sets up multiplayer (host or join) once. Afterwards just click Play in Steam.
+if exist "%~dp0MistriMultiLauncher.exe" (
+    start "" /wait "%~dp0MistriMultiLauncher.exe" --configure
+) else (
+    start "" /wait "%~dp0build\MistriMultiLauncher.exe" --configure
+)

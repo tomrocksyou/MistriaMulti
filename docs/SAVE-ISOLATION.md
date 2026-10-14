@@ -28,8 +28,9 @@ Grounded in the game's own scripts (read-only reference, not stored in this repo
    existing UDP link); the guest's helper writes it into the guest's `mp/saves/`; the guest loads that.
    Guests therefore start from the actual host world instead of a local one. Per-player records
    (inventory, appearance...) keep using the existing host-side player store.
-4. **Safety net (done).** `scripts/SaveGuard.ps1` backs up solo saves before every launch and restores
-   guest changes afterwards, so a bug in 1-3 cannot lose solo progress.
+4. **Safety net (done).** The launcher copies the solo saves to `mod_data/mistrimulti/solo_backups/<timestamp>` before
+   every launch (newest 10 kept). It never restores or changes saves: multiplayer uses its own folder, so a rollback
+   would only destroy legitimate solo progress.
 
 ## Verified
 `probes/mmprobe_saves` on the real game (title screen, `game.title_entered`): `CONFIG_DIRECTORY` is readable and
@@ -41,14 +42,14 @@ restores cleanly.
 and `transition_to` are wrapped (via `ui.menu_opened`): New Game and Load Game first ask "Singleplayer or Multiplayer?"
 (the game's own `MultipleChoicePopup`, text supplied through `local.missing`). The choice points `CONFIG_DIRECTORY` at
 `<config>/saves` or `<config>/multiplayer/saves` and rebuilds the save list. The multiplayer runtime only starts inside the
-multiplayer space; choosing Multiplayer without the helper running (Play.bat) shows an explanatory popup.
+multiplayer space; choosing Multiplayer without the helper running shows an explanatory popup.
 Any failure restores the solo folder. Quitting to the title tears the session down.
 
 ## Known side effects / still to do
 - `settings.json` is also resolved through `CONFIG_DIRECTORY`, so settings changed during a multiplayer session are written
   to the multiplayer folder (solo settings are untouched).
 - Guest saves are still vetoed (`game.save_guard`) until the host-world transfer exists.
-- A mod cannot launch programs, so the helper is started by `SteamLaunch.cmd` (Steam launch option) or `Play.bat`.
+- A mod cannot launch programs, so the helper is started by `MistriMultiLauncher.exe --steam` (the Steam launch option).
 - If there are no solo saves the title screen has no Load Game button, so existing multiplayer worlds are unreachable until one solo save exists.
 - Untested: wrapping the title menu's methods, popup text injection, and teardown on quit-to-title.
 - Host-world transfer to guests (helper file transfer) is not built.

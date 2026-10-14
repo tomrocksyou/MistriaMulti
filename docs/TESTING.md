@@ -42,6 +42,14 @@ no staged files left), "up to date" afterwards, and the Save Solo backup into Do
 `sh scripts/build-updater.sh`. Regenerate the published file list with `sh scripts/make-release.sh` whenever the mod
 changes; CI fails when `release/latest.txt` is stale.
 
+## Launcher checks
+
+`tests/test_launcher.py` runs `MistriMultiLauncher.exe` against a fake game under Wine (or directly on Windows):
+helper start and cleanup, `control.json` lifecycle, exit code and argument pass-through, stable identity, the rolling
+solo-save backup (newest 10 kept, foreign folders untouched), every invalid-configuration fallback (the game must always
+start), `--mistrimulti-direct`, wrong executables, the `--configure` prompts, 24 fuzzed configuration files and the helper
+being stopped when the launcher is killed. Build with `sh scripts/build-launcher.sh`.
+
 ## Transport checks
 
 From the project folder on Windows:
@@ -64,7 +72,7 @@ until the test has finished.
 1. Close the game. Enable the MMAPI debug agent by adding `"debug_enabled": true`
    to `%LOCALAPPDATA%/FieldsOfMistria/mod_data/mmapi/mmapi.json`. Preserve any
    other existing settings. A new file can contain `{ "debug_enabled": true }`.
-2. Start `Play.bat` and choose host, note its room code, and enter a test world on the farm.
+2. Run `Play.bat` and choose host, note its room code, set the Steam launch option, click Play in Steam and enter a test world on the farm.
 3. Run:
 
 ```powershell
