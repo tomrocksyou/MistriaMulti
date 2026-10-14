@@ -91,9 +91,16 @@ Updates are retried every 100 ms while reliable; otherwise an identical snapshot
 sent once per second. This also heals loss of the final movement update when a player stops.
 The event layer does not change the helper's UDP protocol.
 
+## Menu bridge (`menu/cmd.txt`, `menu/status.json`)
+
+The in-game Host / Join menu talks to the launcher through two files in the same data folder as the bridge, so no network port is
+involved: the mod writes `menu/cmd.txt` (`key=value` lines: `seq`, `cmd` = host | join | scan | stop, `host`, `port`, `password`,
+`room`; the launcher deletes it after reading) and the launcher publishes `menu/status.json` (heartbeat, last `seq`, state, error
+code, addresses, scan results). `docs/SYNC-MENU.md` has the complete format, the state machine and the error codes.
+
 ## Host discovery (UDP 7776)
 
-While a host plays, the launcher (`MistriMultiLauncher.exe` on Windows, `mistrimulti-launcher` on Linux; identical wire behaviour) answers discovery queries on UDP port 7776 (the game traffic itself uses the separate
+While a host plays (never in standby: a computer that has not chosen to host does not answer), the launcher (`MistriMultiLauncher.exe` on Windows, `mistrimulti-launcher` on Linux; identical wire behaviour) answers discovery queries on UDP port 7776 (the game traffic itself uses the separate
 port from `launcher.cfg`, 7777 by default). A query is exactly 64 bytes: `MSDQ`, version byte `1`, 59 zero bytes. The reply
 is exactly 64 bytes: `MSDR`, version `1`, flags (bit 0 = the host uses a custom room code, bit 1 = it needs a room password), game port (u16 little-endian),
 computer name (32 bytes, NUL padded), 24 zero bytes. Anything else is ignored, and the reply is never larger than the

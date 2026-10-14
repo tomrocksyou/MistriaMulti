@@ -202,6 +202,24 @@ network namespace (`unshare -n`, loopback up) several can run side by side. `ONL
 Not covered: the real game on a real Steam Deck, the real Linux or Proton game's save folder, a real Steam identity probe,
 and the real Tailscale output. Those need a device.
 
+## In-game menu checks (Host a game / Join a game)
+
+Details and the in-game checklist: `docs/SYNC-MENU.md`.
+
+```sh
+python3 tests/test_menu.py                                                # GML menu + badge against a scripted fake launcher
+unshare -n sh -c '<bring lo up>; python3 tests/test_menu.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux'
+python3 tests/test_launcher_linux.py ...   # test_menu_*: standby, host/stop, scan and join, failures, command validation
+python3 tests/test_launcher.py ...         # test_menu_*: the same for the Windows launcher under Wine
+```
+
+What the first one proves: every screen of the flow in order, input validation (addresses, rooms, passwords, injected lines),
+plain-words errors for every code, Cancel / Escape / silent launcher / stuck download, a hostile `status.json`, the badge's
+states, fallbacks and watchdog, and that popup or file failures reset the flow without an exception reaching the game. The second
+adds the real Linux launcher, helper and a real host. What none of them prove: how the game draws and closes the popups, whether
+`text_input_popup` and the localiser behave as read from the scripts, and the Windows launcher on real Windows (Wine only).
+Run the tests that open ports inside `unshare -n` (private network namespace, `lo` up), as `runall.sh` does.
+
 ## Linux installer checks
 
 `tests/test_install_linux.py` runs `install.sh` against a throwaway `HOME` containing a fake Steam tree (a symlinked
@@ -284,7 +302,7 @@ until the test has finished.
 1. Close the game. Enable the MMAPI debug agent by adding `"debug_enabled": true`
    to `%LOCALAPPDATA%/FieldsOfMistria/mod_data/mmapi/mmapi.json`. Preserve any
    other existing settings. A new file can contain `{ "debug_enabled": true }`.
-2. Run `Play.bat` and choose host, note its room code, set the Steam launch option, click Play in Steam and enter a test world on the farm.
+2. Set the Steam launch option once (`docs/SYNC-MENU.md`), click Play in Steam, choose New Game, Multiplayer, Host a game, Start hosting, Start playing, and enter a test world on the farm. The room code is the default `4d495354` unless you started the host from an older `launcher.cfg` with another one.
 3. Run:
 
 ```powershell

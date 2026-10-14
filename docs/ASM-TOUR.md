@@ -42,6 +42,14 @@ same routine convention (`abi.inc`) over raw syscalls. The pieces:
   to fit in three temporary registers.
 - `linux/net.inc`: the world download client, interface and Tailscale scan, discovery query.
 
+## The in-game menu supervisor
+
+`linux/menu.inc` and `launcher/menu.inc` (Windows twin) are the part of the launchers that answers the game's Host / Join menu
+(`docs/SYNC-MENU.md`). Read `sv_poll` first: it runs about four times a second from the launcher's game-waiting loop
+(`disc_serve`), reads and deletes `menu/cmd.txt` (`sv_read_cmd`), validates it (`sv_valid_common`, `v_ipv4`) and calls `sv_host`,
+`sv_join`, `sv_scan_now` or `sess_stop`; `sv_join_step` watches the helper's own `status.json` for the host's WELCOME and then
+downloads the world; `sv_status_write` publishes `menu/status.json`. Standby is `menu_init`: it opens nothing.
+
 ## Memory and performance
 
 `helper/steam_windows.asm` and `helper/steam_linux.asm` load the installed game's

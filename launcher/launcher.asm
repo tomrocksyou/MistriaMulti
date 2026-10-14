@@ -78,6 +78,7 @@ room_default db '4d495354',0
 host_s_dummy db 0
 a_host_s db 'host',0
 a_join_s db 'join',0
+a_idle_s db 'idle',0
 needle_local db '"uid":"local:'
 needle_local_len equ $ - needle_local
 hexdigits db '0123456789abcdef'
@@ -91,6 +92,7 @@ f_auth_key db 'key=%s\install.key',13,10,0
 f_auth_keys db 'keys=%s\trust_keys.txt',13,10,0
 f_auth_deny db 'deny=%s\deny.txt',13,10,0
 f_auth_pass db 'pass=%s',13,10,0
+t_optional db 'Optional setup: you can skip it. Start the game from Steam and choose Multiplayer, then Host a game or Join a game, in the game itself.',13,10,'This pre-sets a role (saved in launcher.cfg) that starts by itself.',13,10,13,10,0
 t_stop db 'stop'
 t_stop_len equ $ - t_stop
 p_mode db 'Host a game (H) or join a friend (J)? ',0
@@ -112,6 +114,7 @@ name_table dq n_stop, n_status, n_txframe, n_txtmp, n_pid
 align 8
 
 section .bss
+sv_serving resd 1
 tcp_sock resq 1
 ws_name resb 80
 ws_tmp resb 80
@@ -190,6 +193,7 @@ section .text
 global start
 %include "winutil.inc"
 %include "world.inc"
+%include "menu.inc"
 
 
 
@@ -682,6 +686,9 @@ FN write_control
     cmp dword [cfg_mode], 1
     je .m
     lea r9, [a_join_s]
+    cmp dword [cfg_mode], 2
+    je .m
+    lea r9, [a_idle_s]
 .m: mov eax, [cfg_player]
     mov [rsp+32], rax
     lea rax, [uid_a]
@@ -1148,6 +1155,11 @@ FN stop_helper
     mov rcx, [h_helper]
     call CloseHandle
     mov qword [h_helper], 0
+    mov rcx, [h_job]                ; the job only exists to end a helper that outlives the launcher
+    test rcx, rcx
+    jz .d
+    call CloseHandle
+    mov qword [h_job], 0
 .d:
 END_FN
 
@@ -1422,6 +1434,15 @@ END_FN
 FN disc_serve
     mov r12, rcx
 .loop:
+    cmp qword [disc_sock], 0
+    jne .have
+    cmp qword [tcp_sock], 0
+    jne .have
+    mov rcx, r12                        ; standby or joined: nothing listens, so just wait a moment for the game to end
+    mov edx, 250
+    call WaitForSingleObject
+    jmp .check
+.have:
     mov rax, [disc_sock]
     mov [disc_pfds], rax
     mov word [disc_pfds+8], 0x0100      ; POLLRDNORM
@@ -1472,19 +1493,13 @@ FN disc_serve
     mov [rsp+40], rax
     call sendto
 .check:
+    call sv_poll                        ; commands from the in-game menu (launcher/menu.inc)
     mov rcx, r12
     xor edx, edx
     call WaitForSingleObject
     test eax, eax
     jnz .loop
-    mov rcx, [disc_sock]
-    call closesocket
-    mov qword [disc_sock], 0
-    mov rcx, [tcp_sock]
-    test rcx, rcx
-    jz .d
-    call closesocket
-    mov qword [tcp_sock], 0
+    call disc_stop
 .d:
 END_FN
 
@@ -1516,15 +1531,15 @@ FN launch_game
     test rax, rax
     jz .d
     mov rbx, rax
-    cmp qword [disc_sock], 0
-    je .plainwait
-    mov rcx, rbx
-    call disc_serve
-    jmp .waited
-.plainwait:
+    cmp dword [sv_serving], 0           ; the plain no-multiplayer start just waits for the game
+    jne .serve
     mov rcx, rbx
     mov edx, -1
     call WaitForSingleObject
+    jmp .waited
+.serve:
+    mov rcx, rbx
+    call disc_serve
 .waited:
     mov rcx, rbx
     lea rdx, [game_exit]
@@ -1662,6 +1677,8 @@ configure_main:
     jnz .keeppass
     mov byte [a_pass], 0
 .keeppass:
+    lea rcx, [t_optional]
+    call say
     mov eax, [cfg_mode]
     mov [old_mode], eax
     mov eax, [cfg_player]
@@ -2067,12 +2084,24 @@ start:
     test r12d, r12d
     jz .direct
     call load_config
-    lea rbx, [r_config]
-    test eax, eax
-    jz .direct
+    mov [sv_legacy], eax              ; 1: a valid launcher.cfg (optional, advanced): that role starts by itself, as before
     call get_uid
     lea rcx, [epoch_a]
     call guid_hex
+    cmp dword [sv_legacy], 0
+    jne .legacy
+    ; No launcher.cfg: standby. Nothing is hosted or joined and no port opens; the in-game Multiplayer menu decides.
+    lea rbx, [r_control]
+    call menu_init
+    test eax, eax
+    jz .direct
+    lea rax, [r_standby]
+    mov [reason], rax
+    call log_reason
+    call backup_saves
+    jmp .run
+.legacy:
+    call menu_prepare
     call prepare_bridge
     call write_auth
     lea rbx, [r_auth]
@@ -2089,18 +2118,31 @@ start:
     call backup_saves
     call start_helper
     test eax, eax
-    jnz .run
+    jnz .legacy_up
     xor ecx, ecx
     call write_control
     lea rbx, [r_helper]
     jmp .direct
-.run:
+.legacy_up:
+    mov eax, [cfg_mode]
+    mov [sv_session], eax
     call join_refresh_world
     call disc_start
+    mov ecx, ST_READY
+    cmp dword [cfg_mode], 1
+    jne .legacy_state
+    call sv_collect_addrs
+    mov ecx, ST_HOSTING
+.legacy_state:
+    xor edx, edx
+    call sv_set
+.run:
+    mov dword [sv_serving], 1
     call launch_game
-    call stop_helper
-    xor ecx, ecx
-    call write_control
+    call sess_stop
+    mov ecx, ST_STOPPED
+    xor edx, edx
+    call sv_set
     mov ecx, [game_exit]
     call ExitProcess
 .direct:

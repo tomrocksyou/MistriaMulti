@@ -57,7 +57,7 @@ if ($Target -in @('Windows','Both')) {
     if ($LASTEXITCODE -ne 0) { throw 'Updater linking failed.' }
     Write-Host 'Windows updater built.'
     $taskLauncherObject = Join-Path $taskBuildRoot 'launcher-win.obj'
-    & $taskNasm -f win64 @taskDebugFlags -I $taskIncludes -I ((Join-Path $taskProjectRoot 'common').Replace('\','/') + '/') (Join-Path $taskProjectRoot 'launcher\launcher.asm') -o $taskLauncherObject
+    & $taskNasm -f win64 @taskDebugFlags -I $taskIncludes -I ((Join-Path $taskProjectRoot 'common').Replace('\','/') + '/') -I ((Join-Path $taskProjectRoot 'launcher').Replace('\','/') + '/') (Join-Path $taskProjectRoot 'launcher\launcher.asm') -o $taskLauncherObject
     if ($LASTEXITCODE -ne 0) { throw 'Launcher assembly failed.' }
     $taskLauncherExe = Join-Path $taskBuildRoot 'MistriMultiLauncher.exe'
     $taskLauncherArgs = @('/nologo','/machine:x64','/subsystem:windows','/entry:start','/nodefaultlib','/incremental:no',
