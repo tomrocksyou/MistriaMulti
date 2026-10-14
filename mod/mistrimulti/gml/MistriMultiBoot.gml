@@ -82,7 +82,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.3 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.4 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -114,8 +114,6 @@ function mistrimulti_tick() {
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
     // The Host / Join menu and the badge's watchdog work on the title screen too, before any multiplayer world exists.
-    // In the real game this tick does not run on the title screen; mistrimulti_draw_gui drives the menu there.
-    __mistrimulti_menu().tick_alive = true;
     try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); }
     catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
     // Multiplayer starts only after the player picked the multiplayer save space.
@@ -360,19 +358,19 @@ function mistrimulti_debug_inspect() {
         object_kind: string(global.__mistrimulti_peer_object) };
 }
 
-// ui.draw_gui fires every frame, also on the title screen where mistrimulti_tick does not run. It moves the menu along
-// whenever the tick did not run since the last draw, so the menu never advances twice in one frame.
+// The game's mod runtime calls a function given to mmapi_register as a one-off installer, not every frame (in the real
+// game mistrimulti_tick never ran that way, on the title screen or in a world). ui.draw_gui does fire every frame, on the
+// title screen and in a world, so it drives the whole mod: menu, startup, character and every sync feature.
+function mistrimulti_installer() {
+    var r = __mistrimulti_runtime();
+    if (r[$ "installer_seen"] != undefined) return;
+    r.installer_seen = true;
+    try { mmapi_log_info("mistrimulti", "Installer called (the mod runs from the draw hook)."); mmapi_log_flush("mistrimulti"); } catch (e) {}
+}
+
 function mistrimulti_draw_gui(resize) {
-    var m = __mistrimulti_menu();
-    if (m[$ "tick_alive"] == true) m.tick_alive = false;
-    else {
-        if (m[$ "draw_driven"] == undefined) {
-            m.draw_driven = true;
-            try { mmapi_log_warn("mistrimulti", "Menu is driven by the draw hook (the mod tick is not running here)."); mmapi_log_flush("mistrimulti"); } catch (e) {}
-        }
-        try { mistrimulti_menu_tick(); }
-        catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
-    }
+    try { mistrimulti_tick(); }
+    catch (e) { mmapi_warn_rate_limited("mistrimulti_tick", "mistrimulti", "Mod tick failed: " + string(e)); }
     mistrimulti_draw_status(resize);
 }
 
@@ -380,7 +378,7 @@ function mistrimulti_register() {
     var r = __mistrimulti_runtime();
     if (r.registered) return;
     r.registered = true;
-    mmapi_register(mistrimulti_tick);
+    mmapi_register(mistrimulti_installer);
     mmapi_filter("tool.targets", mistrimulti_tool_targets);
     mistrimulti_farm_register_hooks();
     mmapi_guard("game.save_guard", mistrimulti_save_guard);
@@ -411,5 +409,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.3");
+mmapi_mod_declare("mistrimulti", "0.2.4");
 mistrimulti_register();

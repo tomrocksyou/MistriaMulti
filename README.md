@@ -5,7 +5,7 @@ The Windows helper calls Win32/Winsock; the Linux helper, launcher and manager u
 them needs Python, .NET, Rust, a paid server, or a third-party multiplayer relay at runtime.
 GML and MOMI/MMAPI provide the supported connection to the game.
 
-## Current version: 0.2.3 experimental
+## Current version: 0.2.4 experimental
 
 0.2.0 replaces the one-at-a-time event queue with the event layer (`docs/EVENT-LAYER.md`). Every player
 must run the same version; 0.1.0 and 0.2.0 games do not see each other's updates.
