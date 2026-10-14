@@ -34,6 +34,8 @@ Implemented:
   money, skill XP, perks, spells, friendship points and relationship status.
 - Guests load their hosted-world record on reconnect. New guests start with the game's
   starter inventory and customize their character before publishing progress.
+- Host-owned chests, items on the ground and F9 gifts that never duplicate or lose items; shipping bins stay per
+  player (`docs/SYNC-CONTAINERS.md`, experimental and not yet run in the game).
 - F8 displays connection status in game.
 
 This is not feature-complete co-op. Crops/harvests, shared containers and item transfers,
