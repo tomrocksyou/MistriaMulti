@@ -1,0 +1,1266 @@
+; MistriMulti updater: a plain Win32 window written in NASM. No C runtime.
+; Shows the installed and latest version, updates the mod files, and backs up solo saves.
+bits 64
+default rel
+%define WINDOWS 1
+%include "abi.inc"
+
+%macro WSTR 2
+%1: dw __utf16__(%2), 0
+%endmacro
+
+extern GetModuleHandleW, ExitProcess, GetCommandLineW, LocalFree, GetFileAttributesW, CreateFileW, ReadFile, CloseHandle
+extern CommandLineToArgvW
+extern RegisterClassExW, CreateWindowExW, DefWindowProcW, ShowWindow, UpdateWindow, GetMessageW, TranslateMessage
+extern DispatchMessageW, PostQuitMessage, SendMessageW, SetWindowTextW, LoadCursorW, wsprintfW
+extern GetStockObject, GetEnvironmentVariableW, CreateDirectoryW, CopyFileW, DeleteFileW, MoveFileExW, WriteFile
+extern FindFirstFileW, FindNextFileW, FindClose, GetLocalTime, lstrlenW
+extern SHGetKnownFolderPath, CoTaskMemFree
+extern WinHttpOpen, WinHttpConnect, WinHttpOpenRequest, WinHttpSendRequest, WinHttpReceiveResponse
+extern WinHttpQueryHeaders, WinHttpReadData, WinHttpCloseHandle
+extern BCryptOpenAlgorithmProvider, BCryptHash, BCryptCloseAlgorithmProvider
+
+section .data
+WSTR cls_name, "MistriMultiUpdater"
+WSTR cls_static, "STATIC"
+WSTR cls_button, "BUTTON"
+WSTR title, "MistriMulti Updater"
+WSTR txt_check, "Check for updates"
+WSTR txt_update, "Update"
+WSTR txt_save, "Save Solo"
+WSTR txt_close, "Close"
+WSTR txt_start, "Looking for the game..."
+fmt_game_missing: dw __utf16__(`Fields of Mistria was not found.\r\n\r\nPass the game folder as the first argument, or install the game through Steam.`), 0
+fmt_status: dw __utf16__(`Game folder:\r\n%s\r\n\r\nMod installed:   %s\r\nLatest version:  %s\r\n\r\n%s`), 0
+WSTR msg_unknown, "Press Check for updates."
+WSTR msg_uptodate, "You are up to date."
+WSTR msg_available, "An update is available. Press Update."
+WSTR msg_notinstalled, "Not installed yet. Press Update to install."
+WSTR msg_offline, "Could not reach the update server (is the repository public yet?)."
+WSTR msg_badlist, "The update list is not valid."
+WSTR msg_hash, "A downloaded file failed its checksum. Nothing was changed."
+WSTR msg_dlfail, "A download failed. Nothing was changed."
+WSTR msg_needcheck, "Check for updates first."
+WSTR msg_writefail, "Could not write a file into the game folder."
+fmt_done: dw __utf16__(`Updated to %s.\r\n\r\nNow open Mods of Mistria and click Install, then start the game.`), 0
+fmt_saved: dw __utf16__(`Saved %d file(s) to:\r\n%s`), 0
+WSTR msg_nosaves, "No solo saves were found to back up."
+WSTR msg_nodocs, "Could not find your Documents folder."
+WSTR env_local, "LOCALAPPDATA"
+WSTR env_saves, "MISTRIMULTI_SAVES_DIR"
+WSTR env_docs, "MISTRIMULTI_DOCS_DIR"
+WSTR suffix_saves, "\FieldsOfMistria\saves"
+WSTR suffix_backups, "\MistriMulti Backups"
+WSTR fmt_stamp, "\%04d%02d%02d-%02d%02d%02d"
+WSTR fmt_star, "%s\*"
+WSTR fmt_slash, "%s\%s"
+WSTR fmt_url, "%s/%s"
+WSTR fmt_mods, "%s\mods\%s"
+WSTR fmt_new, "%s.new"
+WSTR fmt_ver_line, "%S"
+WSTR ua, "MistriMultiUpdater"
+WSTR verb_get, "GET"
+WSTR alg_sha256, "SHA256"
+WSTR def_host, "raw.githubusercontent.com"
+WSTR def_prefix, "/tomrocksyou/MistriaMulti/main"
+WSTR latest_path, "release/latest.txt"
+WSTR txt_none, "not installed"
+WSTR txt_unknown, "(press Check for updates)"
+WSTR suffix_maybe, "\Maybe.toml"
+WSTR suffix_manifest, "\mods\mistrimulti\manifest.toml"
+WSTR cand_1, ":\SteamLibrary\steamapps\common\Fields of Mistria"
+WSTR cand_2, ":\Steam\steamapps\common\Fields of Mistria"
+WSTR cand_3, ":\Program Files (x86)\Steam\steamapps\common\Fields of Mistria"
+WSTR cand_4, ":\Program Files\Steam\steamapps\common\Fields of Mistria"
+WSTR fmt_cand, "%c%s"
+WSTR fmt_cat, "%s%s"
+needle_version db 'version = "'
+needle_version_len equ $ - needle_version
+WSTR txt_unavail, "unavailable"
+needle_ver2 db 'version '
+needle_dotdot db '..'
+needle_modslash db 'mod/'
+hexdigits db '0123456789abcdef'
+align 4
+guid_docs dd 0xFDD39AD0
+    dw 0x238F, 0x46AF
+    db 0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7
+align 8
+cand_table dq cand_1, cand_2, cand_3, cand_4
+
+section .bss
+h_inst resq 1
+h_wnd resq 1
+h_status resq 1
+h_btn_update resq 1
+h_font resq 1
+argc resd 1
+argv resq 1
+msg resb 64
+wc resb 80
+game_dir resw 520
+path_tmp resw 1040
+status_text resw 2048
+installed_ver resw 40
+latest_ver resw 40
+file_buf resb 8192
+http_buf resb 262144
+manifest_buf resb 16384
+http_len resq 1
+manifest_len resq 1
+status_code resd 1
+q_len resd 1
+srv_host resq 1
+srv_prefix resq 1
+srv_port resd 1
+srv_secure resd 1
+state_msg resq 1
+digest resb 32
+hexout resb 72
+wpath1 resw 1040
+wpath2 resw 1040
+wpath3 resw 1040
+wurl resw 1040
+fd resb 600
+st resb 16
+hAlg resq 1
+mcur resq 1
+m_hex resq 1
+m_path resq 1
+m_pathlen resq 1
+tmp_ptr resq 1
+done_msg resw 1024
+copied resd 1
+
+section .text
+global start
+
+; rcx = wide string, rdx = out buffer (wide)  -> copy zero-terminated wide string
+FN wcopy
+    mov rsi, rcx
+    mov rdi, rdx
+.l: lodsw
+    stosw
+    test ax, ax
+    jnz .l
+END_FN
+
+; returns rax = pointer to first occurrence of needle in hay, or 0. rcx=hay, rdx=hay_len, r8=needle, r9=needle_len
+FN find_bytes
+    mov rsi, rcx
+    mov rbx, rdx
+    sub rbx, r9
+    jb .none
+    xor r10, r10
+.outer:
+    cmp r10, rbx
+    ja .none
+    xor r11, r11
+.inner:
+    cmp r11, r9
+    je .found
+    lea rax, [rsi+r10]
+    mov al, [rax+r11]
+    cmp al, [r8+r11]
+    jne .next
+    inc r11
+    jmp .inner
+.next:
+    inc r10
+    jmp .outer
+.found:
+    lea rax, [rsi+r10]
+    jmp .done
+.none:
+    xor eax, eax
+.done:
+END_FN
+
+; Does file (wide path in rcx) exist? rax = 1/0
+FN file_exists
+    call GetFileAttributesW
+    cmp eax, -1
+    setne al
+    movzx eax, al
+END_FN
+
+; Looks for Fields of Mistria; fills game_dir. rax=1 found / 0 not found
+; Tries argv[1], then drive letters C..Z against the usual Steam library locations.
+FN find_game
+    cmp dword [argc], 2
+    jb .search
+    mov rax, [argv]
+    mov rcx, [rax+8]
+    lea rdx, [game_dir]
+    call wcopy
+    lea rcx, [game_dir]
+    lea rdx, [suffix_maybe]
+    lea r8, [path_tmp]
+    call join_wide
+    lea rcx, [path_tmp]
+    call file_exists
+    jmp .finish
+.search:
+    mov r12d, 'C'
+.drive:
+    xor r13d, r13d
+.cand:
+    ; game_dir = X + candidate
+    lea rcx, [game_dir]
+    lea rdx, [fmt_cand]
+    mov r8d, r12d
+    lea rax, [cand_table]
+    mov r9, [rax+r13*8]
+    call wsprintfW
+    lea rcx, [game_dir]
+    lea rdx, [suffix_maybe]
+    lea r8, [path_tmp]
+    call join_wide
+    lea rcx, [path_tmp]
+    call file_exists
+    test eax, eax
+    jnz .finish
+    inc r13d
+    cmp r13d, 4
+    jb .cand
+    inc r12d
+    cmp r12d, 'Z'
+    jbe .drive
+    xor eax, eax
+.finish:
+END_FN
+
+; r8 = out = wide(rcx) + wide(rdx)
+FN join_wide
+    mov r12, r8
+    mov r13, rdx
+    mov rdx, r12
+    call wcopy               ; out = first
+    mov rdi, r12
+.find_end:
+    cmp word [rdi], 0
+    je .at_end
+    add rdi, 2
+    jmp .find_end
+.at_end:
+    mov rsi, r13
+.cp: lodsw
+    stosw
+    test ax, ax
+    jnz .cp
+END_FN
+
+; Reads the installed mod version into installed_ver ("not installed" when missing).
+FN read_installed
+    lea rcx, [txt_none]
+    lea rdx, [installed_ver]
+    call wcopy
+    lea rcx, [game_dir]
+    lea rdx, [suffix_manifest]
+    lea r8, [path_tmp]
+    call join_wide
+    lea rcx, [path_tmp]
+    mov edx, 0x80000000        ; GENERIC_READ
+    mov r8d, 1                 ; FILE_SHARE_READ
+    xor r9d, r9d
+    mov qword [rsp+32], 3      ; OPEN_EXISTING
+    mov qword [rsp+40], 0x80
+    mov qword [rsp+48], 0
+    call CreateFileW
+    cmp rax, -1
+    je .done
+    mov rbx, rax
+    mov rcx, rbx
+    lea rdx, [file_buf]
+    mov r8d, 8000
+    lea r9, [rsp+64]
+    mov qword [rsp+32], 0
+    call ReadFile
+    mov rcx, rbx
+    call CloseHandle
+    mov edx, [rsp+64]          ; bytes read
+    lea rcx, [file_buf]
+    lea r8, [needle_version]
+    mov r9d, needle_version_len
+    call find_bytes
+    test rax, rax
+    jz .done
+    lea rsi, [rax+needle_version_len]
+    lea rdi, [installed_ver]
+    xor ecx, ecx
+.v: movzx eax, byte [rsi]
+    cmp al, '"'
+    je .vend
+    test al, al
+    jz .vend
+    mov [rdi+rcx*2], ax
+    inc rsi
+    inc ecx
+    cmp ecx, 30
+    jb .v
+.vend:
+    mov word [rdi+rcx*2], 0
+.done:
+END_FN
+
+FN show_status
+    lea rcx, [status_text]
+    lea rdx, [fmt_status]
+    lea r8, [game_dir]
+    lea r9, [installed_ver]
+    lea rax, [latest_ver]
+    mov [rsp+32], rax
+    mov rax, [state_msg]
+    mov [rsp+40], rax
+    call wsprintfW
+    mov rcx, [h_status]
+    lea rdx, [status_text]
+    call SetWindowTextW
+END_FN
+
+; rcx = wide message to show under the versions
+FN set_state
+    mov [state_msg], rcx
+    call show_status
+END_FN
+
+; Creates a child control. rcx=class rdx=text r8d=style r9d=x ; stack: y,w,h,id (our own convention: r12..r15 preset)
+FN make_child
+    ; in: rcx class, rdx text, r8 style, r9 x, r12 y, r13 w, r14 h, r15 id
+    ; CreateWindowExW(ex, class, text, style, x, y, w, h, parent, menu, inst, param)
+    mov r10, r8                ; style
+    mov r8, rdx                ; text -> 3rd arg
+    mov rdx, rcx               ; class -> 2nd arg
+    xor ecx, ecx               ; ex style -> 1st arg
+    mov r11, r9                ; x
+    mov r9, r10                ; style -> 4th arg
+    mov [rsp+32], r11          ; x
+    mov [rsp+40], r12          ; y
+    mov [rsp+48], r13          ; w
+    mov [rsp+56], r14          ; h
+    mov rax, [h_wnd]
+    mov [rsp+64], rax          ; parent
+    mov [rsp+72], r15          ; control id as menu
+    mov rax, [h_inst]
+    mov [rsp+80], rax
+    mov qword [rsp+88], 0
+    call CreateWindowExW
+    mov rbx, rax
+    mov rcx, rbx
+    mov edx, 0x30              ; WM_SETFONT
+    mov r8, [h_font]
+    mov r9d, 1
+    call SendMessageW
+    mov rax, rbx
+END_FN
+
+; ---------- small helpers ----------
+FN w2i                      ; rcx wide decimal -> eax
+    xor eax, eax
+.l: movzx edx, word [rcx]
+    sub edx, '0'
+    cmp edx, 9
+    ja .d
+    imul eax, eax, 10
+    add eax, edx
+    add rcx, 2
+    jmp .l
+.d:
+END_FN
+
+FN wequal                   ; rcx, rdx wide strings -> eax 1 if equal
+.l: mov ax, [rcx]
+    cmp ax, [rdx]
+    jne .no
+    test ax, ax
+    jz .yes
+    add rcx, 2
+    add rdx, 2
+    jmp .l
+.yes:
+    mov eax, 1
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN ascii_to_wide            ; rcx dst wide, rdx src bytes, r8 count
+    xor r9d, r9d
+.l: cmp r9, r8
+    jae .e
+    movzx eax, byte [rdx+r9]
+    mov [rcx+r9*2], ax
+    inc r9
+    jmp .l
+.e: mov word [rcx+r9*2], 0
+END_FN
+
+; creates every missing directory in the wide path rcx (the file name itself is not created)
+FN ensure_dirs
+    mov rsi, rcx
+    mov r12d, 3
+.l: movzx eax, word [rsi+r12*2]
+    test ax, ax
+    jz .d
+    cmp ax, '\'
+    jne .n
+    mov word [rsi+r12*2], 0
+    mov rcx, rsi
+    xor edx, edx
+    call CreateDirectoryW
+    mov word [rsi+r12*2], '\'
+.n: inc r12d
+    jmp .l
+.d:
+END_FN
+
+FN write_file               ; rcx path, rdx data, r8 length -> eax 1 ok
+    mov r12, rdx
+    mov r13, r8
+    mov edx, 0x40000000     ; GENERIC_WRITE
+    xor r8d, r8d
+    xor r9d, r9d
+    mov qword [rsp+32], 2   ; CREATE_ALWAYS
+    mov qword [rsp+40], 0x80
+    mov qword [rsp+48], 0
+    call CreateFileW
+    cmp rax, -1
+    je .fail
+    mov rbx, rax
+    mov rcx, rbx
+    mov rdx, r12
+    mov r8, r13
+    lea r9, [q_len]
+    mov qword [rsp+32], 0
+    call WriteFile
+    mov r14d, eax
+    mov rcx, rbx
+    call CloseHandle
+    test r14d, r14d
+    jz .fail
+    mov eax, [q_len]
+    cmp rax, r13
+    jne .fail
+    mov eax, 1
+    jmp .d
+.fail:
+    xor eax, eax
+.d:
+END_FN
+
+; ---------- network ----------
+; rcx host (wide), rdx path (wide). Uses srv_port / srv_secure. eax=1 ok, body in http_buf, length in http_len
+FN http_get
+    mov r12, rcx
+    mov r13, rdx
+    mov qword [http_len], 0
+    xor ebx, ebx
+    xor esi, esi
+    xor edi, edi
+    lea rcx, [ua]
+    xor edx, edx
+    xor r8d, r8d
+    xor r9d, r9d
+    mov qword [rsp+32], 0
+    call WinHttpOpen
+    test rax, rax
+    jz .fail
+    mov rbx, rax
+    mov rcx, rbx
+    mov rdx, r12
+    mov r8d, [srv_port]
+    xor r9d, r9d
+    call WinHttpConnect
+    test rax, rax
+    jz .fail
+    mov rsi, rax
+    mov rcx, rsi
+    lea rdx, [verb_get]
+    mov r8, r13
+    xor r9d, r9d
+    mov qword [rsp+32], 0
+    mov qword [rsp+40], 0
+    xor eax, eax
+    cmp dword [srv_secure], 0
+    je .ns
+    mov eax, 0x800000       ; WINHTTP_FLAG_SECURE
+.ns:
+    mov [rsp+48], rax
+    call WinHttpOpenRequest
+    test rax, rax
+    jz .fail
+    mov rdi, rax
+    mov rcx, rdi
+    xor edx, edx
+    xor r8d, r8d
+    xor r9d, r9d
+    mov qword [rsp+32], 0
+    mov qword [rsp+40], 0
+    mov qword [rsp+48], 0
+    call WinHttpSendRequest
+    test eax, eax
+    jz .fail
+    mov rcx, rdi
+    xor edx, edx
+    call WinHttpReceiveResponse
+    test eax, eax
+    jz .fail
+    mov dword [q_len], 4
+    mov dword [status_code], 0
+    mov rcx, rdi
+    mov edx, 0x20000013     ; STATUS_CODE | FLAG_NUMBER
+    xor r8d, r8d
+    lea r9, [status_code]
+    lea rax, [q_len]
+    mov [rsp+32], rax
+    mov qword [rsp+40], 0
+    call WinHttpQueryHeaders
+    cmp dword [status_code], 200
+    jne .fail
+    xor r14d, r14d
+.read:
+    mov eax, 262140
+    sub eax, r14d
+    jbe .ok
+    cmp eax, 8192
+    jbe .sz
+    mov eax, 8192
+.sz:
+    mov rcx, rdi
+    lea rdx, [http_buf]
+    add rdx, r14
+    mov r8d, eax
+    lea r9, [q_len]
+    call WinHttpReadData
+    test eax, eax
+    jz .fail
+    mov eax, [q_len]
+    test eax, eax
+    jz .ok
+    add r14d, eax
+    jmp .read
+.ok:
+    mov [http_len], r14
+    lea rax, [http_buf]
+    mov byte [rax+r14], 0
+    mov r15d, 1
+    jmp .close
+.fail:
+    xor r15d, r15d
+.close:
+    test rdi, rdi
+    jz .c1
+    mov rcx, rdi
+    call WinHttpCloseHandle
+.c1:
+    test rsi, rsi
+    jz .c2
+    mov rcx, rsi
+    call WinHttpCloseHandle
+.c2:
+    test rbx, rbx
+    jz .c3
+    mov rcx, rbx
+    call WinHttpCloseHandle
+.c3:
+    mov eax, r15d
+END_FN
+
+; rcx data, rdx length -> lowercase hex of SHA-256 in hexout (64 chars + 0). eax=1 ok
+FN sha256_hex
+    mov r12, rcx
+    mov r13, rdx
+    lea rcx, [hAlg]
+    lea rdx, [alg_sha256]
+    xor r8d, r8d
+    xor r9d, r9d
+    call BCryptOpenAlgorithmProvider
+    test eax, eax
+    jnz .fail
+    mov rcx, [hAlg]
+    xor edx, edx
+    xor r8d, r8d
+    mov r9, r12
+    mov [rsp+32], r13
+    lea rax, [digest]
+    mov [rsp+40], rax
+    mov qword [rsp+48], 32
+    call BCryptHash
+    mov ebx, eax
+    mov rcx, [hAlg]
+    xor edx, edx
+    call BCryptCloseAlgorithmProvider
+    test ebx, ebx
+    jnz .fail
+    lea rsi, [digest]
+    lea rdi, [hexout]
+    lea r8, [hexdigits]
+    xor ecx, ecx
+.h: movzx eax, byte [rsi+rcx]
+    mov edx, eax
+    shr edx, 4
+    and eax, 15
+    mov dl, [r8+rdx]
+    mov [rdi], dl
+    mov al, [r8+rax]
+    mov [rdi+1], al
+    add rdi, 2
+    inc ecx
+    cmp ecx, 32
+    jb .h
+    mov byte [rdi], 0
+    mov eax, 1
+    jmp .d
+.fail:
+    xor eax, eax
+.d:
+END_FN
+
+; ---------- update list ----------
+; Walks manifest_buf: sets m_hex, m_path, m_pathlen for the next "<64 hex> <path>" line. eax=1 / 0 at end
+FN manifest_next
+    mov rsi, [mcur]
+    lea r8, [manifest_buf]
+    add r8, [manifest_len]
+.line:
+    cmp rsi, r8
+    jae .none
+    mov rdi, rsi
+.eol:
+    cmp rdi, r8
+    jae .e
+    cmp byte [rdi], 10
+    je .e
+    inc rdi
+    jmp .eol
+.e: mov rax, rdi
+    sub rax, rsi
+    cmp rax, 66
+    jb .skip
+    cmp byte [rsi+64], ' '
+    jne .skip
+    mov [m_hex], rsi
+    lea rax, [rsi+65]
+    mov [m_path], rax
+    mov rdx, rdi
+    cmp byte [rdx-1], 13
+    jne .t
+    dec rdx
+.t: sub rdx, rax
+    mov [m_pathlen], rdx
+    lea rax, [rdi+1]
+    mov [mcur], rax
+    mov eax, 1
+    jmp .done
+.skip:
+    lea rsi, [rdi+1]
+    jmp .line
+.none:
+    mov [mcur], r8
+    xor eax, eax
+.done:
+END_FN
+
+; Builds, for the current manifest entry: wurl (download path), wpath1 (final file), wpath2 (staged .new file).
+; eax=1 ok, 0 if the path is not a safe "mod/..." path.
+FN entry_paths
+    cmp qword [m_pathlen], 5
+    jb .bad
+    cmp qword [m_pathlen], 300
+    ja .bad
+    mov rax, [m_path]
+    mov eax, [rax]
+    cmp eax, 'mod/'
+    jne .bad
+    mov rcx, [m_path]
+    mov rdx, [m_pathlen]
+    lea r8, [needle_dotdot]
+    mov r9d, 2
+    call find_bytes
+    test rax, rax
+    jnz .bad
+    lea rcx, [wpath3]
+    mov rdx, [m_path]
+    mov r8, [m_pathlen]
+    call ascii_to_wide
+    lea rcx, [wurl]
+    lea rdx, [fmt_url]
+    mov r8, [srv_prefix]
+    lea r9, [wpath3]
+    call wsprintfW
+    lea rsi, [wpath3+8]            ; skip "mod/"
+.sl:
+    movzx eax, word [rsi]
+    test ax, ax
+    jz .sd
+    cmp ax, '/'
+    jne .sn
+    mov word [rsi], '\'
+.sn:
+    add rsi, 2
+    jmp .sl
+.sd:
+    lea rcx, [wpath1]
+    lea rdx, [fmt_mods]
+    lea r8, [game_dir]
+    lea r9, [wpath3+8]
+    call wsprintfW
+    lea rcx, [wpath2]
+    lea rdx, [fmt_new]
+    lea r8, [wpath1]
+    call wsprintfW
+    mov eax, 1
+    jmp .done
+.bad:
+    xor eax, eax
+.done:
+END_FN
+
+FN cleanup_staged
+    lea rax, [manifest_buf]
+    mov [mcur], rax
+.l: call manifest_next
+    test eax, eax
+    jz .d
+    call entry_paths
+    test eax, eax
+    jz .l
+    lea rcx, [wpath2]
+    call DeleteFileW
+    jmp .l
+.d:
+END_FN
+
+FN do_check
+    mov qword [manifest_len], 0
+    lea rcx, [wurl]
+    lea rdx, [fmt_url]
+    mov r8, [srv_prefix]
+    lea r9, [latest_path]
+    call wsprintfW
+    mov rcx, [srv_host]
+    lea rdx, [wurl]
+    call http_get
+    test eax, eax
+    jz .offline
+    mov rcx, [http_len]
+    cmp rcx, 16000
+    ja .bad
+    mov rdx, rcx
+    lea rsi, [http_buf]
+    lea rdi, [manifest_buf]
+    rep movsb
+    mov byte [rdi], 0
+    mov [manifest_len], rdx
+    lea rcx, [manifest_buf]
+    lea r8, [needle_ver2]
+    mov r9d, 8
+    call find_bytes
+    test rax, rax
+    jz .bad
+    lea rsi, [rax+8]
+    lea rdi, [latest_ver]
+    xor ecx, ecx
+.c: movzx eax, byte [rsi+rcx]
+    cmp al, 13
+    je .ce
+    cmp al, 10
+    je .ce
+    test al, al
+    jz .ce
+    mov [rdi+rcx*2], ax
+    inc ecx
+    cmp ecx, 30
+    jb .c
+.ce:
+    mov word [rdi+rcx*2], 0
+    lea rcx, [installed_ver]
+    lea rdx, [txt_none]
+    call wequal
+    test eax, eax
+    jnz .notinst
+    lea rcx, [installed_ver]
+    lea rdx, [latest_ver]
+    call wequal
+    test eax, eax
+    jnz .uptodate
+    lea rcx, [msg_available]
+    jmp .show
+.notinst:
+    lea rcx, [msg_notinstalled]
+    jmp .show
+.uptodate:
+    lea rcx, [msg_uptodate]
+    jmp .show
+.bad:
+    mov qword [manifest_len], 0
+    lea rcx, [txt_unavail]
+    lea rdx, [latest_ver]
+    call wcopy
+    lea rcx, [msg_badlist]
+    jmp .show
+.offline:
+    lea rcx, [txt_unavail]
+    lea rdx, [latest_ver]
+    call wcopy
+    lea rcx, [msg_offline]
+.show:
+    call set_state
+END_FN
+
+FN do_update
+    cmp qword [manifest_len], 0
+    jne .go
+    lea rcx, [msg_needcheck]
+    call set_state
+    jmp .d
+.go:
+    lea rax, [manifest_buf]
+    mov [mcur], rax
+.p1:
+    call manifest_next
+    test eax, eax
+    jz .pass2
+    call entry_paths
+    test eax, eax
+    jz .badlist
+    mov rcx, [srv_host]
+    lea rdx, [wurl]
+    call http_get
+    test eax, eax
+    jz .dlfail
+    lea rcx, [http_buf]
+    mov rdx, [http_len]
+    call sha256_hex
+    test eax, eax
+    jz .dlfail
+    lea rsi, [hexout]
+    mov rdi, [m_hex]
+    mov ecx, 64
+    repe cmpsb
+    jne .hashfail
+    lea rcx, [wpath1]
+    call ensure_dirs
+    lea rcx, [wpath2]
+    lea rdx, [http_buf]
+    mov r8, [http_len]
+    call write_file
+    test eax, eax
+    jz .writefail
+    jmp .p1
+.pass2:
+    lea rax, [manifest_buf]
+    mov [mcur], rax
+.p2:
+    call manifest_next
+    test eax, eax
+    jz .finished
+    call entry_paths
+    lea rcx, [wpath2]
+    lea rdx, [wpath1]
+    mov r8d, 1                 ; MOVEFILE_REPLACE_EXISTING
+    call MoveFileExW
+    jmp .p2
+.finished:
+    call read_installed
+    lea rcx, [done_msg]
+    lea rdx, [fmt_done]
+    lea r8, [latest_ver]
+    call wsprintfW
+    lea rcx, [done_msg]
+    call set_state
+    jmp .d
+.badlist:
+    call cleanup_staged
+    lea rcx, [msg_badlist]
+    call set_state
+    jmp .d
+.dlfail:
+    call cleanup_staged
+    lea rcx, [msg_dlfail]
+    call set_state
+    jmp .d
+.hashfail:
+    call cleanup_staged
+    lea rcx, [msg_hash]
+    call set_state
+    jmp .d
+.writefail:
+    call cleanup_staged
+    lea rcx, [msg_writefail]
+    call set_state
+.d:
+END_FN
+
+FN do_save
+    lea rcx, [env_saves]
+    lea rdx, [wpath1]
+    mov r8d, 520
+    call GetEnvironmentVariableW
+    test eax, eax
+    jnz .have_src
+    lea rcx, [env_local]
+    lea rdx, [wpath3]
+    mov r8d, 520
+    call GetEnvironmentVariableW
+    test eax, eax
+    jz .nosaves
+    lea rcx, [wpath1]
+    lea rdx, [fmt_cat]
+    lea r8, [wpath3]
+    lea r9, [suffix_saves]
+    call wsprintfW
+.have_src:
+    lea rcx, [env_docs]
+    lea rdx, [wpath2]
+    mov r8d, 520
+    call GetEnvironmentVariableW
+    test eax, eax
+    jnz .have_docs
+    lea rcx, [guid_docs]
+    xor edx, edx
+    xor r8d, r8d
+    lea r9, [tmp_ptr]
+    call SHGetKnownFolderPath
+    test eax, eax
+    jnz .nodocs
+    mov rcx, [tmp_ptr]
+    lea rdx, [wpath2]
+    call wcopy
+    mov rcx, [tmp_ptr]
+    call CoTaskMemFree
+.have_docs:
+    lea rcx, [wpath3]
+    lea rdx, [fmt_cat]
+    lea r8, [wpath2]
+    lea r9, [suffix_backups]
+    call wsprintfW
+    lea rcx, [wpath3]
+    xor edx, edx
+    call CreateDirectoryW
+    lea rcx, [st]
+    call GetLocalTime
+    lea rcx, [wpath2]
+    lea rdx, [fmt_stamp]
+    movzx r8d, word [st]
+    movzx r9d, word [st+2]
+    movzx eax, word [st+6]
+    mov [rsp+32], rax
+    movzx eax, word [st+8]
+    mov [rsp+40], rax
+    movzx eax, word [st+10]
+    mov [rsp+48], rax
+    movzx eax, word [st+12]
+    mov [rsp+56], rax
+    call wsprintfW
+    lea rcx, [wurl]
+    lea rdx, [fmt_cat]
+    lea r8, [wpath3]
+    lea r9, [wpath2]
+    call wsprintfW
+    lea rcx, [wurl]
+    xor edx, edx
+    call CreateDirectoryW
+    mov dword [copied], 0
+    lea rcx, [wpath2]
+    lea rdx, [fmt_star]
+    lea r8, [wpath1]
+    call wsprintfW
+    lea rcx, [wpath2]
+    lea rdx, [fd]
+    call FindFirstFileW
+    cmp rax, -1
+    je .report
+    mov rbx, rax
+.each:
+    test dword [fd], 0x10          ; skip folders
+    jnz .next
+    lea rcx, [wpath3]
+    lea rdx, [fmt_slash]
+    lea r8, [wpath1]
+    lea r9, [fd+44]
+    call wsprintfW
+    lea rcx, [wpath2]
+    lea rdx, [fmt_slash]
+    lea r8, [wurl]
+    lea r9, [fd+44]
+    call wsprintfW
+    lea rcx, [wpath3]
+    lea rdx, [wpath2]
+    xor r8d, r8d
+    call CopyFileW
+    test eax, eax
+    jz .next
+    inc dword [copied]
+.next:
+    mov rcx, rbx
+    lea rdx, [fd]
+    call FindNextFileW
+    test eax, eax
+    jnz .each
+    mov rcx, rbx
+    call FindClose
+.report:
+    cmp dword [copied], 0
+    je .nosaves
+    lea rcx, [done_msg]
+    lea rdx, [fmt_saved]
+    mov r8d, [copied]
+    lea r9, [wurl]
+    call wsprintfW
+    lea rcx, [done_msg]
+    call set_state
+    jmp .d
+.nosaves:
+    lea rcx, [msg_nosaves]
+    call set_state
+    jmp .d
+.nodocs:
+    lea rcx, [msg_nodocs]
+    call set_state
+.d:
+END_FN
+
+
+FN wndproc
+    ; rcx=hwnd rdx=msg r8=wParam r9=lParam
+    cmp edx, 2                 ; WM_DESTROY
+    je .destroy
+    cmp edx, 0x111             ; WM_COMMAND
+    je .command
+    call DefWindowProcW
+    jmp .done
+.command:
+    movzx eax, r8w
+    cmp eax, 1
+    je .do_check
+    cmp eax, 2
+    je .do_update
+    cmp eax, 3
+    je .do_save
+    cmp eax, 4
+    je .close
+    xor eax, eax
+    jmp .done
+.do_check:
+    call do_check
+    xor eax, eax
+    jmp .done
+.do_update:
+    call do_update
+    xor eax, eax
+    jmp .done
+.do_save:
+    call do_save
+    xor eax, eax
+    jmp .done
+.close:
+    mov rcx, [h_wnd]
+    mov edx, 0x10              ; WM_CLOSE
+    xor r8d, r8d
+    xor r9d, r9d
+    call DefWindowProcW
+    xor eax, eax
+    jmp .done
+.destroy:
+    xor ecx, ecx
+    call PostQuitMessage
+    xor eax, eax
+.done:
+END_FN
+
+start:
+    sub rsp, 8
+    and rsp, -16
+    sub rsp, 128
+    ; command line
+    call GetCommandLineW
+    mov rcx, rax
+    lea rdx, [argc]
+    call CommandLineToArgvW
+    mov [argv], rax
+    xor ecx, ecx
+    call GetModuleHandleW
+    mov [h_inst], rax
+    mov ecx, 17                ; DEFAULT_GUI_FONT
+    call GetStockObject
+    mov [h_font], rax
+    ; defaults (arguments 2-5 override the server: host port secure(0/1) path-prefix, used for testing)
+    lea rcx, [txt_unknown]
+    lea rdx, [latest_ver]
+    call wcopy
+    lea rax, [def_host]
+    mov [srv_host], rax
+    lea rax, [def_prefix]
+    mov [srv_prefix], rax
+    mov dword [srv_port], 443
+    mov dword [srv_secure], 1
+    lea rax, [msg_unknown]
+    mov [state_msg], rax
+    cmp dword [argc], 6
+    jb .args_done
+    mov rax, [argv]
+    mov rcx, [rax+16]
+    mov [srv_host], rcx
+    mov rcx, [rax+24]
+    call w2i
+    mov [srv_port], eax
+    mov rax, [argv]
+    mov rcx, [rax+32]
+    call w2i
+    mov [srv_secure], eax
+    mov rax, [argv]
+    mov rcx, [rax+40]
+    mov [srv_prefix], rcx
+.args_done:
+    ; window class
+    lea rdi, [wc]
+    xor eax, eax
+    mov ecx, 80
+    rep stosb
+    mov dword [wc], 80
+    mov dword [wc+4], 3
+    lea rax, [wndproc]
+    mov [wc+8], rax
+    mov rax, [h_inst]
+    mov [wc+24], rax
+    xor ecx, ecx
+    mov edx, 32512             ; IDC_ARROW
+    call LoadCursorW
+    mov [wc+40], rax
+    mov qword [wc+48], 6       ; COLOR_WINDOW + 1
+    lea rax, [cls_name]
+    mov [wc+64], rax
+    lea rcx, [wc]
+    call RegisterClassExW
+    ; main window
+    xor ecx, ecx
+    lea rdx, [cls_name]
+    lea r8, [title]
+    mov r9d, 0x10CA0000        ; WS_VISIBLE | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+    mov dword [rsp+32], 0x80000000
+    mov dword [rsp+40], 0x80000000
+    mov qword [rsp+48], 520
+    mov qword [rsp+56], 330
+    mov qword [rsp+64], 0
+    mov qword [rsp+72], 0
+    mov rax, [h_inst]
+    mov [rsp+80], rax
+    mov qword [rsp+88], 0
+    call CreateWindowExW
+    mov [h_wnd], rax
+    ; status text
+    lea rcx, [cls_static]
+    lea rdx, [txt_start]
+    mov r8d, 0x50000000        ; WS_CHILD | WS_VISIBLE
+    mov r9d, 16
+    mov r12d, 12
+    mov r13d, 480
+    mov r14d, 170
+    mov r15d, 10
+    call make_child
+    mov [h_status], rax
+    ; buttons
+    lea rcx, [cls_button]
+    lea rdx, [txt_check]
+    mov r8d, 0x50010000        ; WS_CHILD | WS_VISIBLE | WS_TABSTOP
+    mov r9d, 16
+    mov r12d, 200
+    mov r13d, 140
+    mov r14d, 28
+    mov r15d, 1
+    call make_child
+    lea rcx, [cls_button]
+    lea rdx, [txt_update]
+    mov r8d, 0x50010000
+    mov r9d, 164
+    mov r12d, 200
+    mov r13d, 100
+    mov r14d, 28
+    mov r15d, 2
+    call make_child
+    mov [h_btn_update], rax
+    lea rcx, [cls_button]
+    lea rdx, [txt_save]
+    mov r8d, 0x50010000
+    mov r9d, 272
+    mov r12d, 200
+    mov r13d, 100
+    mov r14d, 28
+    mov r15d, 3
+    call make_child
+    lea rcx, [cls_button]
+    lea rdx, [txt_close]
+    mov r8d, 0x50010000
+    mov r9d, 380
+    mov r12d, 200
+    mov r13d, 100
+    mov r14d, 28
+    mov r15d, 4
+    call make_child
+    ; game + installed version
+    call find_game
+    test eax, eax
+    jz .no_game
+    call read_installed
+    call show_status
+    jmp .loop_init
+.no_game:
+    mov rcx, [h_status]
+    lea rdx, [fmt_game_missing]
+    call SetWindowTextW
+.loop_init:
+    ; Hidden test mode: argument 6 = steps (c=check u=update s=save), argument 7 = file to write the final status to.
+    cmp dword [argc], 8
+    jb .interactive
+    mov rax, [argv]
+    mov rsi, [rax+48]
+.step:
+    movzx eax, word [rsi]
+    test ax, ax
+    jz .steps_done
+    cmp ax, 'c'
+    jne .s1
+    call do_check
+.s1:
+    cmp ax, 'u'
+    jne .s2
+    call do_update
+.s2:
+    cmp ax, 's'
+    jne .s3
+    call do_save
+.s3:
+    add rsi, 2
+    jmp .step
+.steps_done:
+    lea rcx, [status_text]
+    call lstrlenW
+    lea rdx, [status_text]
+    lea r8d, [rax*2]
+    mov rax, [argv]
+    mov rcx, [rax+56]
+    call write_file
+    xor ecx, ecx
+    call ExitProcess
+.interactive:
+    mov rcx, [h_wnd]
+    mov edx, 5
+    call ShowWindow
+.pump:
+    lea rcx, [msg]
+    xor edx, edx
+    xor r8d, r8d
+    xor r9d, r9d
+    call GetMessageW
+    test eax, eax
+    jle .quit
+    lea rcx, [msg]
+    call TranslateMessage
+    lea rcx, [msg]
+    call DispatchMessageW
+    jmp .pump
+.quit:
+    mov ecx, [msg+16]
+    call ExitProcess

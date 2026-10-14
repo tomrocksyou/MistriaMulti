@@ -34,6 +34,14 @@ Steam Deck game session. The save test invokes the real registered guard;
 it does not force a save or advance the day. Unsynchronized gameplay listed
 in `README.md` remains outside the current prototype.
 
+## Updater checks
+
+`tests/test_updater.py` runs the assembly updater against a local HTTP server (under Wine with xvfb on Linux, directly on
+Windows): update detection, verified download and install, rejection of a file with a bad checksum (nothing installed,
+no staged files left), "up to date" afterwards, and the Save Solo backup into Documents. Build with
+`sh scripts/build-updater.sh`. Regenerate the published file list with `sh scripts/make-release.sh` whenever the mod
+changes; CI fails when `release/latest.txt` is stale.
+
 ## Transport checks
 
 From the project folder on Windows:
