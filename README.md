@@ -23,6 +23,9 @@ Implemented:
   base animations, action animations, and tool attachments.
 - Host-authoritative farm soil and watering updates, conflict correction, and bounded
   terrain snapshots for joining players, room transitions, and host day changes.
+- Host-authoritative farm objects (crops, trees, rocks, forageables, dig sites, weeds, fences, sprinklers): harvests,
+  chops and digs are decided by the host and yield to the player who acted; growth and spawns follow the host
+  (`docs/SYNC-FARM.md`, untested in the game).
 - An event layer for synced features: batched, ordered, acknowledged events per player, blobs up to
   256 KB delivered whole, and host-authoritative requests applied exactly once (`docs/EVENT-LAYER.md`,
   which includes the guide for adding a synced feature). Appearance, farm terrain and player records use it.
