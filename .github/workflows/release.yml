@@ -33,12 +33,16 @@ jobs:
           python3 tests/test_updater.py build/MistriMulti.exe build/fakegame.exe
           python3 tests/test_world.py build/MistriMulti.exe
           python3 tests/test_launcher.py build/MistriMultiLauncher.exe build/mistrimulti-helper.exe build/fakegame.exe build/MistriMulti.exe
+      - name: Build the Linux programs
+        run: sh scripts/build-linux.sh
       - name: Assemble the release files and the list
         run: |
           mkdir -p dist
           cp build/MistriMulti.exe build/MistriMultiLauncher.exe build/mistrimulti-helper.exe build/mistrimulti-steam-id.exe dist/
           sh scripts/make-release.sh --bin dist dist/latest.txt
           cat dist/latest.txt
+      - name: Player downloads (Windows zip, Linux tar.gz)
+        run: sh scripts/make-player-packages.sh dist build dist
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-release
@@ -50,6 +54,7 @@ jobs:
         run: |
           # Draft first, so "latest" never points at a release whose assets are still uploading.
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "MistriMulti ${GITHUB_REF_NAME#v}" \
-            --notes "Update with MistriMulti.exe (Check for updates, then Update), or download the programs below. See docs/RELEASES.md." \
+            --notes "Players: download MistriMulti-${GITHUB_REF_NAME#v}-Windows.zip (Windows) or MistriMulti-${GITHUB_REF_NAME#v}-Linux.tar.gz (Linux / Steam Deck) and follow HOW-TO-PLAY.txt inside. The other files are for the updater (docs/RELEASES.md)." \
+            dist/MistriMulti-*-Windows.zip dist/MistriMulti-*-Linux.tar.gz \
             dist/latest.txt dist/MistriMulti.exe dist/MistriMultiLauncher.exe dist/mistrimulti-helper.exe dist/mistrimulti-steam-id.exe
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest

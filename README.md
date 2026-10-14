@@ -1,20 +1,35 @@
 # MistriMulti
 
-A Fields of Mistria multiplayer mod with a native x86-64 NASM networking helper.
-The Windows helper calls Win32/Winsock; the Linux helper, launcher and manager use Linux syscalls. None of
-them needs Python, .NET, Rust, a paid server, or a third-party multiplayer relay at runtime.
-GML and MOMI/MMAPI provide the supported connection to the game.
+Co-op multiplayer for **Fields of Mistria**: one player hosts their farm, up to seven friends join it. Install once, then start
+the game from Steam and choose **Multiplayer > Host a game** or **Join a game** in the game. Your singleplayer saves stay
+separate and untouched.
 
-## Current version: 0.2.9 experimental
+## How to play
 
-0.2.0 replaces the one-at-a-time event queue with the event layer (`docs/EVENT-LAYER.md`). Every player
-must run the same version; 0.1.0 and 0.2.0 games do not see each other's updates.
+1. Download the latest release from the **Releases** page (right side of this page):
+   `MistriMulti-<version>-Windows.zip` or `MistriMulti-<version>-Linux.tar.gz` (Linux / Steam Deck).
+2. Unpack it and follow **HOW-TO-PLAY.txt** inside: run `Install-Mod.bat` (Linux: `./install.sh`), click **Install** in
+   MOMI, and (Windows) paste one line into the game's Steam launch options. Friends use **Tailscale** to reach each other.
+3. Start the game from Steam: New Game or Load Game > **Multiplayer** > **Host a game** or **Join a game**.
 
-With 0.1.0, the Windows game bridge was tested with a simulated remote player.
-The live test covers movement, drawing, room changes,
-farm requests, conflict/authority checks, save guards and disconnect expiry.
-The 0.2.0 event layer is tested against the real helpers and file bridge, but not yet in the game.
-See `docs/TESTING.md` for what these checks prove and what remains untested.
+The full player guide, with updating and troubleshooting, is [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md).
+
+## Status: 0.2.9, experimental
+
+Tested in the real game (game 1.0.8, Windows and Debian): hosting and joining from the in-game menu, both characters moving,
+shared time and weather, sleeping and the new day, hoeing, watering and planting, chests, the shipping bin and the shared
+gold purse, town trips, leaving and rejoining with your own inventory. New in 0.2.9, not yet tried: the other player on the map.
+Written and tested only against a stand-in game so far: the mines, animals and buildings, quests and cutscenes, festivals.
+Villagers follow the same schedule on every screen but can be a few steps apart. Everyone must run the same version.
+
+---
+
+# For developers
+
+A native x86-64 NASM networking helper, launcher and manager (Win32/Winsock on Windows, raw syscalls on Linux) next to a GML
+mod loaded through MOMI/MMAPI. None of them needs Python, .NET, Rust, a paid server, or a third-party relay at runtime.
+Handover notes for the next contributor: `docs/HANDOFF.md`. Releases: `docs/RELEASES.md` (a `v<version>` tag builds the
+player downloads with `scripts/make-player-packages.sh`).
 
 Implemented:
 
@@ -25,7 +40,7 @@ Implemented:
   terrain snapshots for joining players, room transitions, and host day changes.
 - Host-authoritative farm objects (crops, trees, rocks, forageables, dig sites, weeds, fences, sprinklers): harvests,
   chops and digs are decided by the host and yield to the player who acted; growth and spawns follow the host
-  (`docs/SYNC-FARM.md`, untested in the game).
+  (`docs/SYNC-FARM.md`; planting verified in the game).
 - An event layer for synced features: batched, ordered, acknowledged events per player, blobs up to
   256 KB delivered whole, and host-authoritative requests applied exactly once (`docs/EVENT-LAYER.md`,
   which includes the guide for adding a synced feature). Appearance, farm terrain and player records use it.
@@ -43,9 +58,9 @@ Implemented:
 - Guests load their hosted-world record on reconnect. New guests start with the game's
   starter inventory and customize their character before publishing progress.
 - Host-owned chests, items on the ground and F9 gifts that never duplicate or lose items
-  (`docs/SYNC-CONTAINERS.md`, experimental and not yet run in the game).
+  (`docs/SYNC-CONTAINERS.md`; chests verified in the game).
 - One shared gold pool for the whole world, owned by the host, and shared shipping bins sold once by the host
-  (`docs/SYNC-WALLET.md`, not yet run in the game).
+  (`docs/SYNC-WALLET.md`; verified in the game).
 - Per-player progress (recipes, almanac, mail, personal quests, romance and children, cosmetics, counters) is stored on the host
   beside each player's record, committed with the host's save, and one villager can be romanced by one player at a time
   (`docs/SYNC-PROGRESS.md`).
@@ -53,17 +68,17 @@ Implemented:
   to the host, a lost or closed host returns the guest to the title screen with a message (`docs/SYNC-GUESTSAVE.md`).
 - **Everything is chosen in the game**: after the install you only start the game from Steam. New Game or Load Game, then
   Multiplayer, then **Host a game** (shows the addresses to give friends) or **Join a game** (finds hosts, asks for a password,
-  downloads the host's world). No host/join step to run first (`docs/SYNC-MENU.md`; not yet run in the real game).
+  downloads the host's world). No host/join step to run first (`docs/SYNC-MENU.md`; verified in the game).
 - F8 displays connection status in game.
-- Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
+- Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`; verified in the game).
 - Mines: one shared run (same itinerary and floors for everyone), host-owned monster health with one kill and one drop set, and shared rocks, chests and ladders (`docs/SYNC-DUNGEON.md`, not yet run in the game).
 - World story (story quests, the cutscenes and facts that open the map), villager schedules steered by the host, cutscenes as private
   viewings, festivals as a function of the shared date (`docs/SYNC-STORY.md`, not yet tried in the game).
 
 This is not feature-complete co-op. Not shared: monster movement in the mines (each player sees their own copy; health and
 kills are shared), the seal and boss rooms, villagers' exact paths and seats (room and activity agree), and story rewards
-for players who did not do the step. Everything listed above was written against the game's scripts and tested only against
-a stand-in game; none of it has been confirmed in the real game yet.
+for players who did not do the step. What has been confirmed in the real game is listed under Status above; the
+"not yet run in the game" notes in this list are kept current as features are tried.
 
 Guests retain their local world's objects while the synchronized systems operate.
 Their core character progress is checkpointed on the host about every five seconds;
@@ -71,9 +86,9 @@ the host confirms a complete record before it is considered saved. Guest local s
 are blocked during multiplayer. The host can save its farm normally. See
 `docs/PLAYER-DATA.md` for storage, backup and recovery details.
 
-## Windows: first setup
+## Windows: setup from a source checkout
 
-1. Install the supported game version and MOMI **0.16.5** (validated against game **1.0.6**).
+1. Install the supported game version (1.0.6 or 1.0.8) and MOMI **0.16.5** or later.
 2. Keep this project outside the game folder. `Build.bat` builds the ASM helper; a built
    Windows executable is also included under `build/` in the supplied project.
 3. Get the mod into the game's `mods/` folder with the manager (`MistriMulti.exe`: **Check for updates**, then **Update**), or, when
@@ -96,10 +111,10 @@ are blocked during multiplayer. The host can save its farm normally. See
      latest saved world and opens it. **Refresh** scans again; **Type an address** joins an IP that is not listed. The player
      number is chosen for you.
    The host should save (sleep) before friends join, because friends get the world as of the host's last save.
-8. A badge at the bottom right shows **Multiplayer: Online** (green), **Idle** (amber: ready, nothing hosted or joined) or
-   **Offline** (red, with the reason: the game was updated past the versions this mod was tested on, the launcher is not
-   running because the game was not started through the Steam launch option, the helper program is missing...). F8 shows the
-   same text with the reason.
+8. **F8** shows the status: **Multiplayer: Online**, **Idle** (ready, nothing hosted or joined) or **Offline** with the reason
+   (the game was updated past the versions this mod was tested on, the launcher is not running because the game was not
+   started through the Steam launch option, the helper program is missing...). A coloured badge at the bottom right is
+   planned but does not draw yet: the game's mod runtime has no `draw_*` text functions (`docs/HANDOFF.md`).
    (`MistriMulti.exe`'s **Host a game** / **Join a game...** buttons, `Play.bat` and `MistriMultiLauncher.exe --configure` still
    exist as optional advanced tools: they pre-set a role in `launcher.cfg` that then starts by itself. The in-game menu replaces
    them for normal use.)
@@ -140,7 +155,7 @@ calls, no C runtime, no Python). Keep them together in one folder, for example `
 | `mistrimulti-manager` | Optional console tools: `host`, `join [IP]`, `scan`, `steam-setup`, `save-solo`. |
 | `mistrimulti-helper-linux` | The network helper (unchanged). The launcher starts it and ties its life to its own. |
 
-1. Install the GML mod through the Linux MOMI build (MOMI **0.16.5**, game **1.0.6**, same as Windows).
+1. Install the GML mod through the Linux MOMI build (MOMI **0.16.5** or later, game 1.0.6 or 1.0.8, same as Windows).
 2. Build with `sh scripts/build-linux.sh` (needs `nasm` and `binutils`; the output is in `build/`), or take the
    `mistrimulti-linux-x64` artifact from CI. `chmod +x` the three programs.
 3. **Once**, in Steam (`./install.sh` does this for you): right-click the game, Properties, Launch Options, and paste the line
@@ -153,7 +168,7 @@ calls, no C runtime, no Python). Keep them together in one folder, for example `
    downloads the host's world and opens it; you can also type an address). See `docs/SYNC-MENU.md`.
    (Optional and advanced: `./mistrimulti-manager host` / `join [IP]` and `./mistrimulti-launcher --configure` pre-set a role
    in `launcher.cfg` that then starts without the menu. Delete `launcher.cfg` to get back to the menu.)
-5. The badge, the **New Game -> Multiplayer** menu, world download and save separation work exactly as in the Windows steps above.
+5. F8, the **New Game -> Multiplayer** menu, world download and save separation work exactly as in the Windows steps above.
    Why multiplayer did not start (if the game opened normally) is written to
    `<game folder>/mod_data/mistrimulti/launcher.log`; the helper's own messages are in `helper.log` next to it.
 6. `./mistrimulti-manager save-solo` copies your solo saves to `~/Documents/MistriMulti Backups/<UTC time>/`
