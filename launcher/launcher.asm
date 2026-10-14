@@ -19,6 +19,7 @@ extern WideCharToMultiByte, lstrlenW, lstrlenA, lstrcmpiW, wsprintfW, wsprintfA
 extern CreateJobObjectW, SetInformationJobObject, AssignProcessToJobObject
 extern CreateWindowExW
 extern OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, GlobalAlloc, GlobalLock, GlobalUnlock
+extern WSAStartup, WSACleanup, socket, bind, WSAPoll, recvfrom, sendto, closesocket, GetComputerNameA
 extern CoCreateGuid, GetStdHandle, AllocConsole, SetConsoleOutputCP, Sleep, GetExitCodeProcess, ReadFile, WriteFile, CloseHandle
 
 section .data
@@ -99,6 +100,13 @@ name_table dq n_stop, n_status, n_txframe, n_txtmp, n_pid
 align 8
 
 section .bss
+disc_sock resq 1
+disc_pfd resb 16
+disc_from resb 32
+disc_fromlen resd 1
+disc_buf resb 128
+disc_resp resb 64
+wsadata resb 408
 old_mode resd 1
 old_player resd 1
 h_job resq 1
@@ -1217,6 +1225,116 @@ FN stop_helper
 .d:
 END_FN
 
+; ---------------- host discovery ----------------
+; While hosting, answer "who is hosting?" queries on UDP 7776 so friends can find this PC without typing an IP.
+; Query:  exactly 64 bytes starting "MSDQ", version 1.  Reply: 64 bytes "MSDR", version 1, flags, game port, computer name.
+; The reply is never larger than the query, so this cannot be used to amplify traffic.
+FN disc_start
+    mov qword [disc_sock], 0
+    cmp dword [cfg_mode], 1
+    jne .d
+    mov ecx, 0x0202
+    lea rdx, [wsadata]
+    call WSAStartup
+    test eax, eax
+    jnz .d
+    mov ecx, 2                      ; AF_INET
+    mov edx, 2                      ; SOCK_DGRAM
+    mov r8d, 17                     ; IPPROTO_UDP
+    call socket
+    cmp rax, -1
+    je .d
+    mov rbx, rax
+    lea rdi, [disc_from]
+    xor eax, eax
+    mov ecx, 16
+    rep stosb
+    mov word [disc_from], 2         ; AF_INET, port 7776 (0x1E60) in network order, address 0.0.0.0
+    mov word [disc_from+2], 0x601E
+    mov rcx, rbx
+    lea rdx, [disc_from]
+    mov r8d, 16
+    call bind
+    test eax, eax
+    jnz .fail
+    mov [disc_sock], rbx
+    ; prepare the fixed part of the reply
+    lea rdi, [disc_resp]
+    xor eax, eax
+    mov ecx, 64
+    rep stosb
+    mov dword [disc_resp], 'MSDR'
+    mov byte [disc_resp+4], 1
+    lea rcx, [a_room]
+    lea rdx, [room_default]
+    call a_equal
+    xor eax, 1                      ; flag bit 0: this host uses a custom room code
+    mov [disc_resp+5], al
+    mov eax, [cfg_port]
+    mov [disc_resp+6], ax
+    mov dword [q_len], 31
+    lea rcx, [disc_resp+8]
+    lea rdx, [q_len]
+    call GetComputerNameA
+    jmp .d
+.fail:
+    mov rcx, rbx
+    call closesocket
+.d:
+END_FN
+
+; Waits for the game process (rcx handle) while answering discovery queries.
+FN disc_serve
+    mov r12, rcx
+.loop:
+    mov rax, [disc_sock]
+    mov [disc_pfd], rax
+    mov word [disc_pfd+8], 0x0100   ; POLLRDNORM
+    mov word [disc_pfd+10], 0
+    lea rcx, [disc_pfd]
+    mov edx, 1
+    mov r8d, 250
+    call WSAPoll
+    cmp eax, 1
+    jne .check
+    test word [disc_pfd+10], 0x0100
+    jz .check
+    mov dword [disc_fromlen], 32
+    mov rcx, [disc_sock]
+    lea rdx, [disc_buf]
+    mov r8d, 128
+    xor r9d, r9d
+    lea rax, [disc_from]
+    mov [rsp+32], rax
+    lea rax, [disc_fromlen]
+    mov [rsp+40], rax
+    call recvfrom
+    cmp eax, 64
+    jne .check
+    cmp dword [disc_buf], 'MSDQ'
+    jne .check
+    cmp byte [disc_buf+4], 1
+    jne .check
+    mov rcx, [disc_sock]
+    lea rdx, [disc_resp]
+    mov r8d, 64
+    xor r9d, r9d
+    lea rax, [disc_from]
+    mov [rsp+32], rax
+    mov eax, [disc_fromlen]
+    mov [rsp+40], rax
+    call sendto
+.check:
+    mov rcx, r12
+    xor edx, edx
+    call WaitForSingleObject
+    test eax, eax
+    jnz .loop
+    mov rcx, [disc_sock]
+    call closesocket
+    mov qword [disc_sock], 0
+END_FN
+
 ; Runs the game command line (everything after "--steam") and waits for it. Sets game_exit.
 FN launch_game
     mov dword [game_exit], 1
@@ -1245,9 +1363,16 @@ FN launch_game
     test rax, rax
     jz .d
     mov rbx, rax
+    cmp qword [disc_sock], 0
+    je .plainwait
+    mov rcx, rbx
+    call disc_serve
+    jmp .waited
+.plainwait:
     mov rcx, rbx
     mov edx, -1
     call WaitForSingleObject
+.waited:
     mov rcx, rbx
     lea rdx, [game_exit]
     call GetExitCodeProcess
@@ -1840,6 +1965,7 @@ start:
     lea rbx, [r_helper]
     jmp .direct
 .run:
+    call disc_start
     call launch_game
     call stop_helper
     xor ecx, ecx

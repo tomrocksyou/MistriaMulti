@@ -242,6 +242,61 @@ def test_configure():
         sb.cleanup()
 
 
+def query_host(timeout=2.0, payload=None, port=7776):
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(payload if payload is not None else b"MSDQ\x01" + b"\x00" * 59, ("127.0.0.1", port))
+        return sock.recvfrom(256)[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
+def test_discovery_responder():
+    sb = Sandbox()
+    try:
+        sb.config("mode=host\r\nport=47851\r\n")
+        proc = sb.steam()
+        assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
+        reply = None
+        for _ in range(20):
+            reply = query_host(0.5)
+            if reply:
+                break
+        assert reply is not None and len(reply) == 64, "host did not answer a discovery query"
+        assert reply[:4] == b"MSDR" and reply[4] == 1 and reply[5] == 0, reply[:8]
+        assert int.from_bytes(reply[6:8], "little") == 47851, reply[:8]
+        name = reply[8:40].split(b"\x00")[0]
+        assert len(name) > 0, "computer name missing"
+        assert query_host(0.7, b"MSDQ\x01") is None, "short query must not be answered"
+        assert query_host(0.7, b"XXXX\x01" + b"\x00" * 59) is None, "wrong magic must not be answered"
+        assert query_host(0.7, b"MSDQ\x09" + b"\x00" * 59) is None, "unknown version must not be answered"
+        assert query_host(0.7, b"MSDQ\x01" + b"\x00" * 200) is None, "oversized query must not be answered"
+        finish(proc)
+        assert query_host(0.7) is None, "responder must stop with the game"
+        # a custom room code is announced, a joining player never answers
+        sb.config("mode=host\r\nport=47851\r\nroom=a1b2c3d4\r\n")
+        proc = sb.steam()
+        assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
+        for _ in range(20):
+            reply = query_host(0.5)
+            if reply:
+                break
+        assert reply is not None and reply[5] == 1, "custom room flag missing"
+        finish(proc)
+        sb.config("mode=join\r\nhost=127.0.0.1\r\nplayer=2\r\nport=47861\r\n")
+        proc = sb.steam()
+        assert wait_for(lambda: (sb.mod / "bridge_2" / "status.json").exists())
+        assert query_host(1.0) is None, "a joining player must not answer discovery"
+        finish(proc)
+        print("discovery: host answers valid 64-byte queries only, flags custom rooms, stops with the game")
+    finally:
+        sb.cleanup()
+
+
 def test_fuzz():
     import random
     rng = random.Random(1234)
@@ -311,5 +366,6 @@ test_direct_and_wrong_exe()
 test_backup_prune()
 test_configure()
 test_fuzz()
+test_discovery_responder()
 test_helper_dies_with_launcher()
 print("PASS")
