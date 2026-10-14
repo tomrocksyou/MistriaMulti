@@ -195,6 +195,11 @@ commit", using `save.game_saving` / `save.game_loaded`); a chest or trade featur
 | `DONE_LIMIT` / `DONE_BYTES` / `REQ_STREAMS` | 64 / 64 KB / 16 | Host result cache per requester stream; streams kept |
 | `ACK_HOT_TICKS` | 90 | Frames (1.5 s) a changed ACK keeps the 100 ms resend |
 
+On a host the layer also asks `MistriMultiTrust.gml` (runtime slot `r.trust_gate`, absent elsewhere) before it hands a guest's event to a
+handler: 300 events, 40 requests and 512 KiB of blob chunks per second per guest (burst twice that), and at most 6 new event streams
+(then one per ten seconds). Over the limit the event simply waits, unacknowledged, so ordering and exactly-once delivery are kept; see
+`docs/SECURITY.md`.
+
 Worst-case memory per game: about 0.5 MB outgoing queue, 2 MB queued blobs, 1.8 MB of incoming blobs (7 senders), and
 1 MB host result cache. Typical use is a few kilobytes.
 

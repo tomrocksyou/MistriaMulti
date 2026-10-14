@@ -141,6 +141,26 @@ FN v_room                       ; rcx ASCII -> eax 1 if exactly 8 hex digits
 .d:
 END_FN
 
+FN v_pass                       ; rcx ASCII -> eax 1 if empty (no password) or 1 to 64 printable ASCII characters without spaces
+    xor edx, edx
+.l: movzx eax, byte [rcx+rdx]
+    test al, al
+    jz .ok
+    cmp al, 33
+    jb .bad
+    cmp al, 126
+    ja .bad
+    inc edx
+    cmp edx, 64
+    jbe .l
+.bad:
+    xor eax, eax
+    jmp .d
+.ok:
+    mov eax, 1
+.d:
+END_FN
+
 ; rcx = ASCII file name -> eax 1 only for  game-<digits>-(autosave|<digits>).sav  (nothing else: no paths, no ".old.sav")
 FN wf_valid_name
     mov rsi, rcx

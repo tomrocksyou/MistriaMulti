@@ -196,6 +196,32 @@ FN pl_atomic
     xor eax, eax
 .done:
 END_FN
+; RCX buffer, RDX length -> EAX 1 when filled with system randomness (getrandom)
+FN pl_random
+    mov r12, rcx
+    mov r13, rdx
+.again:
+    test r13, r13
+    jz .ok
+    mov rdi, r12
+    mov rsi, r13
+    xor edx, edx
+    mov eax, 318
+    syscall
+    cmp rax, -4
+    je .again
+    test rax, rax
+    jle .bad
+    add r12, rax
+    sub r13, rax
+    jmp .again
+.ok:
+    mov eax, 1
+    jmp .done
+.bad:
+    xor eax, eax
+.done:
+END_FN
 FN pl_print
     mov r12, rcx
     call text_length

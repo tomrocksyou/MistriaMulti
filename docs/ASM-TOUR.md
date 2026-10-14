@@ -22,6 +22,13 @@
    syscall argument, and SYSCALL clobbers RCX and R11. This is different from the
    normal System V userspace function-call convention.
 
+## Authentication
+
+`helper/include/auth.inc` holds the join handshake, HMAC-SHA256 (built on `linux/sha256.inc`, which both helpers include), the
+key store, the deny list, the token buckets and the guest state machine; `receive_fragment` in `core.inc` verifies a tag before it touches
+any state. Start with `host_proof` (host) and `guest_challenge` (guest), and compare them with `tests/mmauth.py`, which is the same
+protocol in a few dozen lines of Python. `docs/SECURITY.md` explains the design.
+
 ## The Linux launcher and manager
 
 `linux/launcher.asm` and `linux/manager.asm` are the Linux twins of `launcher/launcher.asm` and the manager window; they use the

@@ -17,6 +17,9 @@ WSTR mp_t_orip, "Or type the host's IP address:"
 WSTR mp_t_joinip, "Join this IP"
 WSTR mp_t_player, "Your player number (1-7):"
 WSTR mp_t_room, "Room code (only if your host has one):"
+WSTR mp_t_pass, "Room password (only if your host has one):"
+WSTR mp_s_badpass, "The password must be 1 to 64 letters, digits or punctuation, without spaces or accents."
+WSTR mp_s_needpass, "This host uses a room password. Ask them for it and type it below."
 WSTR mp_t_hostbtn, "Host a game"
 WSTR mp_t_joinbtn, "Join a game..."
 WSTR mp_t_steambtn, "Steam setup..."
@@ -59,12 +62,20 @@ WSTR mp_t_crlf, `\r\n`
 mp_f_joinmsg: dw __utf16__(`Saved. Now start Fields of Mistria from Steam and choose Multiplayer on New Game or Load Game.\r\n\r\nJoining: `), 0
 mp_f_steammsg: dw __utf16__(`The launch line has been copied to your clipboard.\r\n\r\nOne time only: in Steam, right-click Fields of Mistria > Properties > Launch Options, press Ctrl+V, and close the window.\r\n\r\nSteam then starts multiplayer automatically every time you press Play.`), 0
 mp_f_cfg_join db 'mode=join',13,10,'host=%s',13,10,'port=%d',13,10,'player=%d',13,10,'room=%s',13,10,0
+mp_f_cfg_pass db 'password=%s',13,10,0
+mp_f_cfg_host_pass db 'mode=host',13,10,'port=7777',13,10,'player=0',13,10,'room=',13,10,'password=%s',13,10,0
+mp_k_pass db 'password='
+mp_k_pass_len equ $ - mp_k_pass
 mp_f_cfg_host db 'mode=host',13,10,'port=7777',13,10,'player=0',13,10,'room=',13,10,0
 mp_k_player db 'player='
 mp_k_player_len equ $ - mp_k_player
 mp_f_ascii_entry db '%s %d %d %s',13,10,0
 mp_f_ascii_ip db '%d.%d.%d.%d',0
 mp_t_custom db '   [needs a room code]',0
+mp_t_pw db '   [needs a password]',0
+mp_t_both db '   [needs a room code and a password]',0
+align 8
+mp_t_flagtext dq mp_t_empty, mp_t_custom, mp_t_pw, mp_t_both
 mp_t_empty db 0
 mp_t_ts db '"100.'
 mp_t_ts_len equ $ - mp_t_ts
@@ -101,6 +112,8 @@ h_list resq 1
 h_ed_ip resq 1
 h_ed_player resq 1
 h_ed_room resq 1
+h_ed_pass resq 1
+mp_pass resb 72
 h_join_status resq 1
 cur_parent resq 1
 mp_guid resb 16
@@ -536,12 +549,11 @@ FN mp_fill_list
     mov ecx, [rax+r12*4]
     lea rdx, [mp_ascii]
     call mp_ip_text
-    lea rdx, [mp_t_empty]
     lea rax, [mp_host_flags]
-    test byte [rax+r12], 1
-    jz .nc
-    lea rdx, [mp_t_custom]
-.nc:
+    movzx eax, byte [rax+r12]
+    and eax, 3
+    lea rdx, [mp_t_flagtext]
+    mov rdx, [rdx+rax*8]
     mov eax, r12d
     shl eax, 5
     lea r8, [mp_host_name]
@@ -600,6 +612,51 @@ FN mp_cfg_path
 .d:
 END_FN
 
+; mp_pass = the password= line of the existing launcher.cfg (empty if none or unusable). Needs wpath2 from mp_cfg_path.
+FN mp_old_pass
+    mov byte [mp_pass], 0
+    lea rcx, [wpath2]
+    lea rdx, [file_buf]
+    mov r8d, 4000
+    call read_file
+    cmp rax, 8
+    jl .d
+    mov r13, rax
+    lea rcx, [file_buf]
+    mov rdx, rax
+    lea r8, [mp_k_pass]
+    mov r9d, mp_k_pass_len
+    call find_bytes
+    test rax, rax
+    jz .d
+    lea rsi, [rax+mp_k_pass_len]
+    lea rdi, [file_buf]
+    add rdi, r13                    ; end of the data
+    lea r8, [mp_pass]
+    xor ecx, ecx
+.c: cmp rsi, rdi
+    jae .e
+    movzx eax, byte [rsi]
+    cmp al, 13
+    je .e
+    cmp al, 10
+    je .e
+    cmp ecx, 64
+    jae .bad
+    mov [r8+rcx], al
+    inc ecx
+    inc rsi
+    jmp .c
+.e: mov byte [r8+rcx], 0
+    lea rcx, [mp_pass]
+    call v_pass
+    test eax, eax
+    jnz .d
+.bad:
+    mov byte [mp_pass], 0
+.d:
+END_FN
+
 ; player number from an existing launcher.cfg (1-7) or a random one -> eax
 FN mp_pick_player
     call mp_cfg_path
@@ -653,7 +710,17 @@ FN mp_save_join
     mov [rsp+32], rax
     mov [rsp+40], r15
     call wsprintfA
-    mov r8d, eax
+    mov r12d, eax
+    cmp byte [mp_pass], 0
+    je .nopw
+    lea rcx, [mp_text]
+    add rcx, r12
+    lea rdx, [mp_f_cfg_pass]
+    lea r8, [mp_pass]
+    call wsprintfA
+    add r12d, eax
+.nopw:
+    mov r8d, r12d
     lea rcx, [wpath2]
     lea rdx, [mp_text]
     call write_file
@@ -691,12 +758,26 @@ FN mp_do_host
     call mp_cfg_path
     test eax, eax
     jz .fail
+    call mp_old_pass                ; a password already in launcher.cfg stays
+    cmp byte [mp_pass], 0
+    jne .withpass
     lea rcx, [mp_f_cfg_host]
     call lstrlenA
     mov r8d, eax
     lea rcx, [wpath2]
     lea rdx, [mp_f_cfg_host]
     call write_file
+    jmp .written
+.withpass:
+    lea rcx, [mp_text]
+    lea rdx, [mp_f_cfg_host_pass]
+    lea r8, [mp_pass]
+    call wsprintfA
+    mov r8d, eax
+    lea rcx, [wpath2]
+    lea rdx, [mp_text]
+    call write_file
+.written:
     test eax, eax
     jz .fail
     mov dword [mp_tgt_count], 0
@@ -811,6 +892,33 @@ FN mp_finish_join
     test eax, eax
     jz .badroom
 .save:
+    mov rcx, [h_ed_pass]
+    lea rdx, [wpath1]
+    mov r8d, 66
+    call GetWindowTextW
+    xor ecx, ecx
+    lea rsi, [wpath1]
+    lea rdi, [mp_pass]
+.pw:
+    movzx eax, word [rsi+rcx*2]
+    test eax, eax
+    jz .pwend
+    cmp eax, 33
+    jb .badpass
+    cmp eax, 126
+    ja .badpass
+    cmp ecx, 64
+    jae .badpass
+    mov [rdi+rcx], al
+    inc ecx
+    jmp .pw
+.pwend:
+    mov byte [rdi+rcx], 0
+    test ecx, ecx
+    jnz .pwdone
+    test r14d, 2
+    jnz .needpass
+.pwdone:
     mov rcx, r12
     mov edx, r13d
     mov r8d, r15d
@@ -874,6 +982,12 @@ FN mp_finish_join
     jmp .st
 .needroom:
     lea rcx, [mp_s_needroom]
+    jmp .st
+.badpass:
+    lea rcx, [mp_s_badpass]
+    jmp .st
+.needpass:
+    lea rcx, [mp_s_needpass]
     jmp .st
 .nosave:
     lea rcx, [mp_s_nosave]
@@ -989,7 +1103,7 @@ FN mp_open_join
     mov dword [rsp+32], 0x80000000
     mov dword [rsp+40], 0x80000000
     mov qword [rsp+48], 480
-    mov qword [rsp+56], 440
+    mov qword [rsp+56], 476
     mov qword [rsp+64], 0
     mov qword [rsp+72], 0
     mov rax, [h_inst]
@@ -1108,12 +1222,32 @@ FN mp_open_join
     mov r15d, 16
     call make_child
     mov [h_ed_room], rax
+    ; room password (masked)
+    lea rcx, [cls_static]
+    lea rdx, [mp_t_pass]
+    mov r8d, 0x50000000
+    mov r9d, 14
+    mov r12d, 358
+    mov r13d, 270
+    mov r14d, 18
+    mov r15d, 34
+    call make_child
+    lea rcx, [mp_edit]
+    lea rdx, [mp_t_empty_w]
+    mov r8d, 0x508100A0
+    mov r9d, 290
+    mov r12d, 355
+    mov r13d, 110
+    mov r14d, 24
+    mov r15d, 18
+    call make_child
+    mov [h_ed_pass], rax
     ; status line
     lea rcx, [cls_static]
     lea rdx, [mp_s_ready]
     mov r8d, 0x50000000
     mov r9d, 14
-    mov r12d, 362
+    mov r12d, 394
     mov r13d, 440
     mov r14d, 36
     mov r15d, 17

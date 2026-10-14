@@ -26,6 +26,14 @@ n_steamtmp db '/steamid.tmp',0
 n_probe db '/mistrimulti-steam-id-linux',0
 n_helper db '/mistrimulti-helper-linux',0
 n_helperlog db '/helper.log',0
+n_authcfg db '/auth.cfg',0
+n_installkey db '/install.key',10,0
+n_trustkeys db '/trust_keys.txt',10,0
+n_denylist db '/deny.txt',10,0
+t_auth_key db 'key=',0
+t_auth_keys db 'keys=',0
+t_auth_deny db 'deny=',0
+t_auth_pass db 'pass=',0
 n_backups db '/solo_backups',0
 n_bridge db '/bridge_',0
 n_stop db 'stop.flag',0
@@ -65,6 +73,7 @@ r_flag db 'Multiplayer not started: --mistrimulti-direct was given. The game was
 r_paths db 'Multiplayer not started: could not find the folder where the game keeps its files (set MISTRIMULTI_DATA_DIR). The game was started normally.',10,0
 r_config db 'Multiplayer not started: launcher.cfg is missing or invalid. Run mistrimulti-launcher --configure. The game was started normally.',10,0
 r_control db 'Multiplayer not started: control.json could not be written. The game was started normally.',10,0
+r_auth db 'Multiplayer not started: auth.cfg could not be written, so the room password cannot be applied. The game was started normally.',10,0
 r_helper db 'Multiplayer not started: the network helper could not be started (is mistrimulti-helper-linux next to the launcher, and is the port free? see helper.log). The game was started normally.',10,0
 r_nogame db 'MistriMulti: could not start the game command.',10,0
 p_mode db 'Host a game (H) or join a friend (J)? ',0
@@ -701,6 +710,59 @@ FN backup_saves
 .d:
 END_FN
 
+; Writes <bridge>/auth.cfg for the helper: where it keeps the install key and the key store, the deny list, and the room
+; password (docs/SECURITY.md). Private to this user. eax 1 ok. Rewritten at every start, so a removed password disappears.
+FN write_auth
+    lea rcx, [out_buf]
+    mov edx, 4096
+    call pb_start
+    lea rcx, [t_auth_key]
+    call pb_str
+    lea rcx, [mod_dir]
+    call pb_str
+    lea rcx, [n_installkey]
+    call pb_str
+    lea rcx, [t_auth_keys]
+    call pb_str
+    lea rcx, [mod_dir]
+    call pb_str
+    lea rcx, [n_trustkeys]
+    call pb_str
+    lea rcx, [t_auth_deny]
+    call pb_str
+    lea rcx, [mod_dir]
+    call pb_str
+    lea rcx, [n_denylist]
+    call pb_str
+    cmp byte [a_pass], 0
+    je .nopass
+    lea rcx, [t_auth_pass]
+    call pb_str
+    lea rcx, [a_pass]
+    call pb_str
+    lea rcx, [t_nl]
+    call pb_str
+.nopass:
+    call pb_end
+    cmp eax, -1
+    je .bad
+    mov r13d, eax
+    lea rcx, [p1]
+    lea rdx, [bridge_dir]
+    lea r8, [n_authcfg]
+    call path2
+    lea rcx, [p1]
+    lea rdx, [out_buf]
+    mov r8d, r13d
+    mov dword [wf_mode], 0600o
+    call write_file
+    mov dword [wf_mode], 0644o
+    jmp .d
+.bad:
+    xor eax, eax
+.d:
+END_FN
+
 ; ---------------- helper ----------------
 ; A joining player refreshes the host's world just before the game starts (quietly: failures are fine).
 FN join_refresh_world
@@ -921,6 +983,10 @@ FN disc_start
     lea rdx, [room_default]
     call a_equal
     xor eax, 1                          ; flag bit 0: this host uses a custom room code
+    cmp byte [a_pass], 0
+    je .nopassflag
+    or al, 2                            ; flag bit 1: this host needs a room password
+.nopassflag:
     mov [disc_resp+5], al
     mov eax, [cfg_port]
     mov [disc_resp+6], ax
@@ -1290,6 +1356,10 @@ configure_main:
     call mod_dir_init
     call load_config
     mov [have_old], eax
+    test eax, eax
+    jnz .keeppass
+    mov byte [a_pass], 0               ; no usable old setup: nothing to keep (an invalid password is never written back)
+.keeppass:
     mov eax, [cfg_mode]
     mov [old_mode], eax
     mov eax, [cfg_player]
@@ -1627,6 +1697,13 @@ program_main:
     lea rcx, [epoch_a]
     call guid_hex
     call prepare_bridge
+    call write_auth
+    lea rbx, [r_auth]
+    test eax, eax
+    jnz .authok
+    cmp byte [a_pass], 0                ; without a password the helper still works (its keys stay in memory)
+    jne .direct
+.authok:
     mov ecx, 1
     call write_control
     lea rbx, [r_control]

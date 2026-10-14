@@ -461,7 +461,7 @@ FN write_plain                  ; rcx path, rdx data, r8 length -> eax 1 ok (cre
     mov r12, rdx
     mov r13, r8
     mov edx, O_WRITE_NEW
-    mov r8d, 0644o
+    mov r8d, [wf_mode]                  ; 0644o, or 0600o while a file with a password is written
     call sys_open
     test rax, rax
     js .fail
@@ -1116,6 +1116,7 @@ END_FN
 
 section .data
 s_tmp_suffix db '.tmp',0
+wf_mode dd 0644o
 s_urandom db '/dev/urandom',0
 hex_digits db '0123456789abcdef'
 s_env_path db 'PATH',0

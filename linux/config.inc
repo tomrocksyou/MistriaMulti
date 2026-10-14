@@ -17,6 +17,7 @@ k_host db 5,'host='
 k_port db 5,'port='
 k_player db 7,'player='
 k_room db 5,'room='
+k_pass db 9,'password='
 room_default db '4d495354',0
 a_host_s db 'host',0
 a_join_s db 'join',0
@@ -68,6 +69,7 @@ a_host resb 32
 a_port resb 16
 a_player resb 16
 a_room resb 16
+a_pass resb 72
 
 section .text
 FN path2                        ; rcx destination (1100 bytes), rdx first part, r8 second part -> eax length, -1 if too long
@@ -543,6 +545,14 @@ FN load_config
     call v_room
     test eax, eax
     jz .bad
+    lea rcx, [k_pass]                  ; optional room password; an unusable one stops multiplayer, never opens the room
+    lea rdx, [a_pass]
+    mov r8d, 72
+    call cfg_get
+    lea rcx, [a_pass]
+    call v_pass
+    test eax, eax
+    jz .bad
     cmp dword [cfg_mode], 1
     jne .join
     mov dword [cfg_player], 0
@@ -610,6 +620,13 @@ FN cfg_save
     call pb_str
     lea rcx, [a_room]
     call pb_str
+    cmp byte [a_pass], 0
+    je .nopass
+    lea rcx, [t_cfg_pass]
+    call pb_str
+    lea rcx, [a_pass]
+    call pb_str
+.nopass:
     lea rcx, [t_crlf]
     call pb_str
     call pb_end
@@ -623,7 +640,13 @@ FN cfg_save
     lea rcx, [p1]
     lea rdx, [out_buf]
     mov r8d, r12d
+    mov dword [wf_mode], 0644o
+    cmp byte [a_pass], 0
+    je .write
+    mov dword [wf_mode], 0600o         ; a stored password is for this user only
+.write:
     call write_file
+    mov dword [wf_mode], 0644o
     jmp .d
 .bad:
     xor eax, eax
@@ -636,6 +659,7 @@ t_cfg_host db 13,10,'host=',0
 t_cfg_port db 13,10,'port=',0
 t_cfg_player db 13,10,'player=',0
 t_cfg_room db 13,10,'room=',0
+t_cfg_pass db 13,10,'password=',0
 t_crlf db 13,10,0
 align 8
 section .text

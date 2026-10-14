@@ -7,7 +7,7 @@ extern GetCommandLineW, CommandLineToArgvW, WideCharToMultiByte, MultiByteToWide
 extern GetTickCount64, GetStdHandle, CreateFileW, ReadFile, WriteFile, CloseHandle
 extern MoveFileExW, GetFileAttributesW, ExitProcess, LocalFree
 extern WSAStartup, WSACleanup, socket, bind, ioctlsocket, closesocket
-extern recvfrom, sendto, WSAPoll
+extern recvfrom, sendto, WSAPoll, BCryptGenRandom
 
 section .bss
 platform_argc resd 1
@@ -262,6 +262,18 @@ FN pl_atomic
 .bad:
     xor eax, eax
 .done:
+END_FN
+
+; RCX buffer, RDX length -> EAX 1 when filled with system randomness (BCryptGenRandom, system preferred RNG)
+FN pl_random
+    mov r8d, edx
+    mov rdx, rcx
+    xor ecx, ecx
+    mov r9d, 2
+    call BCryptGenRandom
+    test eax, eax
+    sete al
+    movzx eax, al
 END_FN
 
 FN pl_print

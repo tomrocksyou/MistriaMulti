@@ -46,6 +46,7 @@ WSTR f_mpsaves_star, "%s\FieldsOfMistria\multiplayer\saves\*.sav"
 WSTR f_mpsaves_file, "%s\FieldsOfMistria\multiplayer\saves\%S"
 WSTR f_mpsaves_dir, "%s\FieldsOfMistria\multiplayer\saves"
 WSTR n_cfg, "\launcher.cfg"
+WSTR n_authcfg, "auth.cfg"
 WSTR n_log, "\launcher.log"
 WSTR n_control, "\control.json"
 WSTR n_identity, "\local_identity.json"
@@ -65,12 +66,14 @@ r_flag db 'Multiplayer not started: --mistrimulti-direct was given. The game was
 r_paths db 'Multiplayer not started: could not work out the folders (LOCALAPPDATA?). The game was started normally.',13,10,0
 r_config db 'Multiplayer not started: launcher.cfg is missing or invalid. Run the launcher with --configure. The game was started normally.',13,10,0
 r_control db 'Multiplayer not started: control.json could not be written. The game was started normally.',13,10,0
+r_auth db 'Multiplayer not started: auth.cfg could not be written, so the room password cannot be applied. The game was started normally.',13,10,0
 r_helper db 'Multiplayer not started: the network helper could not be started (is mistrimulti-helper.exe next to the launcher, and is the port free?). The game was started normally.',13,10,0
 k_mode db 5,'mode='
 k_host db 5,'host='
 k_port db 5,'port='
 k_player db 7,'player='
 k_room db 5,'room='
+k_pass db 9,'password='
 room_default db '4d495354',0
 host_s_dummy db 0
 a_host_s db 'host',0
@@ -83,6 +86,11 @@ json_true db 'true',0
 json_false db 'false',0
 json_identity db '{"uid":"%s"}',0
 cfg_fmt db 'mode=%s',13,10,'host=%s',13,10,'port=%d',13,10,'player=%d',13,10,'room=%s',13,10,0
+f_cfg_pass db 'password=%s',13,10,0
+f_auth_key db 'key=%s\install.key',13,10,0
+f_auth_keys db 'keys=%s\trust_keys.txt',13,10,0
+f_auth_deny db 'deny=%s\deny.txt',13,10,0
+f_auth_pass db 'pass=%s',13,10,0
 t_stop db 'stop'
 t_stop_len equ $ - t_stop
 p_mode db 'Host a game (H) or join a friend (J)? ',0
@@ -156,6 +164,8 @@ a_host resb 32
 a_port resb 16
 a_player resb 16
 a_room resb 16
+a_pass resb 72
+auth_buf resb 4200
 uid_a resb 64
 epoch_a resb 40
 line_a resb 256
@@ -414,6 +424,14 @@ FN load_config
 .haveRoom:
     lea rcx, [a_room]
     call v_room
+    test eax, eax
+    jz .bad
+    lea rcx, [k_pass]                  ; optional room password; an unusable one stops multiplayer, never opens the room
+    lea rdx, [a_pass]
+    mov r8d, 72
+    call cfg_get
+    lea rcx, [a_pass]
+    call v_pass
     test eax, eax
     jz .bad
     cmp dword [cfg_mode], 1
@@ -686,6 +704,62 @@ FN write_control
     mov r8d, eax
     lea rcx, [p1]
     lea rdx, [utf8]
+    call write_file
+    jmp .d
+.bad:
+    xor eax, eax
+.d:
+END_FN
+
+; Writes <bridge>\auth.cfg for the helper: where it keeps the install key and the key store, the deny list, and the room
+; password (docs/SECURITY.md). Rewritten at every start, so a removed password disappears. eax=1 ok.
+FN write_auth
+    mov ecx, 65001
+    xor edx, edx
+    lea r8, [mod_dir]
+    mov r9d, -1
+    lea rax, [file_buf]
+    mov [rsp+32], rax
+    mov qword [rsp+40], 3000
+    mov qword [rsp+48], 0
+    mov qword [rsp+56], 0
+    call WideCharToMultiByte
+    test eax, eax
+    jz .bad
+    lea r12, [auth_buf]
+    mov rcx, r12
+    lea rdx, [f_auth_key]
+    lea r8, [file_buf]
+    call wsprintfA
+    add r12, rax
+    mov rcx, r12
+    lea rdx, [f_auth_keys]
+    lea r8, [file_buf]
+    call wsprintfA
+    add r12, rax
+    mov rcx, r12
+    lea rdx, [f_auth_deny]
+    lea r8, [file_buf]
+    call wsprintfA
+    add r12, rax
+    cmp byte [a_pass], 0
+    je .nopass
+    mov rcx, r12
+    lea rdx, [f_auth_pass]
+    lea r8, [a_pass]
+    call wsprintfA
+    add r12, rax
+.nopass:
+    lea rcx, [p1]
+    lea rdx, [f_slash]
+    lea r8, [bridge_dir]
+    lea r9, [n_authcfg]
+    call wsprintfW
+    lea r8, [auth_buf]
+    sub r12, r8
+    mov r8, r12
+    lea rcx, [p1]
+    lea rdx, [auth_buf]
     call write_file
     jmp .d
 .bad:
@@ -1153,6 +1227,10 @@ FN disc_start
     lea rdx, [room_default]
     call a_equal
     xor eax, 1                      ; flag bit 0: this host uses a custom room code
+    cmp byte [a_pass], 0
+    je .nopassflag
+    or al, 2                            ; flag bit 1: this host needs a room password
+.nopassflag:
     mov [disc_resp+5], al
     mov eax, [cfg_port]
     mov [disc_resp+6], ax
@@ -1580,6 +1658,10 @@ configure_main:
     jz cfg_giveup
     call load_config
     mov [have_old], eax
+    test eax, eax
+    jnz .keeppass
+    mov byte [a_pass], 0
+.keeppass:
     mov eax, [cfg_mode]
     mov [old_mode], eax
     mov eax, [cfg_player]
@@ -1784,6 +1866,16 @@ configure_main:
     lea rax, [a_room]
     mov [rsp+48], rax
     call wsprintfA
+    cmp byte [a_pass], 0
+    je .nopw
+    lea rcx, [utf8]
+    call lstrlenA
+    lea rcx, [utf8]
+    add rcx, rax
+    lea rdx, [f_cfg_pass]
+    lea r8, [a_pass]
+    call wsprintfA
+.nopw:
     lea rcx, [p1]
     lea rdx, [f_cat]
     lea r8, [mod_dir]
@@ -1982,6 +2074,13 @@ start:
     lea rcx, [epoch_a]
     call guid_hex
     call prepare_bridge
+    call write_auth
+    lea rbx, [r_auth]
+    test eax, eax
+    jnz .authok
+    cmp byte [a_pass], 0                ; without a password the helper still works (its keys stay in memory)
+    jne .direct
+.authok:
     mov ecx, 1
     call write_control
     lea rbx, [r_control]

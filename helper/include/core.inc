@@ -19,6 +19,30 @@
 %define P_EPOCH 56
 %define P_BUILD 64
 %define P_CACHE (64+MAX_STATE)
+%define TAG 16
+%define PKT_MAX (HEADER+FRAGMENT+TAG)
+%define HM_MAX 1536
+%define PW_ROUNDS 30000
+%define KS_MAX 256
+%define KS_ENTRY 48
+%define KS_TEXT (KS_MAX*98+16)
+%define DN_MAX 64
+%define A_STATE 0
+%define A_GEN 4
+%define A_PKT 8
+%define A_FRM 12
+%define A_LAST 16
+%define A_FP 24
+%define A_CN 40
+%define A_SK 56
+%define A_SIZE 96
+%define PKT_BUCKET_ADD 40
+%define PKT_BUCKET_CAP 800
+%define FRM_BUCKET_ADD 3
+%define FRM_BUCKET_CAP 60
+%define WINDOW_MS 20000
+%define CFG_BYTES 4096
+
 
 section .data
 udp_socket dq -1
@@ -74,11 +98,11 @@ rx_path resb 2112
 status_path resb 2112
 stop_path resb 2112
 file_bytes resb MAX_STATE+3
-packet_in resb HEADER+FRAGMENT+1
-packet_out resb HEADER+FRAGMENT
+packet_in resb PKT_MAX+1
+packet_out resb PKT_MAX
 source_address resb 16
 peers resb REC_SIZE*MAX_PLAYERS
-status_buffer resb 256
+status_buffer resb 640
 number_buffer resb 32
 
 section .text
@@ -117,6 +141,7 @@ FN mistria_main
     mov edx, 16
     call hash_bytes
     mov [r12+P_HASH], eax
+    call auth_init
     lea rcx, [started]
     call pl_print
     call publish_status
@@ -131,16 +156,17 @@ FN mistria_main
 .drain:
     mov rcx, [udp_socket]
     lea rdx, [packet_in]
-    mov r8d, HEADER+FRAGMENT+1
+    mov r8d, PKT_MAX+1
     lea r9, [source_address]
     call pl_recv
     test rax, rax
     js .send
     mov ecx, eax
-    call receive_fragment
+    call receive_packet
     dec ebx
     jnz .drain
 .send:
+    call auth_tick
     mov rax, [now_ms]
     sub rax, [last_send]
     mov edx, 1000
@@ -159,6 +185,7 @@ FN mistria_main
     cmp rax, 1000
     jb .loop
     call expire_peers
+    call auth_second
     call publish_status
     mov rax, [now_ms]
     mov [last_status], rax
@@ -350,6 +377,8 @@ FN parse_arguments
     mov r12d, eax
     mov ecx, 1
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     cmp dword [rax], 'host'
     je .host
     cmp dword [rax], 'join'
@@ -368,6 +397,8 @@ FN parse_arguments
 .port:
     mov ecx, 2
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_decimal
     jc .bad
@@ -380,6 +411,8 @@ FN parse_arguments
     mov [local_address+2], ax
     mov ecx, 3
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_decimal
     jc .bad
@@ -397,12 +430,16 @@ FN parse_arguments
     mov [local_id], eax
     mov ecx, 4
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_hex
     jc .bad
     mov [session_code], eax
     mov ecx, 5
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov r13, rax
     mov rcx, rax
     call text_length
@@ -429,11 +466,15 @@ FN parse_arguments
     je .good
     mov ecx, 6
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_ip
     jc .bad
     mov ecx, 7
     call pl_arg
+    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    jz .bad
     mov rcx, rax
     call parse_decimal
     jc .bad
@@ -524,9 +565,12 @@ FN send_local
     mov r12, rax
     cmp dword [mode_host], 0
     jne .host
+    cmp dword [g_state], 2
+    jne .done
     mov rcx, r12
     lea rdx, [host_address]
     mov r8d, [local_id]
+    lea r9, [g_sk]
     call send_record
     jmp .done
 .host:
@@ -534,27 +578,46 @@ FN send_local
 .peer:
     cmp ebx, MAX_PLAYERS
     jae .done
-    mov ecx, ebx
-    call peer_pointer
-    cmp dword [rax+P_PRESENT], 0
-    je .next
-    mov rdx, rax
     mov rcx, r12
+    mov edx, ebx
     xor r8d, r8d
-    call send_record
-.next:
+    call send_to_peer
     inc ebx
     jmp .peer
 .done:
 END_FN
 
-; RCX source record, RDX destination sockaddr, R8D original source player ID.
+; RCX source record, EDX recipient slot, R8D original source player ID: only to authenticated live peers
+FN send_to_peer
+    mov r12, rcx
+    mov ebx, edx
+    mov r14d, r8d
+    mov ecx, ebx
+    call auth_pointer
+    mov r13, rax
+    cmp dword [r13+A_STATE], 1
+    jne .done
+    mov ecx, ebx
+    call peer_pointer
+    cmp dword [rax+P_PRESENT], 0
+    je .done
+    mov rdx, rax
+    mov rcx, r12
+    mov r8d, r14d
+    lea r9, [r13+A_SK]
+    call send_record
+.done:
+END_FN
+
+; RCX source record, RDX destination sockaddr, R8D original source player ID, R9 32 byte session key.
+; Every datagram ends with a 16 byte HMAC tag over (direction byte, header, payload).
 FN send_record
     mov r12, rcx
     mov r13, rdx
     mov r14d, r8d
+    mov rsi, r9
     mov dword [packet_out], 'MSMP'
-    mov word [packet_out+4], 1
+    mov word [packet_out+4], 2
     mov word [packet_out+6], 0
     mov [packet_out+8], r14d
     mov eax, [r12+P_SEQ]
@@ -585,12 +648,30 @@ FN send_record
 .size:
     mov [rsp+64], r8d
     lea rcx, [packet_out+HEADER]
-    lea rdx, [r12+P_CACHE+r15]
+    lea rdx, [r12+P_CACHE]
+    add rdx, r15
+    call bytes_copy
+    mov dword [mb_len], 0
+    lea rcx, [mode_host]
+    mov edx, 1
+    call mb_add
+    lea rcx, [packet_out]
+    mov edx, [rsp+64]
+    add edx, HEADER
+    call mb_add
+    mov rcx, rsi
+    lea rdx, [hm_res]
+    call mb_hmac
+    mov eax, [rsp+64]
+    lea rcx, [packet_out+HEADER]
+    add rcx, rax
+    lea rdx, [hm_res]
+    mov r8d, TAG
     call bytes_copy
     mov rcx, [udp_socket]
     lea rdx, [packet_out]
     mov r8d, [rsp+64]
-    add r8d, HEADER
+    add r8d, HEADER+TAG
     mov r9, r13
     call pl_send
     test rax, rax
@@ -603,16 +684,35 @@ FN send_record
     jb .chunk
 END_FN
 
-; Datagram length in ECX; buffer/address are platform-filled globals.
-FN receive_fragment
-    cmp ecx, HEADER+1
+; Datagram length in ECX; the datagram and its source are in the platform-filled packet_in / source_address.
+FN receive_packet
+    cmp ecx, 8
     jb .bad
-    cmp ecx, HEADER+FRAGMENT
+    cmp ecx, PKT_MAX
     ja .bad
+    cmp dword [packet_in], 'MSAU'
+    je .auth
+    call receive_fragment
+    jmp .done
+.auth:
+    call auth_receive
+    jmp .done
+.bad:
+    inc qword [bad_packets]
+.done:
+END_FN
+
+; Datagram length in ECX (a 40 byte header, 1 to 1152 payload bytes, the 16 byte tag).
+FN receive_fragment
+    cmp ecx, HEADER+TAG+1
+    jb .bad
+    cmp ecx, PKT_MAX
+    ja .bad
+    sub ecx, TAG
     mov r15d, ecx
     cmp dword [packet_in], 'MSMP'
     jne .bad
-    cmp dword [packet_in+4], 1
+    cmp dword [packet_in+4], 2
     jne .bad
     mov eax, [session_code]
     cmp eax, [packet_in+16]
@@ -646,32 +746,60 @@ FN receive_fragment
     add ecx, HEADER
     cmp ecx, r15d
     jne .bad
+    ; Authentication comes before any state is touched.
+    xor esi, esi
     cmp dword [mode_host], 0
     je .client
     test r12d, r12d
     jz .bad
-    jmp .record
-.client:
-    mov rax, [source_address]
-    cmp rax, [host_address]
-    jne .bad
-.record:
+    mov ecx, r12d
+    call auth_pointer
+    mov rsi, rax
     mov ecx, r12d
     call peer_pointer
     mov r13, rax
-    cmp dword [mode_host], 0
-    je .source_ok
+    cmp dword [rsi+A_STATE], 1
+    jne .unknown
     cmp dword [r13+P_PRESENT], 0
-    je .new_peer
+    je .unknown
     mov rax, [source_address]
     cmp rax, [r13+P_ADDR]
     jne .bad
+    mov rcx, rsi
+    call bucket_packet
+    test eax, eax
+    jz .limited
+    lea rdx, [rsi+A_SK]
+    mov ecx, r15d
+    xor r8d, r8d
+    call verify_packet
+    test eax, eax
+    jz .bad
     jmp .source_ok
-.new_peer:
+.unknown:
+    inc qword [unknown_sources]
+    call send_resync
+    jmp .done
+.limited:
+    inc qword [limited_packets]
+    jmp .done
+.client:
+    cmp dword [g_state], 2
+    jne .bad
     mov rax, [source_address]
-    mov [r13+P_ADDR], rax
-    mov rax, [source_address+8]
-    mov [r13+P_ADDR+8], rax
+    cmp rax, [host_address]
+    jne .bad
+    lea rdx, [g_sk]
+    mov ecx, r15d
+    mov r8d, 1
+    call verify_packet
+    test eax, eax
+    jz .bad
+    mov rax, [now_ms]
+    mov [g_last_rx], rax
+    mov ecx, r12d
+    call peer_pointer
+    mov r13, rax
 .source_ok:
     mov rax, [now_ms]
     mov [r13+P_SEEN], rax
@@ -717,7 +845,8 @@ FN receive_fragment
     mov eax, [packet_in+24]
     cmp eax, [r13+P_LENGTH]
     jne .bad
-    lea rcx, [r13+P_BUILD+r14]
+    lea rcx, [r13+P_BUILD]
+    add rcx, r14
     lea rdx, [packet_in+HEADER]
     mov r8d, r15d
     sub r8d, HEADER
@@ -732,6 +861,14 @@ FN receive_fragment
     call hash_bytes
     cmp eax, [r13+P_HASH]
     jne .corrupt
+    ; A host spends one completed-frame token per accepted snapshot; a peer out of tokens is simply not published.
+    test rsi, rsi
+    jz .publish
+    mov rcx, rsi
+    call bucket_frame
+    test eax, eax
+    jz .frame_limited
+.publish:
     mov eax, [r13+P_ASM_SEQ]
     mov [r13+P_SEQ], eax
     lea rcx, [r13+P_CACHE]
@@ -754,14 +891,10 @@ FN receive_fragment
     jae .done
     cmp ebx, r12d
     je .next_peer
-    mov ecx, ebx
-    call peer_pointer
-    cmp dword [rax+P_PRESENT], 0
-    je .next_peer
-    mov rdx, rax
     mov rcx, r13
+    mov edx, ebx
     mov r8d, r12d
-    call send_record
+    call send_to_peer
 .next_peer:
     inc ebx
     jmp .forward
@@ -775,8 +908,16 @@ FN receive_fragment
     inc eax
     cmp ax, [packet_in+30]
     jne .done
+    mov rcx, rsi
+    call bucket_frame
+    test eax, eax
+    jz .frame_limited
     mov ebx, 1
     jmp .forward
+.frame_limited:
+    inc qword [limited_packets]
+    mov dword [r13+P_BITS], 0
+    jmp .done
 .corrupt:
     mov dword [r13+P_BITS], 0
 .bad:
@@ -817,17 +958,8 @@ FN expire_peers
     sub rax, [r12+P_SEEN]
     cmp rax, 10000
     jb .next
-    mov dword [r12+P_PRESENT], 0
-    mov dword [r12+P_COMPLETE], 0
-    mov dword [r12+P_BITS], 0
-    mov dword [r12+P_EPOCH], 0
-    lea rcx, [r12+P_CACHE]
-    lea rdx, [inactive_json]
-    call text_copy
-    mov dword [r12+P_LENGTH], 16
     mov ecx, ebx
-    mov rdx, r12
-    call publish_record
+    call peer_drop
 .next:
     inc ebx
     jmp .peer
@@ -908,6 +1040,46 @@ FN publish_status
     mov rcx, [now_ms]
     call append_number
     mov rcx, rax
+    lea rdx, [status_auth]
+    call text_copy
+    mov rdx, rax
+    mov ecx, 1
+    cmp dword [mode_host], 0
+    jne .authnum
+    mov ecx, [g_state]
+.authnum:
+    call append_number
+    mov rcx, rax
+    lea rdx, [status_reject]
+    call text_copy
+    mov rdx, rax
+    mov ecx, [g_reject]
+    call append_number
+    mov rcx, rax
+    lea rdx, [status_limited]
+    call text_copy
+    mov rdx, rax
+    mov rcx, [limited_packets]
+    call append_number
+    mov rcx, rax
+    lea rdx, [status_authfail]
+    call text_copy
+    mov rdx, rax
+    mov rcx, [auth_failures]
+    call append_number
+    mov rcx, rax
+    lea rdx, [status_denied]
+    call text_copy
+    mov rdx, rax
+    mov rcx, [denied_joins]
+    call append_number
+    mov rcx, rax
+    lea rdx, [status_unknown]
+    call text_copy
+    mov rdx, rax
+    mov rcx, [unknown_sources]
+    call append_number
+    mov rcx, rax
     lea rdx, [status_end]
     call text_copy
     lea rdx, [status_buffer]
@@ -916,3 +1088,4 @@ FN publish_status
     lea rcx, [status_path]
     call pl_atomic
 END_FN
+%include "auth.inc"

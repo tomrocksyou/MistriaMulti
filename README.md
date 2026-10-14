@@ -35,7 +35,9 @@ Implemented:
 - Atomic game/helper file publication; bounded fragmentation and reassembly; replay rejection;
   one-second idle heartbeats; automatic helper shutdown from the Windows launcher.
 - Guest character creation uses the game's customization menu and saves an independent profile.
-- Profiles use a Steam ID when available, with a persistent local identity as fallback.
+- Profiles use a Steam ID when available, with a persistent local identity as fallback. Joining is authenticated: an optional host
+  password, per-install keys, tagged packets, identity binding with host approval (F7), a ban list and per-player rate limits
+  (`docs/SECURITY.md`; the room code is not a password).
 - Each hosted world stores separate player records for appearance, inventory, equipment,
   money, skill XP, perks, spells, friendship points and relationship status.
 - Guests load their hosted-world record on reconnect. New guests start with the game's
