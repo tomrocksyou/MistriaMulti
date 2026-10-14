@@ -138,6 +138,7 @@ copied resd 1
 section .text
 global start
 %include "winutil.inc"
+%include "world.inc"
 %include "mp.inc"
 
 
@@ -1105,6 +1106,45 @@ start:
     mov r14d, 30
     mov r15d, 7
     call make_child
+    ; test hook:  --fetch <ip> <destination folder> <result file>   (downloads the host's world, writes the result code)
+    cmp dword [argc], 5
+    jb .nofetch
+    mov rax, [argv]
+    mov rcx, [rax+8]
+    lea rdx, [s_fetch]
+    call wequal
+    test eax, eax
+    jz .nofetch
+    mov rax, [argv]
+    mov rdx, [rax+16]
+    lea rcx, [mp_ascii]
+    mov r8d, 20
+    call wide_to_ascii
+    lea rcx, [mp_ascii]
+    call v_ipv4
+    test eax, eax
+    jz .fetch_bad
+    lea rcx, [mp_ascii]
+    call inet_addr
+    mov ecx, eax
+    mov rax, [argv]
+    mov rdx, [rax+24]
+    mov dword [wf_connect_ms], 1500
+    call world_fetch
+    add al, '0'
+    mov [mp_ascii+32], al
+    jmp .fetch_write
+.fetch_bad:
+    mov byte [mp_ascii+32], '9'
+.fetch_write:
+    mov rax, [argv]
+    mov rcx, [rax+32]
+    lea rdx, [mp_ascii+32]
+    mov r8d, 1
+    call write_file
+    xor ecx, ecx
+    call ExitProcess
+.nofetch:
     ; test hook:  --scan <file>
     cmp dword [argc], 3
     jb .noscan
