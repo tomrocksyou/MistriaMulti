@@ -1,7 +1,24 @@
 # MistriMulti handoff (read this first in a new chat)
 
 Written at the end of the first real two-computer test session. Repo `tomrocksyou/MistriaMulti`, working branch
-`claude/epic-meitner-jwbuc0` (commit and push there; never open a pull request unless the user asks).
+`claude/stoic-gates-o8v369` (was `claude/epic-meitner-jwbuc0`) (commit and push there; never open a pull request unless the user asks).
+
+## 0. Update (second session, mod 0.2.5): first working host + join
+
+Host on Debian, join on Windows through the in-game menu: both characters are visible and move correctly. Lessons from the
+real game (the stand-in tests could not catch them; keep them in mind for every GML change):
+
+- **`mmapi_register(fn)` is a one-off installer, not a per-frame tick.** The whole mod now runs from `ui.draw_gui`
+  (`mistrimulti_draw_gui` in `MistriMultiBoot.gml`), which fires every frame on the title screen and in a world.
+- **Missing built-ins in the mod runtime** ("no such field `x` in <object>"): `variable_struct_exists`, `draw_set_alpha`,
+  `draw_set_color`, `draw_text_transformed` (so probably all `draw_*`). Use `s[$ "key"] == undefined`. The badge cannot draw
+  yet (it needs another way to draw text, e.g. a game script); the clock overlay (`mistrimulti_clock_draw`) has the same problem.
+  F8 shows the status as a notification and works.
+- **`mmapi_mod_data_dir` follows `CONFIG_DIRECTORY`**, which the multiplayer save space moves to `<config>/multiplayer`. Use
+  `mistrimulti_data_dir()` (read once at load). MMAPI's own log for the mod may also move into
+  `<config>/multiplayer/mod_data/mistrimulti/logs` while in a multiplayer world: check both logs.
+- Info lines do appear in the mod log (the earlier "warnings only" note was wrong).
+- Next: walk the `docs/SYNC-*.md` checklists in the real game (clock first), then the badge.
 
 ## 1. What this is and what the user wants
 
