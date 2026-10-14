@@ -25,6 +25,9 @@ fake = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else exe.parent / "fakeg
 on_windows = os.name == "nt"
 WINE = "/usr/lib/wine/wine64"
 PREFIX = os.environ.get("WINEPREFIX", "/tmp/wp")
+# Wine refuses to create a prefix directly in a /tmp it does not own (GitHub runners): create the folder first.
+if not on_windows:
+    os.makedirs(PREFIX, exist_ok=True)
 EXE_BYTES = exe.read_bytes()
 TOOLS = ["MistriMulti.exe", "MistriMultiLauncher.exe", "mistrimulti-helper.exe", "mistrimulti-steam-id.exe"]
 

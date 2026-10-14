@@ -70,7 +70,10 @@ def fetch(dest, handler=None):
         result.unlink()
     host = FakeHost(handler) if handler else None
     cmd = ([str(exe)] if on_windows else ["xvfb-run", "-a", WINE, str(exe)]) + ["--fetch", "127.0.0.1", wpath(dest), wpath(result)]
-    env = dict(os.environ, WINEDEBUG="-all", WINEPREFIX=os.environ.get("WINEPREFIX", "/tmp/wp"))
+    prefix = os.environ.get("WINEPREFIX", "/tmp/wp")
+    if not on_windows:
+        os.makedirs(prefix, exist_ok=True)   # Wine will not create a prefix directly in a /tmp it does not own
+    env = dict(os.environ, WINEDEBUG="-all", WINEPREFIX=prefix)
     try:
         subprocess.run(cmd, env=env, timeout=90, check=True, capture_output=True)
     finally:
