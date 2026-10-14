@@ -253,6 +253,11 @@ PROGDIR=''
 for cand in "$SRC" "$SRC/build"; do
     if have_all "$cand"; then PROGDIR=$cand; break; fi
 done
+# A source checkout rebuilds when it can, so old programs from an earlier build are never reused after an update.
+if [ "$PROGDIR" = "$SRC/build" ] && [ -f "$SRC/scripts/build-linux.sh" ] && command -v nasm >/dev/null 2>&1 && command -v ld >/dev/null 2>&1; then
+    say 'Rebuilding the programs so they match this version.'
+    PROGDIR=''
+fi
 if [ -n "$PROGDIR" ]; then
     say "Using the program files in $PROGDIR"
 else
