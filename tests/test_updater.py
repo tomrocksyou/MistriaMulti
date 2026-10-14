@@ -1,6 +1,6 @@
 """Runs the assembly updater (under Wine on Linux) against a local HTTP server.
 
-  python3 tests/test_updater.py build/MistriMultiUpdater.exe
+  python3 tests/test_updater.py build/MistriMulti.exe
 
 Covers: update check, verified download + install, checksum mismatch rejection, Save Solo backup.
 Needs wine64 and xvfb-run on Linux. On Windows it runs the exe directly.

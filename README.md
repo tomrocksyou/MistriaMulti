@@ -50,15 +50,18 @@ are blocked during multiplayer. The host can save its farm normally. See
    Windows executable is also included under `build/` in the supplied project.
 3. Run `Install-Mod.bat`. It copies **only this project's own mod** into your game's `mods/` folder.
 4. Open MOMI, select **MistriMulti**, and click **Install**. Close the game during installation.
-5. Everyone double-clicks `MistriMultiLauncher.exe` (or `Play.bat`) once. It asks whether you want to host (H) or join
-   a friend (J). **Joining only needs the host's IP address**: with Tailscale, that is the host's Tailscale address
-   (it starts with `100.`). Port, room code and player number all have defaults; press Enter. Each friend gets a
-   player number from 1 to 7 automatically, so if two friends end up with the same one, run the setup again and
-   type a different number. A room code is optional (only useful if you want to keep strangers' packets out of a
-   session on a public IP; the host and friends must then type the same one).
-   The line to paste into Steam is copied to your clipboard when setup finishes.
+5. Everyone opens `MistriMulti.exe` (the manager window) once:
+   - **Host a game**: one click. It shows the addresses to give your friends (your Tailscale IP, which starts with `100.`,
+     and your local-network IP).
+   - **Join a game...**: opens a list of hosts and **scans for them** when it opens; **Refresh** scans again. Select a host
+     and press **Join selected**. The scan uses broadcast on your local network and the peer list of Tailscale (if it is
+     installed); it does not sweep IP ranges. If your host is not listed, type its IP in the box and press **Join this IP**.
+     Port, room code and player number are filled in for you (each friend needs a different player number, 1-7: change
+     it in the box if two friends end up with the same one). A room code is only needed if the host chose one.
+   - **Steam setup...**: copies the launch line (see step 6) to the clipboard.
+   (Without the manager, double-clicking `MistriMultiLauncher.exe` or `Play.bat` asks the same questions in a console.)
 6. **Click Play in Steam from now on.** One time only: in Steam, right-click the game, Properties, Launch Options,
-   and paste the line `Play.bat` prints (`"<folder>\MistriMultiLauncher.exe" --steam %command%`). Steam then runs the
+   and paste the launch line (`"<folder>\MistriMultiLauncher.exe" --steam %command%`; the manager's **Steam setup...** button copies it). Steam then runs the
    launcher, which starts the network helper from your saved details and launches the game. If anything is wrong
    with the multiplayer setup the game still starts normally; the reason is written to
    `%LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti\launcher.log`.

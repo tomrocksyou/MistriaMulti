@@ -17,6 +17,7 @@ import time
 on_windows = os.name == "nt"
 WINE = "/usr/lib/wine/wine64"
 launcher, helper, fake = (Path(a).resolve() for a in sys.argv[1:4])
+updater_exe = Path(sys.argv[4]).resolve() if len(sys.argv) > 4 else None
 
 
 def wpath(p):
@@ -297,6 +298,77 @@ def test_discovery_responder():
         sb.cleanup()
 
 
+def scan_with_updater(sb, extra="127.0.0.1"):
+    out = sb.root / "scan.txt"
+    if out.exists():
+        out.unlink()
+    exe = str(updater_exe)
+    cmd = ([exe] if on_windows else ["xvfb-run", "-a", WINE, exe]) + ["--scan", wpath(out)]
+    env = dict(sb.env(), MISTRIMULTI_SCAN_EXTRA=extra)
+    subprocess.run(cmd, env=env, timeout=60, check=True, capture_output=True)
+    return out.read_text() if out.exists() else ""
+
+
+def test_scan():
+    import socket
+    import threading
+    if updater_exe is None:
+        print("scan: skipped (pass the updater exe as the fourth argument)")
+        return
+    # 1. a fake host: names are cleaned, ports and the custom-room flag are read, duplicates are collapsed
+    sb = Sandbox()
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(("127.0.0.1", 7776))
+        sock.settimeout(0.3)
+        stop = threading.Event()
+
+        def serve():
+            while not stop.is_set():
+                try:
+                    data, addr = sock.recvfrom(256)
+                except OSError:
+                    continue
+                if len(data) == 64 and data[:4] == b"MSDQ":
+                    name = b"Tom\x01\x7f PC\xe9" + b"x" * 40
+                    reply = b"MSDR\x01\x01" + (4242).to_bytes(2, "little") + name[:31].ljust(32, b"\x00") + b"\x00" * 24
+                    sock.sendto(reply, addr)
+                    sock.sendto(reply, addr)          # duplicate answer
+                    sock.sendto(b"garbage", addr)
+                    sock.sendto(b"MSDR\x01" + b"\x00" * 10, addr)   # wrong length
+        t = threading.Thread(target=serve, daemon=True)
+        t.start()
+        text = scan_with_updater(sb)
+        stop.set()
+        lines = [l for l in text.splitlines() if l.strip()]
+        assert len(lines) == 1, text
+        ip, port, flags, name = lines[0].split(" ", 3)
+        assert ip == "127.0.0.1" and port == "4242" and flags == "1", lines[0]
+        assert name.startswith("Tom") and all(32 <= ord(c) < 127 for c in name), repr(name)
+        sock.close()
+        t.join(timeout=2)
+    finally:
+        sb.cleanup()
+    # 2. the real launcher hosting
+    sb = Sandbox()
+    try:
+        sb.config("mode=host\r\nport=47871\r\n")
+        proc = sb.steam()
+        assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
+        found = ""
+        for _ in range(6):
+            found = scan_with_updater(sb)
+            if "127.0.0.1" in found:
+                break
+        lines = [l for l in found.splitlines() if l.strip()]
+        assert lines and lines[0].split(" ")[0] == "127.0.0.1" and lines[0].split(" ")[1] == "47871" and lines[0].split(" ")[2] == "0", found
+        finish(proc)
+        assert scan_with_updater(sb).strip() == "", "no host should be found after the game closed"
+        print("scan: finds the real host, cleans names, ignores junk and duplicates, finds nothing when nobody hosts")
+    finally:
+        sb.cleanup()
+
+
 def test_fuzz():
     import random
     rng = random.Random(1234)
@@ -367,5 +439,6 @@ test_backup_prune()
 test_configure()
 test_fuzz()
 test_discovery_responder()
+test_scan()
 test_helper_dies_with_launcher()
 print("PASS")

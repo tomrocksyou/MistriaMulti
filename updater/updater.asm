@@ -13,7 +13,7 @@ extern GetModuleHandleW, ExitProcess, GetCommandLineW, LocalFree, GetFileAttribu
 extern CommandLineToArgvW
 extern RegisterClassExW, CreateWindowExW, DefWindowProcW, ShowWindow, UpdateWindow, GetMessageW, TranslateMessage
 extern DispatchMessageW, PostQuitMessage, SendMessageW, SetWindowTextW, LoadCursorW, wsprintfW
-extern GetStockObject, GetEnvironmentVariableW, CreateDirectoryW, CopyFileW, DeleteFileW, MoveFileExW, WriteFile
+extern UpdateWindow, GetModuleFileNameW, GetStockObject, GetEnvironmentVariableW, CreateDirectoryW, CopyFileW, DeleteFileW, MoveFileExW, WriteFile
 extern FindFirstFileW, FindNextFileW, FindClose, GetLocalTime, lstrlenW
 extern SHGetKnownFolderPath, CoTaskMemFree
 extern WinHttpOpen, WinHttpConnect, WinHttpOpenRequest, WinHttpSendRequest, WinHttpReceiveResponse
@@ -21,10 +21,11 @@ extern WinHttpQueryHeaders, WinHttpReadData, WinHttpCloseHandle
 extern BCryptOpenAlgorithmProvider, BCryptHash, BCryptCloseAlgorithmProvider
 
 section .data
+WSTR clip_static, "STATIC"
 WSTR cls_name, "MistriMultiUpdater"
 WSTR cls_static, "STATIC"
 WSTR cls_button, "BUTTON"
-WSTR title, "MistriMulti Updater"
+WSTR title, "MistriMulti"
 WSTR txt_check, "Check for updates"
 WSTR txt_update, "Update"
 WSTR txt_save, "Save Solo"
@@ -89,6 +90,8 @@ align 8
 cand_table dq cand_1, cand_2, cand_3, cand_4
 
 section .bss
+sinfo resb 104
+pinfo resb 24
 h_inst resq 1
 h_wnd resq 1
 h_status resq 1
@@ -135,6 +138,7 @@ copied resd 1
 section .text
 global start
 %include "winutil.inc"
+%include "mp.inc"
 
 
 
@@ -274,7 +278,7 @@ FN make_child
     mov [rsp+40], r12          ; y
     mov [rsp+48], r13          ; w
     mov [rsp+56], r14          ; h
-    mov rax, [h_wnd]
+    mov rax, [cur_parent]
     mov [rsp+64], rax          ; parent
     mov [rsp+72], r15          ; control id as menu
     mov rax, [h_inst]
@@ -887,6 +891,24 @@ FN wndproc
     je .do_save
     cmp eax, 4
     je .close
+    cmp eax, 5
+    je .do_host
+    cmp eax, 6
+    je .do_join
+    cmp eax, 7
+    je .do_steam
+    xor eax, eax
+    jmp .done
+.do_host:
+    call mp_do_host
+    xor eax, eax
+    jmp .done
+.do_join:
+    call mp_open_join
+    xor eax, eax
+    jmp .done
+.do_steam:
+    call mp_do_steam
     xor eax, eax
     jmp .done
 .do_check:
@@ -980,6 +1002,16 @@ start:
     mov [wc+64], rax
     lea rcx, [wc]
     call RegisterClassExW
+    lea rax, [join_proc]               ; second window class: the Join window
+    mov [wc+8], rax
+    lea rax, [mp_join_class]
+    mov [wc+64], rax
+    lea rcx, [wc]
+    call RegisterClassExW
+    lea rax, [wndproc]
+    mov [wc+8], rax
+    lea rax, [cls_name]
+    mov [wc+64], rax
     ; main window
     xor ecx, ecx
     lea rdx, [cls_name]
@@ -988,7 +1020,7 @@ start:
     mov dword [rsp+32], 0x80000000
     mov dword [rsp+40], 0x80000000
     mov qword [rsp+48], 520
-    mov qword [rsp+56], 330
+    mov qword [rsp+56], 340
     mov qword [rsp+64], 0
     mov qword [rsp+72], 0
     mov rax, [h_inst]
@@ -996,6 +1028,7 @@ start:
     mov qword [rsp+88], 0
     call CreateWindowExW
     mov [h_wnd], rax
+    mov [cur_parent], rax
     ; status text
     lea rcx, [cls_static]
     lea rdx, [txt_start]
@@ -1003,7 +1036,7 @@ start:
     mov r9d, 16
     mov r12d, 12
     mov r13d, 480
-    mov r14d, 170
+    mov r14d, 150
     mov r15d, 10
     call make_child
     mov [h_status], rax
@@ -1012,7 +1045,7 @@ start:
     lea rdx, [txt_check]
     mov r8d, 0x50010000        ; WS_CHILD | WS_VISIBLE | WS_TABSTOP
     mov r9d, 16
-    mov r12d, 200
+    mov r12d, 176
     mov r13d, 140
     mov r14d, 28
     mov r15d, 1
@@ -1021,7 +1054,7 @@ start:
     lea rdx, [txt_update]
     mov r8d, 0x50010000
     mov r9d, 164
-    mov r12d, 200
+    mov r12d, 176
     mov r13d, 100
     mov r14d, 28
     mov r15d, 2
@@ -1031,7 +1064,7 @@ start:
     lea rdx, [txt_save]
     mov r8d, 0x50010000
     mov r9d, 272
-    mov r12d, 200
+    mov r12d, 176
     mov r13d, 100
     mov r14d, 28
     mov r15d, 3
@@ -1040,11 +1073,54 @@ start:
     lea rdx, [txt_close]
     mov r8d, 0x50010000
     mov r9d, 380
-    mov r12d, 200
+    mov r12d, 176
     mov r13d, 100
     mov r14d, 28
     mov r15d, 4
     call make_child
+    lea rcx, [cls_button]
+    lea rdx, [mp_t_hostbtn]
+    mov r8d, 0x50010000
+    mov r9d, 16
+    mov r12d, 214
+    mov r13d, 150
+    mov r14d, 30
+    mov r15d, 5
+    call make_child
+    lea rcx, [cls_button]
+    lea rdx, [mp_t_joinbtn]
+    mov r8d, 0x50010000
+    mov r9d, 176
+    mov r12d, 214
+    mov r13d, 150
+    mov r14d, 30
+    mov r15d, 6
+    call make_child
+    lea rcx, [cls_button]
+    lea rdx, [mp_t_steambtn]
+    mov r8d, 0x50010000
+    mov r9d, 336
+    mov r12d, 214
+    mov r13d, 144
+    mov r14d, 30
+    mov r15d, 7
+    call make_child
+    ; test hook:  --scan <file>
+    cmp dword [argc], 3
+    jb .noscan
+    mov rax, [argv]
+    mov rcx, [rax+8]
+    lea rdx, [s_scan]
+    call wequal
+    test eax, eax
+    jz .noscan
+    call mp_scan
+    mov rax, [argv]
+    mov rcx, [rax+16]
+    call mp_dump_scan
+    xor ecx, ecx
+    call ExitProcess
+.noscan:
     ; game + installed version
     call find_game
     test eax, eax
@@ -1094,6 +1170,14 @@ start:
     mov rcx, [h_wnd]
     mov edx, 5
     call ShowWindow
+    ; MISTRIMULTI_OPEN_JOIN=1 opens the Join window straight away (used for screenshots)
+    lea rcx, [mp_e_openjoin]
+    lea rdx, [wpath1]
+    mov r8d, 4
+    call GetEnvironmentVariableW
+    test eax, eax
+    jz .pump
+    call mp_open_join
 .pump:
     lea rcx, [msg]
     xor edx, edx

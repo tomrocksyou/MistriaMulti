@@ -40,7 +40,7 @@ WSTR f_helpercmd_join, `"%s\\mistrimulti-helper.exe" join %d %d %s "%s" %s %d`
 WSTR f_stamp, "\%04d%02d%02d-%02d%02d%02d"
 WSTR f_launchopt, `"%s" --steam `
 WSTR s_command, "%command%"
-WSTR s_static, "STATIC"
+WSTR clip_static, "STATIC"
 WSTR n_cfg, "\launcher.cfg"
 WSTR n_log, "\launcher.log"
 WSTR n_control, "\control.json"
@@ -166,148 +166,11 @@ section .text
 global start
 %include "winutil.inc"
 
-; ---------------- small utilities ----------------
-FN to_forward                   ; rcx wide string: '\' -> '/' in place
-.l: movzx eax, word [rcx]
-    test ax, ax
-    jz .d
-    cmp ax, '\'
-    jne .n
-    mov word [rcx], '/'
-.n: add rcx, 2
-    jmp .l
-.d:
-END_FN
 
-FN cut_last_component           ; rcx wide path: truncate at the last '\' or '/'
-    mov rsi, rcx
-    xor r8, r8                  ; position of last separator + 1
-    xor r9d, r9d
-.l: movzx eax, word [rsi+r9*2]
-    test ax, ax
-    jz .e
-    cmp ax, '\'
-    je .s
-    cmp ax, '/'
-    jne .n
-.s: lea r8, [r9+1]
-.n: inc r9
-    jmp .l
-.e: test r8, r8
-    jz .d
-    dec r8
-    mov word [rsi+r8*2], 0
-.d:
-END_FN
 
-FN a_equal                      ; rcx, rdx ASCII strings -> eax 1 if equal
-.l: mov al, [rcx]
-    cmp al, [rdx]
-    jne .no
-    test al, al
-    jz .yes
-    inc rcx
-    inc rdx
-    jmp .l
-.yes:
-    mov eax, 1
-    jmp .d
-.no:
-    xor eax, eax
-.d:
-END_FN
 
-FN a2i                          ; rcx ASCII decimal (digits only, 1-6) -> eax, or -1
-    xor eax, eax
-    xor edx, edx
-.l: movzx r8d, byte [rcx]
-    test r8d, r8d
-    jz .e
-    sub r8d, '0'
-    cmp r8d, 9
-    ja .bad
-    imul eax, eax, 10
-    add eax, r8d
-    inc edx
-    cmp edx, 6
-    ja .bad
-    inc rcx
-    jmp .l
-.e: test edx, edx
-    jnz .d
-.bad:
-    mov eax, -1
-.d:
-END_FN
 
-FN v_ipv4                       ; rcx ASCII -> eax 1 if a.b.c.d with each part 0-255
-    xor r8d, r8d
-.group:
-    xor edx, edx
-    xor eax, eax
-.dg:
-    movzx r9d, byte [rcx]
-    lea r10d, [r9-'0']
-    cmp r10d, 9
-    ja .sep
-    imul eax, eax, 10
-    add eax, r10d
-    inc edx
-    cmp edx, 3
-    ja .bad
-    cmp eax, 255
-    ja .bad
-    inc rcx
-    jmp .dg
-.sep:
-    test edx, edx
-    jz .bad
-    inc r8d
-    cmp r9d, '.'
-    je .dot
-    test r9d, r9d
-    jnz .bad
-    cmp r8d, 4
-    jne .bad
-    mov eax, 1
-    jmp .d
-.dot:
-    cmp r8d, 4
-    jae .bad
-    inc rcx
-    jmp .group
-.bad:
-    xor eax, eax
-.d:
-END_FN
 
-FN v_room                       ; rcx ASCII -> eax 1 if exactly 8 hex digits
-    xor edx, edx
-.l: movzx eax, byte [rcx+rdx]
-    test al, al
-    jz .e
-    cmp al, '0'
-    jb .bad
-    cmp al, '9'
-    jbe .ok
-    or al, 32
-    cmp al, 'a'
-    jb .bad
-    cmp al, 'f'
-    ja .bad
-.ok:
-    inc edx
-    cmp edx, 8
-    ja .bad
-    jmp .l
-.e: cmp edx, 8
-    sete al
-    movzx eax, al
-    jmp .d
-.bad:
-    xor eax, eax
-.d:
-END_FN
 
 FN wsubstr                      ; rcx haystack wide, rdx needle wide -> eax 1 if contained
     mov rsi, rcx
@@ -587,52 +450,6 @@ FN load_config
 .d:
 END_FN
 
-; ---------------- processes ----------------
-; rcx = writable command line (wide), rdx = working directory (wide) or 0, r8 = inheritable stdout handle or 0, r9d = creation flags
-; -> rax = process handle, 0 on failure
-FN spawn
-    mov r12, rcx
-    mov r13, rdx
-    mov r14, r8
-    mov r15d, r9d
-    lea rdi, [sinfo]
-    xor eax, eax
-    mov ecx, 104
-    rep stosb
-    mov dword [sinfo], 104
-    test r14, r14
-    jz .nostd
-    mov dword [sinfo+60], 0x100           ; STARTF_USESTDHANDLES
-    mov [sinfo+88], r14
-    mov [sinfo+96], r14
-.nostd:
-    xor ecx, ecx
-    mov rdx, r12
-    xor r8d, r8d
-    xor r9d, r9d
-    xor eax, eax
-    test r14, r14
-    setnz al
-    mov [rsp+32], rax                  ; bInheritHandles
-    mov eax, r15d
-    mov [rsp+40], rax                  ; creation flags
-    mov qword [rsp+48], 0              ; environment
-    mov [rsp+56], r13                  ; working directory
-    lea rax, [sinfo]
-    mov [rsp+64], rax
-    lea rax, [pinfo]
-    mov [rsp+72], rax
-    call CreateProcessW
-    test eax, eax
-    jz .fail
-    mov rcx, [pinfo+8]
-    call CloseHandle
-    mov rax, [pinfo]
-    jmp .d
-.fail:
-    xor eax, eax
-.d:
-END_FN
 
 
 FN get_uid
@@ -1392,51 +1209,7 @@ FN copy_launch_option
     lea r8, [p2]
     call join_wide
     lea rcx, [p2]
-    call lstrlenW
-    lea r13, [rax*2+2]
-    mov ecx, 2                      ; GMEM_MOVEABLE
-    mov rdx, r13
-    call GlobalAlloc
-    test rax, rax
-    jz .d
-    mov r12, rax
-    mov rcx, r12
-    call GlobalLock
-    test rax, rax
-    jz .d
-    mov rdi, rax
-    lea rsi, [p2]
-    mov rcx, r13
-    rep movsb
-    mov rcx, r12
-    call GlobalUnlock
-    ; the clipboard needs an owner window: a hidden message-only window of the built-in STATIC class
-    xor ecx, ecx
-    lea rdx, [s_static]
-    xor r8d, r8d
-    xor r9d, r9d
-    mov qword [rsp+32], 0
-    mov qword [rsp+40], 0
-    mov qword [rsp+48], 0
-    mov qword [rsp+56], 0
-    mov qword [rsp+64], -3          ; HWND_MESSAGE
-    mov qword [rsp+72], 0
-    mov qword [rsp+80], 0
-    mov qword [rsp+88], 0
-    call CreateWindowExW
-    test rax, rax
-    jz .d
-    mov rbx, rax
-    mov rcx, rbx
-    call OpenClipboard
-    test eax, eax
-    jz .d
-    call EmptyClipboard
-    mov ecx, 13                     ; CF_UNICODETEXT
-    mov rdx, r12
-    call SetClipboardData
-    call CloseClipboard
-.d:
+    call clip_set
 END_FN
 
 ; ---------------- console (configure) ----------------

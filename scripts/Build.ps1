@@ -45,12 +45,12 @@ if ($Target -in @('Windows','Both')) {
     if ($LASTEXITCODE -ne 0) { throw 'Steam identity linking failed.' }
     Write-Host 'Windows Steam identity probe built.'
     $taskUpdaterObject = Join-Path $taskBuildRoot 'updater-win.obj'
-    & $taskNasm -f win64 @taskDebugFlags -I $taskIncludes -I ((Join-Path $taskProjectRoot 'common').Replace('\','/') + '/') (Join-Path $taskProjectRoot 'updater\updater.asm') -o $taskUpdaterObject
+    & $taskNasm -f win64 @taskDebugFlags -I $taskIncludes -I ((Join-Path $taskProjectRoot 'common').Replace('\','/') + '/') -I ((Join-Path $taskProjectRoot 'updater').Replace('\','/') + '/') (Join-Path $taskProjectRoot 'updater\updater.asm') -o $taskUpdaterObject
     if ($LASTEXITCODE -ne 0) { throw 'Updater assembly failed.' }
-    $taskUpdaterExe = Join-Path $taskBuildRoot 'MistriMultiUpdater.exe'
+    $taskUpdaterExe = Join-Path $taskBuildRoot 'MistriMulti.exe'
     $taskUpdaterArgs = @('/nologo','/machine:x64','/subsystem:windows','/entry:start','/nodefaultlib','/incremental:no',
         "/out:$taskUpdaterExe", $taskUpdaterObject, "/libpath:$taskLibraries",
-        'kernel32.lib','user32.lib','shell32.lib','gdi32.lib','ole32.lib','winhttp.lib','bcrypt.lib')
+        'kernel32.lib','user32.lib','shell32.lib','gdi32.lib','ole32.lib','winhttp.lib','bcrypt.lib','ws2_32.lib','iphlpapi.lib')
     if (-not $Release) { $taskUpdaterArgs += '/debug' }
     & $taskLinker @taskUpdaterArgs
     if ($LASTEXITCODE -ne 0) { throw 'Updater linking failed.' }

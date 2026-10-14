@@ -48,7 +48,10 @@ changes; CI fails when `release/latest.txt` is stale.
 helper start and cleanup, `control.json` lifecycle, exit code and argument pass-through, stable identity, the rolling
 solo-save backup (newest 10 kept, foreign folders untouched), every invalid-configuration fallback (the game must always
 start), `--mistrimulti-direct`, wrong executables, the `--configure` prompts, 24 fuzzed configuration files and the helper
-being stopped when the launcher is killed. Build with `sh scripts/build-launcher.sh`.
+being stopped when the launcher is killed, the host's discovery responder (valid 64-byte queries only) and the manager's scan
+(`MistriMulti.exe --scan <file>`, with `MISTRIMULTI_SCAN_EXTRA=<ip>` adding a target) against both a fake host and the real
+launcher. Build with `sh scripts/build-launcher.sh` and `sh scripts/build-updater.sh`. `python3 scripts/lint-asm.py .`
+rejects `[label+register]` addresses, which crash 64-bit Windows programs.
 
 ## Transport checks
 

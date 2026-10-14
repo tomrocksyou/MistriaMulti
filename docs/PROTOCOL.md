@@ -52,3 +52,12 @@ they can be added safely.
 
 Updates are retried every 100 ms while reliable; otherwise an identical snapshot is
 sent once per second. This also heals loss of the final movement update when a player stops.
+
+## Host discovery (UDP 7776)
+
+While a host plays, the launcher answers discovery queries on UDP port 7776 (the game traffic itself uses the separate
+port from `launcher.cfg`, 7777 by default). A query is exactly 64 bytes: `MSDQ`, version byte `1`, 59 zero bytes. The reply
+is exactly 64 bytes: `MSDR`, version `1`, flags (bit 0 = the host uses a custom room code), game port (u16 little-endian),
+computer name (32 bytes, NUL padded), 24 zero bytes. Anything else is ignored, and the reply is never larger than the
+query, so the responder cannot amplify traffic. Players scan with a broadcast query on every local network plus a unicast
+query to each Tailscale peer. Discovery gives no authentication: it only tells a friend where to connect.
