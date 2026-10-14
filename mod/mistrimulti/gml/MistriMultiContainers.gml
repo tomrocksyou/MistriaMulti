@@ -1,4 +1,5 @@
-// MistriMulti containers: host-owned chests, fridges and shipping bins. Protocol, assumptions and the in-game
+// MistriMulti containers: host-owned chests, fridges and shipping bins (the host sells the bins at the end of its day and the
+// proceeds go to the shared wallet, MistriMultiWallet.gml). Protocol, assumptions and the in-game
 // checklist: docs/SYNC-CONTAINERS.md. The world items that leave or enter containers are in MistriMultiDrops.gml.
 //
 // A container is a furniture node with an inventory. It has a key (room tree + position) and a revision number that
@@ -45,7 +46,7 @@ function __mistrimulti_ct() {
     var ct = r[$ "ct"];
     if (!is_struct(ct) || ct.stream != r.ev.stream) {
         ct = { stream: r.ev.stream, chests: {}, keys: [], count: -1, indexed: -100000, cursor: 0,
-            txs: {}, bins: {}, owed: [], snaps: array_create(8, undefined) };
+            txs: {}, owed: [], snaps: array_create(8, undefined) };
         r.ct = ct;
     }
     return ct;
@@ -69,6 +70,7 @@ function __mistrimulti_ct_locate(node) {
 
 function __mistrimulti_ct_chest(key, loc, node, size, host) {
     var c = { k: key, loc: loc, node: node, size: size, rev: host ? 0 : -1, synced: host, hot: 0, open_at: -100000,
+        bin: node.prototype.interaction_chest[$ "shipping_bin"] == true,
         base: array_create(size, undefined), seen: array_create(size, 0), hold: array_create(size, false) };
     for (var i = 0; i < size; i++) {
         var slot = node.inventory.slot(i);
@@ -90,20 +92,6 @@ function __mistrimulti_ct_index(ct) {
         var node = nodes.get(i);
         if (node[$ "inventory"] == undefined || node.prototype[$ "interaction_chest"] == undefined) continue;
         var where = __mistrimulti_ct_locate(node);
-        if (node.prototype.interaction_chest[$ "shipping_bin"] == true) {
-            // Not shared (docs/SYNC-CONTAINERS.md): every game sells its own bin at its own end of day. A guest's copy of
-            // the host's bin is emptied once, or the guest would sell the host's items as well.
-            if (where != undefined && r.mode == "join" && !struct_exists(ct.bins, where.key)) {
-                ct.bins[$ where.key] = true;
-                for (var b = 0; b < node.inventory.size(); b++) {
-                    var bin = node.inventory.slot(b);
-                    bin.item = undefined;
-                    bin.count = 0;
-                    bin.updates += 1;
-                }
-            }
-            continue;
-        }
         var size = node.inventory.size();
         if (where == undefined || struct_exists(chests, where.key) || size < 1 || size > MISTRIMULTI_CT_SLOTS) continue;
         var old = ct.chests[$ where.key];
@@ -793,14 +781,20 @@ function __mistrimulti_ct_revert(groups) {
     mmapi_warn_rate_limited("mistrimulti_containers", "mistrimulti", "A chest change was too large and was undone.");
 }
 
+// The end-of-day sequence is running in this game: it empties the copy of every shipping bin without the player moving anything.
+function __mistrimulti_ct_sleeping() {
+    return ARI != undefined && (ARI[$ "end_of_day_status"] != undefined || ARI[$ "end_of_day_sequence"] == true);
+}
+
 // Everything the menus changed in the scanned chests: [{ c, dirty: [{ i, pre, now, u }] }].
 function __mistrimulti_ct_collect(ct) {
     var set = __mistrimulti_ct_scan_set(ct);
-    var sleeping = ARI != undefined && ARI[$ "end_of_day_status"] != undefined;
+    var sleeping = __mistrimulti_ct_sleeping();
     var groups = [];
     for (var x = 0; x < array_length(set); x++) {
         var c = set[x];
         var dirty = [];
+        var emptied = false;
         for (var i = 0; i < c.size; i++) {
             if (c.hold[i]) continue;
             var slot = c.node.inventory.slot(i);
@@ -809,14 +803,17 @@ function __mistrimulti_ct_collect(ct) {
             if (__mistrimulti_ct_same(st, c.base[i])) {
                 c.seen[i] = slot.updates;
             } else if (sleeping) {
-                // The end-of-day sequence changes bins on its own; that is not the player's move. The host decides.
+                // The end-of-day sequence empties this game's copy of every shipping bin on its own; that is not the
+                // player's move. The host sells the bins (once, into the shared wallet) and decides what they hold.
                 c.base[i] = st;
                 c.seen[i] = slot.updates;
+                if (c.bin) emptied = true;
             } else {
                 array_push(dirty, { i: i, pre: c.base[i], now: st, u: slot.updates });
             }
         }
         if (array_length(dirty) > 0) array_push(groups, { c: c, dirty: dirty });
+        if (emptied) __mistrimulti_ct_resync(c); // show what the host's bin holds again
     }
     return groups;
 }
@@ -896,8 +893,10 @@ function __mistrimulti_ct_apply_pack(c, data) {
     if (states == undefined) return false;
     for (var j = 0; j < array_length(states); j++) {
         var s = states[j];
-        // A slot with a request in flight takes the host's answer from that request's result.
-        if (!c.hold[s.i]) __mistrimulti_ct_reconcile(c, s.i, s.st, c.base[s.i]);
+        // A slot with a request in flight takes the host's answer from that request's result. A bin that this game's end of
+        // day just emptied is not an edit of the player: the host's state replaces it as it is.
+        var ref = c.bin && __mistrimulti_ct_sleeping() ? __mistrimulti_ct_state(c.node.inventory.slot(s.i)) : c.base[s.i];
+        if (!c.hold[s.i]) __mistrimulti_ct_reconcile(c, s.i, s.st, ref);
     }
     return true;
 }

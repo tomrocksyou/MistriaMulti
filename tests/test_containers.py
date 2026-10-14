@@ -802,31 +802,34 @@ def test_gift():
     print("PASS: gift: leaves the giver, waits as an item only the recipient can claim; refused gifts stay put")
 
 
-def test_shipping_bins_are_per_player():
-    # Every game sells its own bin at its own end of day, so a bin must never be shared (it would be sold once per game).
+def test_shipping_bins_are_shared():
+    # Bins are host-owned like chests: any player puts items in or takes them back. At the end of the day the HOST sells
+    # them once (the proceeds go to the shared wallet, tests/test_wallet.py); a guest's own sale of its copy pays nothing.
     world = make_world(130, jitter=20)
     C = (30, 10)
     for game in world.games.values():
         game.node.add_chest(C, {0: ("apple", 5)}, bin=True)      # the host's items, also in each guest's copy of the save
+    for game in world.games.values():
+        if game.slot:
+            for s in game.node.inv(C).slots:
+                s["remove"](s["count"]) if s["count"] else None
+                s["updates"] = 0                                   # a guest's older copy of the world
     settle(world, 4000)
     host, g1, g2 = (world.games[i].node for i in range(3))
-    assert g1.inv(C).contents() == {} and g2.inv(C).contents() == {}      # guests start with an empty bin
-    assert host.inv(C).contents() == {0: ("apple", None, 5)}
+    assert g1.inv(C).contents() == {0: ("apple", None, 5)} and g2.inv(C).contents() == {0: ("apple", None, 5)}
     g1.player.slots[0]["add"](make_item("bread"), 3)
     ui_put(world.games[1], C, 1, "bread", 3)
     host.inv(C).slots[2]["add"](make_item("potion"), 1)
     settle(world, 4000)
-    assert host.inv(C).contents() == {0: ("apple", None, 5), 2: ("potion", None, 1)}
-    assert g1.inv(C).contents() == {1: ("bread", None, 3)} and g2.inv(C).contents() == {}
-    sold = {}
-    for game in world.games.values():       # each game's end of day empties its own bin
-        for slot in game.node.inv(C).slots:
-            if slot["count"]:
-                n = slot["item"]["name"]
-                sold[n] = sold.get(n, 0) + slot["count"]
-    assert sold == {"apple": 5, "potion": 1, "bread": 3}, sold
+    want = {0: ("apple", None, 5), 1: ("bread", None, 3), 2: ("potion", None, 1)}
+    assert host.inv(C).contents() == want and g1.inv(C).contents() == want and g2.inv(C).contents() == want
+    ui_take(world.games[2], C, 1, 2)                                # a guest takes some of another player's items back
+    settle(world, 4000)
+    assert host.inv(C).contents()[1] == ("bread", None, 1) and g1.inv(C).contents()[1] == ("bread", None, 1)
+    assert g2.player.total("bread") == 2
+    converged(world, "bins")
     clean(world, "bins")
-    print("PASS: shipping bins are per player: never synced, guests' copies of the host's bin are emptied, nothing is sold twice")
+    print("PASS: shipping bins are host-owned and synced like chests: any player puts in and takes back")
 
 
 def test_loot_seed():
@@ -866,7 +869,7 @@ def main():
     test_claim_races_under_faults()
     test_day_change_and_lost_items()
     test_gift()
-    test_shipping_bins_are_per_player()
+    test_shipping_bins_are_shared()
     test_loot_seed()
     test_exact_conservation_under_faults()
     print("all container tests passed")
