@@ -3,4 +3,4 @@ author = "MistriMulti"
 version = "0.2.0"
 minInstallerVersion = "0.16.5"
 manifestVersion = 1
-requires_hooks = ["tool.targets", "game.save_guard", "game.new_day", "game.room_changed", "game.title_entered", "ui.menu_opened", "ui.draw_gui", "local.missing", "clock.time_advance", "game.clock_tick", "player.pass_out", "object.interact", "dungeon.treasure_chest", "resource.node_picked"]
+requires_hooks = ["tool.targets", "game.save_guard", "game.new_day", "game.room_changed", "game.title_entered", "ui.menu_opened", "ui.draw_gui", "local.missing", "clock.time_advance", "game.clock_tick", "player.pass_out", "object.interact", "dungeon.treasure_chest", "resource.node_picked", "animal.production_gate", "animal.product_drops", "input.take_press", "furniture.place_guard", "items.use_guard"]

@@ -164,6 +164,12 @@ stubbed: simultaneous takes, stale replicas, 21 hostile requests, a guest cut of
 request in flight (never applied twice), snapshots, drop/claim races under loss, day change, gifts, per-player shipping
 bins, seeded loot and randomised item-conservation runs.
 
+## Ranch checks
+
+`python3 tests/test_ranch.py` runs the real animal, pet, building and home GML on the event layer (19 scenarios: paid
+adopt/sell/buy requests answered once, refunds, pooled barn products, snapshots, host restart, hostile data).
+`python3 tests/mutate_ranch.py` breaks the GML in 12 ways and fails if any test still passes.
+
 ## Transport checks
 
 From the project folder on Windows:
