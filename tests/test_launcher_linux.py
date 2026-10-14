@@ -1246,16 +1246,16 @@ def test_password():
         assert stat.S_IMODE(auth.stat().st_mode) == 0o600, oct(auth.stat().st_mode)
         assert wait_for(lambda: (sb.mod / "install.key").exists() and (sb.mod / "install.key").stat().st_size == 32), "no install key"
         assert stat.S_IMODE((sb.mod / "install.key").stat().st_mode) == 0o600
+        for _ in range(20):             # first: the --quick game ends at once, and discovery closes with it
+            reply = query_host(0.5)
+            if reply:
+                break
+        assert reply is not None and reply[5] & 2, "the password flag is announced in discovery"
         challenge, result = handshake(b"s3cret!pw")
         assert result == "ok", result
         hfp = challenge[32:48]
         assert handshake(b"wrong")[1] == ("reject", 1)
         assert handshake(b"")[1] == ("reject", 1)
-        for _ in range(20):
-            reply = query_host(0.5)
-            if reply:
-                break
-        assert reply is not None and reply[5] & 2, "the password flag is announced in discovery"
         finish(proc)
         # a second launch: same install key, so the same host fingerprint; no password configured now
         sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\n")
@@ -1342,6 +1342,13 @@ def menu_wait(sb, seq, states=("idle", "hosting", "ready", "error", "stopped"), 
 
     assert wait_for(done, secs), ("no answer to command", seq, got[-1] if got else None)
     return got[-1]
+
+
+def long_game(sb):
+    """A game that keeps running for two minutes (the test game ends after 12 s at most; joins that wait for a timeout take longer)."""
+    game = sb.game / "FieldsOfMistria"
+    game.write_text("#!/bin/sh\nsleep 120\n")
+    game.chmod(0o755)
 
 
 def start_menu_game(sb, *extra, **env):
@@ -1491,6 +1498,8 @@ class MenuPair:
 
     def __init__(self, world=True):
         self.host, self.guest = Sandbox(), Sandbox()
+        long_game(self.host)
+        long_game(self.guest)
         if world:
             self.host.mp.mkdir(parents=True)
             (self.host.mp / "game-7-autosave.sav").write_bytes(b"THE HOSTS WORLD " * 300)
