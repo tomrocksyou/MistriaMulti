@@ -2,7 +2,7 @@
 
     python3 tests/test_event_features.py
 
-MistriMultiTerrain.gml, MistriMultiPlayerSync.gml and MistriMultiIdentity.gml run unmodified in
+MistriMultiTerrain.gml, MistriMultiPlayerSync.gml, MistriMultiIdentity.gml and MistriMultiProgress.gml run unmodified in
 tests/gml_subset.py on top of MistriMultiEvents.gml, over the simulated helpers and network of
 tests/event_sim.py. Only the engine is stubbed: a small farm grid, and the player-record storage and
 validation functions of MistriMultiPlayerData.gml (which need the real game). This checks the handler
@@ -46,7 +46,7 @@ class Grid:
 
 
 class FeatureNode(GmlNode):
-    extra_files = ("MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml")
+    extra_files = ("MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml", "MistriMultiProgress.gml")
 
     def builtins(self):
         self.grid = Grid()
@@ -83,6 +83,7 @@ class FeatureNode(GmlNode):
                        terrain_cursor=-1, world_key="world_1", player_ready=self.slot == 0, player_revision=0,
                        player_saved_revision=0, player_signature="", player_error="", player_request="",
                        player_sessions=gml.GArray([None] * 8), warning="")
+        self.interp.call("mistrimulti_progress_initialize")
 
 
 class Driver:

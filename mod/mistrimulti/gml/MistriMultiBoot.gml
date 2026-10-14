@@ -64,6 +64,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.player_load", mistrimulti_player_load, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.player_restore", mistrimulti_player_restore, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.events", mistrimulti_events_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.progress", mistrimulti_debug_progress, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.character", mistrimulti_debug_character, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.containers", mistrimulti_containers_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.drops", mistrimulti_drops_debug, { mod_name: "mistrimulti" });
@@ -82,6 +83,7 @@ function mistrimulti_register_events() {
     mistrimulti_containers_register_events();
     mistrimulti_drops_register_events();
     mistrimulti_ranch_register_events();
+    mistrimulti_progress_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -249,13 +251,19 @@ function mistrimulti_save_guard(ctx) {
     if (r.enabled && r.mode == "host") {
         mistrimulti_drops_before_save();
         mistrimulti_player_checkpoint();
+        mistrimulti_player_checkpoint();
+        mistrimulti_progress_flush_request();
     }
     return undefined;
 }
 
 function mistrimulti_new_day(ctx) {
     var r = __mistrimulti_runtime();
-    if (r.enabled && r.mode == "host") r.snapshot_pending = true;
+    if (r.enabled && r.mode == "host") {
+        r.snapshot_pending = true;
+        // The host saves at the end of the day: have every guest send its latest state first.
+        mistrimulti_progress_flush_request();
+    }
 }
 
 function mistrimulti_room_changed(ctx) {
@@ -315,6 +323,9 @@ function mistrimulti_register() {
     mmapi_on("dungeon.treasure_chest", mistrimulti_drops_treasure);
     mmapi_on("resource.node_picked", mistrimulti_drops_rock);
     mmapi_on("game.room_changed", mistrimulti_room_changed);
+    mmapi_on("save.game_saving", mistrimulti_progress_game_saving);
+    mmapi_on("save.game_loaded", mistrimulti_progress_game_loaded);
+    mmapi_guard("dialogue.romance_prompt_guard", mistrimulti_romance_prompt_guard);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
     mmapi_on("ui.draw_gui", mistrimulti_draw_status);

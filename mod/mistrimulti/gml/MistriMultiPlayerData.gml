@@ -12,6 +12,7 @@ function mistrimulti_player_data_initialize() {
     r.player_host_epoch = "";
     r.player_sessions = array_create(8, undefined);
     r.player_error = "";
+    mistrimulti_progress_initialize();
 }
 
 function mistrimulti_player_capture() {
@@ -141,7 +142,7 @@ function mistrimulti_player_restore(data) {
     r.character_owner = ARI;
     r.character_pending = false;
     r.character_loaded = true;
-    r.player_ready = true;
+    mistrimulti_progress_core_ready();
     r.look_signature = "";
     return true;
 }
@@ -185,7 +186,7 @@ function mistrimulti_player_fresh() {
         NPCS[i].report_hearts();
     }
     for (var i = 0; i < NpcId.LEN; i++) NPCS[i].report_relationship();
-    r.player_ready = true;
+    mistrimulti_progress_core_ready();
 }
 
 function mistrimulti_player_path(uid) {

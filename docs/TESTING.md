@@ -72,6 +72,23 @@ example `json_parse` number types, `json_stringify` key order, or array copy-on-
 time with a full window, and anything about the real hooks, menus or saves. `test_live_game.py` and
 `test_player_data.py` (below) speak the new protocol through the same model but need the real game.
 
+## Progress checks
+
+```sh
+python3 tests/test_progress.py        # about 3 minutes
+```
+
+Runs the real `MistriMultiProgress.gml`, `MistriMultiPlayerSync.gml`, the storage half of `MistriMultiPlayerData.gml` and
+`MistriMultiIdentity.gml` on the event layer, over the simulated helpers and network, with a fake game (the data
+structures the game's own save code uses) and a fake file system that can fail. It covers: all ten progress sections
+(capture, validate, restore, capture again is exact; the host's data is replaced), new-character defaults, 43 malformed
+sections and records, migration (unknown sections, newer or damaged envelopes, a core-only record from before the feature),
+readiness gating, delta uploads, returning guests in other slots and accounts, a crash between checkpoints, damaged,
+foreign and newer records, an interrupted host write, refused and oversized sections, forged and replayed messages, the
+flush, the host save commit and rollback (restarts, two generations, missing, damaged and foreign commits), the
+one-partner-per-villager rule (race, break-up, host partner, restart, late joiner), a 134 KB record in blobs and a section
+that fails to restore. The in-game checklist (what these tests cannot show) is in `docs/SYNC-PROGRESS.md`.
+
 ## Updater checks
 
 `tests/test_updater.py` runs the assembly manager against a local HTTP server (under Wine with xvfb on Linux, directly on
