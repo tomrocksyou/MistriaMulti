@@ -24,15 +24,24 @@ Implemented:
   one-second idle heartbeats; automatic helper shutdown from the Windows launcher.
 - Guest character creation uses the game's customization menu and saves an independent profile.
 - Profiles use a Steam ID when available, with a persistent local identity as fallback.
+- Each hosted world stores separate player records for appearance, inventory, equipment,
+  money, skill XP, perks, spells, friendship points and relationship status.
+- Guests load their hosted-world record on reconnect. New guests start with the game's
+  starter inventory and customize their character before publishing progress.
 - F8 displays connection status in game.
 
-This is not feature-complete co-op. Crops/harvests, shared containers/inventories,
+This is not feature-complete co-op. Crops/harvests, shared containers and item transfers,
 resource drops, buildings, animals, quests/unlocks, NPC schedules, time/weather, cutscenes,
-mines/dungeon generation and personal progression are **not synchronized** in this version.
-Players retain their local save's objects and progression. Treat this release as a movement
-and cooperative soil/watering prototype; those other actions still happen locally.
-Joining players cannot save after replicated terrain has changed their world: restart
-the game to return to the untouched original save. The host can save its farm normally.
+mines/dungeon generation are **not synchronized** in this version. Personal quests,
+recipe/cosmetic unlocks, romance cutscene history, marriage dates and children are not
+included in the player records yet. Saving friendship points and relationship status
+does not provide a complete multiplayer romance system.
+
+Guests retain their local world's objects while the synchronized systems operate.
+Their core character progress is checkpointed on the host about every five seconds;
+the host confirms a complete record before it is considered saved. Guest local saves
+are blocked during multiplayer. The host can save its farm normally. See
+`docs/PLAYER-DATA.md` for storage, backup and recovery details.
 
 ## Windows: first setup
 
@@ -120,7 +129,8 @@ see `CONTACT.md`.
 Game assets, Steam libraries and MOMI are not bundled. Those dependencies retain their
 own licenses. The Steam identity probes load the library from the installed game.
 
-Character profiles are stored under `mod_data/mistrimulti/characters/`; hosts keep
-a player roster in `players.json`. Steam IDs remain strings to preserve all 64 bits.
+Appearance defaults are stored under `mod_data/mistrimulti/characters/`. Hosted-world
+records and rosters live under `mod_data/mistrimulti/worlds/`. Steam IDs remain strings
+to preserve all 64 bits.
 The current UDP connection does not authenticate a remote Steam ID; authenticated
 Steam sessions remain a separate requirement.

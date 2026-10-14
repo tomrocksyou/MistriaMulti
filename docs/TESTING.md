@@ -72,6 +72,26 @@ Debug functions are registered only when the agent is enabled during mod
 initialization. No debugger is needed to play. The F8 status hotkey overlaps
 with MMAPI's snapshot toggle while its developer agent is enabled.
 
+## Player record checks
+
+Host a disposable test world with the MMAPI debug agent enabled and other players
+disconnected, then run:
+
+```powershell
+python tests/test_player_data.py --room-code YOUR_EIGHT_HEX_DIGIT_CODE
+```
+
+The live test checks native host checkpoints, interrupted uploads, exact multipart
+records, invalid-input rejection, reconnects in another slot, separate player/world
+records, backup recovery and native character restoration. It disables achievements
+during temporary character changes, restores the character and settings, and removes
+its temporary player records.
+
+The Windows guest flow has also been tested against a simulated host: first creation
+publishes a record, changes wait for host save confirmation, and a host restart
+handshake restores the saved guest without reopening creation. A two-computer playtest
+with actual game clients remains necessary.
+
 ## Guest character checks
 
 With the debug agent enabled, start a guest test world, finish the character

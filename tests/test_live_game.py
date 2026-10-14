@@ -67,9 +67,10 @@ class Game:
 
 
 class Peer:
-    def __init__(self, helper, root, code, port, frame):
+    def __init__(self, helper, root, code, port, frame, player_id=1):
         self.root, self.frame = root, frame
-        self.frame.update(v=1, id=1, epoch=uuid.uuid4().hex, active=True, a=[0]*8)
+        self.player_id = player_id
+        self.frame.update(v=1, id=player_id, epoch=uuid.uuid4().hex, active=True, a=[0]*8)
         self.ack = 0
         self.next_event = 1
         self.pending = None
@@ -79,7 +80,7 @@ class Peer:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.bind(('127.0.0.1', 0))
             local = sock.getsockname()[1]
-        self.process = subprocess.Popen([str(helper), 'join', str(local), '1', code,
+        self.process = subprocess.Popen([str(helper), 'join', str(local), str(player_id), code,
                                         str(root), '127.0.0.1', str(port)],
                                         creationflags=subprocess.CREATE_NO_WINDOW)
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -94,7 +95,7 @@ class Peer:
                     if event:
                         self.frame['a'][0] = max(self.frame['a'][0], event['s'])
                         self.events[event['s']] = event
-                    self.ack = host.get('a', [0]*8)[1]
+                    self.ack = host.get('a', [0]*8)[self.player_id]
                     if self.pending and self.ack >= self.pending['s']:
                         self.pending = None
                 except (OSError, ValueError):

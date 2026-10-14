@@ -31,11 +31,6 @@ function mistrimulti_identity_initialize(cfg) {
     r.character_path = folder + "/" + string_replace_all(r.uid, ":", "_") + ".json";
     r.roster = {};
     r.roster_dirty = false;
-    if (r.mode == "host") {
-        var path = mmapi_mod_data_dir("mistrimulti") + "/players.json";
-        var saved = file_exists(path) ? try_read_json_file(path) : undefined;
-        if (is_struct(saved) && saved[$ "v"] == 1 && is_struct(saved[$ "players"])) r.roster = saved.players;
-    }
 }
 
 function mistrimulti_remember_peer(player) {
@@ -51,8 +46,8 @@ function mistrimulti_remember_peer(player) {
 
 function mistrimulti_flush_roster() {
     var r = __mistrimulti_runtime();
-    if (!r.roster_dirty || r.mode != "host") return;
-    var path = mmapi_mod_data_dir("mistrimulti") + "/players.json";
+    if (!r.roster_dirty || r.mode != "host" || r.world_path == "") return;
+    var path = r.world_path + "/roster.json";
     try {
         save_text_file(path + ".tmp", json_stringify({ v: 1, players: r.roster }));
         file_rename(path + ".tmp", path);

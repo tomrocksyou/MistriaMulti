@@ -41,7 +41,7 @@ function mistrimulti_character_profile() {
 
 function mistrimulti_character_tick() {
     var r = __mistrimulti_runtime();
-    if (r.mode != "join" || ARI == undefined || GRID == undefined || !instance_exists(obj_ari)) return;
+    if (r.mode != "join" || !r.player_ready || ARI == undefined || GRID == undefined || !instance_exists(obj_ari)) return;
     if (r.character_owner != ARI) {
         r.character_owner = ARI;
         r.character_pending = true;
@@ -112,6 +112,7 @@ function mistrimulti_character_complete() {
     r.character_menu = undefined;
     r.look_signature = "";
     mistrimulti_update_look();
+    mistrimulti_player_checkpoint();
 }
 
 function mistrimulti_debug_character() {

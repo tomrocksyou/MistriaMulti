@@ -12,7 +12,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-linux-x64
-          path: build/mistrimulti-helper-linux
+          path: |
+            build/mistrimulti-helper-linux
+            build/mistrimulti-steam-id-linux
+            LICENSE
+            CONTACT.md
   windows:
     runs-on: windows-latest
     steps:
@@ -30,4 +34,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-windows-x64
-          path: build/mistrimulti-helper.exe
+          path: |
+            build/mistrimulti-helper.exe
+            build/mistrimulti-steam-id.exe
+            LICENSE
+            CONTACT.md

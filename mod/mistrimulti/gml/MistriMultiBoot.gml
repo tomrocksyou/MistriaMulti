@@ -44,6 +44,7 @@ function mistrimulti_initialize() {
     r.bridge = native_root + string(cfg.id);
     directory_create(r.bridge);
     mistrimulti_identity_initialize(cfg);
+    mistrimulti_player_data_initialize();
     r.enabled = true;
     r.boot_stage = "ready";
     // Register diagnostics only when the MMAPI debug agent is enabled.
@@ -55,6 +56,12 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.apply", mistrimulti_apply_terrain, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.guard", mistrimulti_save_guard, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.watch", mistrimulti_tool_targets, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.player_data", mistrimulti_debug_player_data, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.checkpoint", mistrimulti_player_checkpoint, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.player_store", mistrimulti_player_store, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.player_load", mistrimulti_player_load, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.player_restore", mistrimulti_player_restore, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.player_receive", mistrimulti_player_receive, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.character", mistrimulti_debug_character, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.1.0 loaded: " + r.mode);
@@ -79,7 +86,7 @@ function mistrimulti_tick() {
     }
     if (!r.enabled) return;
     r.ticks++;
-    mistrimulti_character_tick();
+
     if (r.ticks mod 60 == 1) {
         mistrimulti_flush_roster();
         var status_path = r.bridge + "/status.json";
@@ -95,20 +102,24 @@ function mistrimulti_tick() {
             } else { r.mask = 0; }
         } else { r.mask = 0; }
     }
+    mistrimulti_player_data_tick();
+    mistrimulti_character_tick();
     if (r.ticks mod 3 != 0) return; // 20 Hz bridge; actors animate at the game frame rate.
-    var active = instance_exists(obj_ari) && ARI != undefined && GRID != undefined && !r.character_pending;
+    if (ARI != undefined && GRID != undefined) mistrimulti_read_peers();
+    mistrimulti_prune_queue();
+    mistrimulti_player_send_tick();
+    var active = instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
     if (active) {
-        mistrimulti_read_peers();
         mistrimulti_watch_changes();
         if (r.ticks mod 60 == 0 || r.mask != r.last_mask) mistrimulti_update_look();
         if (r.mode == "host" && (r.mask & ~r.last_mask) != 0) r.snapshot_pending = true;
         r.last_mask = r.mask;
         mistrimulti_stream_terrain();
-        mistrimulti_prune_queue();
     } else {
         mistrimulti_remove_ghosts();
     }
-    var frame = { v: 1, epoch: r.epoch, id: r.id, uid: r.uid, active: active, a: r.ack };
+    var frame = { v: 1, epoch: r.epoch, id: r.id, uid: r.uid, active: active, a: r.ack, world: r.world_key };
+    if (array_length(r.queue) > 0) frame.q = r.queue[0];
     if (active) {
         var ari = instance_find(obj_ari, 0);
         frame.room = mistrimulti_room_key();
@@ -124,7 +135,6 @@ function mistrimulti_tick() {
             if (ma != undefined) { frame.ma = ma; break; }
         }
         frame.name = string(ARI.name);
-        if (array_length(r.queue) > 0) frame.q = r.queue[0];
     }
     var text = json_stringify(frame);
     if (string_byte_length(text) > 16384) {
@@ -181,12 +191,14 @@ function mistrimulti_read_peers() {
         var path = r.bridge + "/rx_" + string(i) + ".json";
         if (!file_exists(path)) continue;
         var p = try_read_json_file(path);
-        if (!is_struct(p) || p[$ "active"] != true) { mistrimulti_hide_peer(i); continue; }
+        if (!is_struct(p)) { mistrimulti_hide_peer(i); continue; }
         if (p[$ "v"] != 1 || p[$ "id"] != i || !is_string(p[$ "epoch"])) continue;
-        if (!is_string(p[$ "room"]) || !is_real(p[$ "x"]) || !is_real(p[$ "y"])) continue;
-        if (!is_real(p[$ "c"]) || p.c < 0 || p.c >= Cardinal.LEN) continue;
-        if (!is_real(p[$ "ba"]) || p.ba < 0 || p.ba >= AnimationName.LEN) continue;
-        if (abs(p.x) > 100000 || abs(p.y) > 100000) continue;
+        if (p[$ "active"] == true) {
+            if (!is_string(p[$ "room"]) || !is_real(p[$ "x"]) || !is_real(p[$ "y"])) continue;
+            if (!is_real(p[$ "c"]) || p.c < 0 || p.c >= Cardinal.LEN) continue;
+            if (!is_real(p[$ "ba"]) || p.ba < 0 || p.ba >= AnimationName.LEN) continue;
+            if (abs(p.x) > 100000 || abs(p.y) > 100000) continue;
+        }
         var old = r.peers[i];
         if (r.peer_epoch[i] != p.epoch) {
             mistrimulti_hide_peer(i);
@@ -211,13 +223,22 @@ function mistrimulti_read_peers() {
             }
         }
         if (remember) mistrimulti_remember_peer(i);
-        mistrimulti_update_peer(i);
+        if (p[$ "active"] == true) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
     }
 }
 
 function mistrimulti_apply_event(player, event) {
     var r = __mistrimulti_runtime();
     if (!is_string(event[$ "k"]) || !is_struct(event[$ "d"])) return true;
+    if (string_copy(event.k, 1, 8) == "profile_") {
+        try { return mistrimulti_player_receive(player, event.k, event.d); }
+        catch (e) {
+            r.player_error = "A player record could not be processed.";
+            mmapi_warn_rate_limited("mistrimulti_player_receive", "mistrimulti", r.player_error + " " + string(e));
+            return false;
+        }
+    }
+    if (r.peers[player][$ "active"] != true && event.k != "look") return true;
     switch event.k {
         case "look":
             var look = event.d;
@@ -252,8 +273,9 @@ function mistrimulti_update_look() {
 
 function mistrimulti_save_guard(ctx) {
     var r = __mistrimulti_runtime();
-    // A joining player's original save must not persist replicated terrain.
-    if (r.enabled && r.mode == "join" && r.dirty_world) return false;
+    // Multiplayer characters must not overwrite the guest's local save.
+    if (r.enabled && r.mode == "join") return false;
+    if (r.enabled && r.mode == "host") mistrimulti_player_checkpoint();
     return undefined;
 }
 
@@ -274,6 +296,8 @@ function mistrimulti_show_status() {
     for (var i = 0; i < 8; i++) if ((r.mask & (1 << i)) != 0) count++;
     var text = "MistriMulti: " + r.mode + " | " + string(count) + " connected";
     if (r.warning != "") text += " | " + r.warning;
+    if (r.player_error != "") text += " | " + r.player_error;
+    if (r.mode == "join" && r.player_revision > r.player_saved_revision) text += " | Saving player progress";
     create_notification(ANCHOR.wrap_for_local(text));
 }
 
