@@ -20,6 +20,10 @@ real game (the stand-in tests could not catch them; keep them in mind for every 
 - `ui.draw_gui` fires per drawn frame and the game draws at 300+ FPS: the tick is paced to 60 Hz with `get_timer()`
   (0.2.7). Before that, every tick-counted timing ran ~6x too fast (the guest's watering watch expired before the water landed).
 - Info lines do appear in the mod log (the earlier "warnings only" note was wrong).
+- Verified in the real game (0.2.7): characters, clock, sleep/new day, hoe/water/plant both ways, chest both ways,
+  shipping bin and shared gold, town trip without crash.
+- User requests: show the other player on the map (needs the game's map scripts: ask for `gml.zip`); guest clock
+  jumps to world time when more than 5 game minutes behind (0.2.8, was 30).
 - Next: walk the `docs/SYNC-*.md` checklists in the real game (clock first), then the badge.
 
 ## 1. What this is and what the user wants

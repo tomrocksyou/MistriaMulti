@@ -483,7 +483,7 @@ def test_clock_sync():
         worst = max(worst, spread(world))
     assert worst < 150, f"clocks drifted {worst} game seconds apart"
     assert guest.weather["forecast"][2] == 3 and guest.weather["weather"] == 1 and slow.weather["weather"] == 1
-    # A guest in a menu stops (as in the game), then catches up smoothly without jumping.
+    # A guest in a menu stops (as in the game), then jumps back to world time once (more than 5 game minutes behind).
     jumps = len(guest.jumps)
     guest.menu_open = True
     world.run(2000)
@@ -491,7 +491,7 @@ def test_clock_sync():
     assert behind > 400, behind
     guest.menu_open = False
     world.run(4000)
-    assert len(guest.jumps) == jumps and spread(world) < 150, (guest.jumps, spread(world))
+    assert len(guest.jumps) == jumps + 1 and spread(world) < 150, (guest.jumps, spread(world))
     # The host in a menu: world time runs on for the guests, and the host catches up afterwards.
     w = host.rt["clock"]["w"]
     host.menu_open = True

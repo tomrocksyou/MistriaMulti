@@ -98,7 +98,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.7 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.8 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -454,5 +454,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.7");
+mmapi_mod_declare("mistrimulti", "0.2.8");
 mistrimulti_register();

@@ -15,7 +15,7 @@
 #macro MISTRIMULTI_CLOCK_DAWN 21600          // hours(6): a new day's Clock
 #macro MISTRIMULTI_CLOCK_LAST 93600          // hours(26): 2 am, when the game makes everyone pass out
 #macro MISTRIMULTI_CLOCK_SMOOTH 120          // game seconds of error that double (or stop) a clock
-#macro MISTRIMULTI_CLOCK_JUMP 1800           // further behind than 30 game minutes: jump
+#macro MISTRIMULTI_CLOCK_JUMP 300            // further behind than 5 game minutes (back from a menu): jump
 #macro MISTRIMULTI_CLOCK_SYNC 2000000        // host W sample interval while W runs (microseconds)
 #macro MISTRIMULTI_CLOCK_REPORT 3000000      // guest report interval while its clock is ahead of W
 #macro MISTRIMULTI_CLOCK_FORCE 60000000      // at 2 am the host ends the day this long after it got there
