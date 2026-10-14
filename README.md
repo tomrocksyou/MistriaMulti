@@ -35,6 +35,7 @@ Implemented:
 - Guests load their hosted-world record on reconnect. New guests start with the game's
   starter inventory and customize their character before publishing progress.
 - F8 displays connection status in game.
+- Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
 
 This is not feature-complete co-op. Crops/harvests, shared containers and item transfers,
 resource drops, buildings, animals, quests/unlocks, NPC schedules, time/weather, cutscenes,

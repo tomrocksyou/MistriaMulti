@@ -75,6 +75,7 @@ function mistrimulti_register_events() {
     mistrimulti_event_register("look", { on_event: mistrimulti_look_event, on_peer: mistrimulti_look_peer });
     mistrimulti_terrain_register_events();
     mistrimulti_player_register_events();
+    mistrimulti_clock_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -301,6 +302,7 @@ function mistrimulti_register() {
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
     mmapi_on("ui.draw_gui", mistrimulti_draw_status);
     mmapi_filter("local.missing", mistrimulti_local_missing);
+    mistrimulti_clock_register_hooks();
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
 }
 
