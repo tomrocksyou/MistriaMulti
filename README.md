@@ -52,10 +52,13 @@ Implemented:
 - F8 displays connection status in game.
 - Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
 - Mines: one shared run (same itinerary and floors for everyone), host-owned monster health with one kill and one drop set, and shared rocks, chests and ladders (`docs/SYNC-DUNGEON.md`, not yet run in the game).
+- World story (story quests, the cutscenes and facts that open the map), villager schedules steered by the host, cutscenes as private
+  viewings, festivals as a function of the shared date (`docs/SYNC-STORY.md`, not yet tried in the game).
 
-This is not feature-complete co-op. Still **not synchronized**: NPC schedules, quests/unlocks that belong to the world,
-cutscenes, and the seal and boss rooms of the mines. Everything listed above was written against the game's scripts and
-tested only against a stand-in game; none of it has been confirmed in the real game yet.
+This is not feature-complete co-op. Not shared: monster movement in the mines (each player sees their own copy; health and
+kills are shared), the seal and boss rooms, villagers' exact paths and seats (room and activity agree), and story rewards
+for players who did not do the step. Everything listed above was written against the game's scripts and tested only against
+a stand-in game; none of it has been confirmed in the real game yet.
 
 Guests retain their local world's objects while the synchronized systems operate.
 Their core character progress is checkpointed on the host about every five seconds;

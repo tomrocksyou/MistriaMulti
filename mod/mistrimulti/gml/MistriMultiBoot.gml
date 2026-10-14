@@ -74,6 +74,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.import_character", mistrimulti_guestsave_import, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.wallet", mistrimulti_wallet_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.dungeon", mistrimulti_dungeon_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -92,6 +93,7 @@ function mistrimulti_register_events() {
     mistrimulti_dungeon_register_events();
     mistrimulti_progress_register_events();
     mistrimulti_wallet_register_events();
+    mistrimulti_story_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -150,6 +152,7 @@ function mistrimulti_tick() {
         mistrimulti_dungeon_tick();
         mistrimulti_farm_tick();
         mistrimulti_wallet_tick();
+        mistrimulti_story_tick();
     } else {
         mistrimulti_remove_ghosts();
     }
