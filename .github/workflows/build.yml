@@ -9,6 +9,9 @@ jobs:
       - run: sh scripts/build-linux.sh
       - run: python3 tests/test_transport.py build/mistrimulti-helper-linux
       - run: python3 tests/test_packet_faults.py build/mistrimulti-helper-linux
+      - run: python3 tests/test_event_layer.py
+      - run: python3 tests/test_event_features.py
+      - run: python3 tests/test_event_bridge.py build/mistrimulti-helper-linux
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-linux-x64
@@ -69,6 +72,7 @@ jobs:
           nasm -f win64 -I ../helper/include/ ../helper/windows.asm -o helper-win.obj
           lld-link /nologo /machine:x64 /subsystem:console /entry:mistria_main /nodefaultlib /incremental:no /out:mistrimulti-helper.exe helper-win.obj /libpath:winlibs kernel32.lib ws2_32.lib shell32.lib
       - run: python3 tests/test_launcher.py build/MistriMultiLauncher.exe build/mistrimulti-helper.exe build/fakegame.exe build/MistriMulti.exe
+      - run: python3 tests/test_event_bridge.py build/mistrimulti-helper.exe
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-launcher

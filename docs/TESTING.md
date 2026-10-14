@@ -13,9 +13,12 @@ Windows and Ubuntu/WSL native ASM transport tests pass:
 - A local heartbeat that advances even when player state is unchanged.
 - Graceful helper shutdown.
 
-MOMI 0.16.5 strict compilation checks pass for the mod on game 1.0.6.
-The actual Windows game also passes `tests/test_live_game.py` using a second,
-real ASM helper on loopback and a simulated game client:
+MOMI 0.16.5 strict compilation checks passed for mod version 0.1.0 on game 1.0.6.
+With version 0.1.0 (the stop-and-wait event queue), the actual Windows game also passed
+`tests/test_live_game.py` using a second, real ASM helper on loopback and a simulated game
+client. Version 0.2.0 replaces that queue with the event layer; the live tests were ported to
+it but **have not yet been run against the game, and the MOMI compilation check has not been
+repeated**:
 
 - Creates the remote character and executes its real draw callback.
 - Interpolates position and changes walking animation and facing.
@@ -33,6 +36,41 @@ and watering-can actions in both directions, WAN/VPN conditions, or a native
 Steam Deck game session. The save test invokes the real registered guard;
 it does not force a save or advance the day. Unsynchronized gameplay listed
 in `README.md` remains outside the current prototype.
+
+## Event layer checks
+
+The event layer (`docs/EVENT-LAYER.md`) is checked three ways, all on Linux (and Windows) without the game:
+
+```sh
+python3 tests/test_event_layer.py            # about 4 minutes; --quick runs the Python model only
+python3 tests/test_event_features.py
+python3 tests/test_event_bridge.py build/mistrimulti-helper-linux    # --guests 7 for eight players
+python3 tests/test_event_bridge.py build/mistrimulti-helper.exe      # Windows helper (under Wine on Linux)
+```
+
+- `test_event_layer.py` runs the reference model (`tests/event_model.py`) and
+  `mod/mistrimulti/gml/MistriMultiEvents.gml` itself, executed by a small GML interpreter
+  (`tests/gml_subset.py`), separately and mixed in one session. They run over a simulated helper
+  and network (`tests/event_sim.py`) with loss, duplication, reordering, 10 s expiry, reconnects,
+  host restart, world re-entry, slot reuse, back-pressure, stalled handlers and 256 KB blobs, for
+  up to eight players. Every run checks ordered exactly-once delivery, requests applied and
+  answered exactly once, exact blobs, drained queues and 16 KB frames. A lockstep test requires the
+  model and the GML to publish byte-identical frames on every tick. The interpreter also parses
+  every mod file, and it is stricter than GameMaker about unset fields, string arithmetic and
+  undeclared variables.
+- `test_event_features.py` runs the real terrain and player-sync GML on the event layer with the
+  engine stubbed: requests applied once, conflicts corrected, invalid and out-of-reach requests
+  rejected, snapshots on rejoin, exact record upload, restore after re-entry, duplicate identities
+  refused.
+- `test_event_bridge.py` drives the real native helpers through the real file bridge, with the
+  model as each player's game, one guest behind a proxy that drops, duplicates and reorders
+  datagrams. It covers steady traffic with 100 KB blobs, a guest helper killed long enough to
+  expire, and a host restart.
+
+What these do not prove: that GameMaker executes the GML exactly as the interpreter does (for
+example `json_parse` number types, `json_stringify` key order, or array copy-on-write), game frame
+time with a full window, and anything about the real hooks, menus or saves. `test_live_game.py` and
+`test_player_data.py` (below) speak the new protocol through the same model but need the real game.
 
 ## Updater checks
 
@@ -109,8 +147,8 @@ disconnected, then run:
 python tests/test_player_data.py --room-code YOUR_EIGHT_HEX_DIGIT_CODE
 ```
 
-The live test checks native host checkpoints, interrupted uploads, exact multipart
-records, invalid-input rejection, reconnects in another slot, separate player/world
+The live test checks native host checkpoints, interrupted uploads (every blob chunk but
+the last), exact records, invalid-input rejection, reconnects in another slot, separate player/world
 records, backup recovery and native character restoration. It disables achievements
 during temporary character changes, restores the character and settings, and removes
 its temporary player records.

@@ -3,8 +3,8 @@ function __mistrimulti_runtime() {
         global.__mistrimulti = {
             registered: false, initialized: false, enabled: false,
             ticks: 0, id: 0, epoch: "", mode: "off", bridge: "",
-            peers: array_create(8, undefined), ack: array_create(8, 0),
-            peer_epoch: array_create(8, ""), queue: [], next_event: 1,
+            peers: array_create(8, undefined), ev: undefined,
+            peer_epoch: array_create(8, ""),
             mask: 0, last_mask: 0, look_signature: "", watches: [],
             terrain_cursor: -1, snapshot_pending: false,
             dirty_world: false, apply_depth: 0, last_frame: "",
@@ -45,6 +45,8 @@ function mistrimulti_initialize() {
     directory_create(r.bridge);
     mistrimulti_identity_initialize(cfg);
     mistrimulti_player_data_initialize();
+    mistrimulti_events_initialize();
+    mistrimulti_register_events();
     r.enabled = true;
     r.boot_stage = "ready";
     // Register diagnostics only when the MMAPI debug agent is enabled.
@@ -61,11 +63,18 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.player_store", mistrimulti_player_store, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.player_load", mistrimulti_player_load, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.player_restore", mistrimulti_player_restore, { mod_name: "mistrimulti" });
-        mmapi_debug_register_fn("mistrimulti.player_receive", mistrimulti_player_receive, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.events", mistrimulti_events_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.character", mistrimulti_debug_character, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.1.0 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
+}
+
+// Every synced feature registers its event kinds here (see docs/EVENT-LAYER.md).
+function mistrimulti_register_events() {
+    mistrimulti_event_register("look", { on_event: mistrimulti_look_event, on_peer: mistrimulti_look_peer });
+    mistrimulti_terrain_register_events();
+    mistrimulti_player_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -108,8 +117,7 @@ function mistrimulti_tick() {
     mistrimulti_character_tick();
     if (r.ticks mod 3 != 0) return; // 20 Hz bridge; actors animate at the game frame rate.
     if (ARI != undefined && GRID != undefined) mistrimulti_read_peers();
-    mistrimulti_prune_queue();
-    mistrimulti_player_send_tick();
+    mistrimulti_events_tick();
     var active = instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
     if (active) {
         mistrimulti_watch_changes();
@@ -120,8 +128,7 @@ function mistrimulti_tick() {
     } else {
         mistrimulti_remove_ghosts();
     }
-    var frame = { v: 1, epoch: r.epoch, id: r.id, uid: r.uid, active: active, a: r.ack, world: r.world_key };
-    if (array_length(r.queue) > 0) frame.q = r.queue[0];
+    var frame = { v: 2, epoch: r.epoch, id: r.id, uid: r.uid, active: active, world: r.world_key };
     if (active) {
         var ari = instance_find(obj_ari, 0);
         frame.room = mistrimulti_room_key();
@@ -138,12 +145,17 @@ function mistrimulti_tick() {
         }
         frame.name = string(ARI.name);
     }
-    var text = json_stringify(frame);
+    // The event layer adds as many queued events as fit within the helper's 16 KB frame. A game takes
+    // part in events only while a world is loaded: on the title screen it would never acknowledge them.
+    var in_world = ARI != undefined;
+    var text = in_world ? mistrimulti_events_encode(frame) : json_stringify(frame);
     if (string_byte_length(text) > 16384) {
         r.warning = "A multiplayer update is too large.";
         return;
     }
-    var reliable = array_length(r.queue) > 0;
+    if (!mistrimulti_event_can_emit(1)) r.warning = "Multiplayer updates are waiting for a player.";
+    else if (r.warning == "Multiplayer updates are waiting for a player.") r.warning = "";
+    var reliable = in_world && mistrimulti_events_reliable();
     var framed = (reliable ? "1\n" : "0\n") + text;
     if (framed == r.last_frame) return;
     try {
@@ -155,38 +167,12 @@ function mistrimulti_tick() {
     }
 }
 
-function mistrimulti_emit(kind, data) {
-    var r = __mistrimulti_runtime();
-    if (array_length(r.queue) >= 256) {
-        r.warning = "Multiplayer updates are waiting for a player.";
-        return false;
-    }
-    array_push(r.queue, { s: r.next_event, k: kind, d: data });
-    r.next_event++;
-    return true;
-}
-
-function mistrimulti_prune_queue() {
-    var r = __mistrimulti_runtime();
-    if (array_length(r.queue) == 0 || r.mask == 0) return;
-    var seq = r.queue[0].s;
-    for (var i = 0; i < 8; i++) {
-        if (i == r.id || (r.mask & (1 << i)) == 0) continue;
-        var peer = r.peers[i];
-        if (!is_struct(peer) || !is_array(peer[$ "a"]) || array_length(peer.a) != 8) return;
-        if (!is_real(peer.a[r.id]) || peer.a[r.id] < seq) return;
-    }
-    array_delete(r.queue, 0, 1);
-    r.warning = "";
-}
-
 function mistrimulti_read_peers() {
     var r = __mistrimulti_runtime();
     for (var i = 0; i < 8; i++) {
         if (i == r.id) continue;
         if ((r.mask & (1 << i)) == 0) {
             mistrimulti_hide_peer(i);
-            r.ack[i] = 0;
             r.peer_epoch[i] = "";
             continue;
         }
@@ -194,7 +180,7 @@ function mistrimulti_read_peers() {
         if (!file_exists(path)) continue;
         var p = try_read_json_file(path);
         if (!is_struct(p)) { mistrimulti_hide_peer(i); continue; }
-        if (p[$ "v"] != 1 || p[$ "id"] != i || !is_string(p[$ "epoch"])) continue;
+        if (p[$ "v"] != 2 || p[$ "id"] != i || !is_string(p[$ "epoch"])) continue;
         if (p[$ "active"] == true) {
             if (!is_string(p[$ "room"]) || !is_real(p[$ "x"]) || !is_real(p[$ "y"])) continue;
             if (!is_real(p[$ "c"]) || p.c < 0 || p.c >= Cardinal.LEN) continue;
@@ -204,7 +190,6 @@ function mistrimulti_read_peers() {
         var old = r.peers[i];
         if (r.peer_epoch[i] != p.epoch) {
             mistrimulti_hide_peer(i);
-            r.ack[i] = 0;
             r.peer_epoch[i] = p.epoch;
             old = undefined;
         }
@@ -214,54 +199,27 @@ function mistrimulti_read_peers() {
         }
         var remember = !is_struct(old) || old[$ "name"] != p[$ "name"] || old[$ "uid"] != p[$ "uid"];
         r.peers[i] = p;
-        var q = p[$ "q"];
-        if (is_struct(q) && is_real(q[$ "s"]) && q.s > r.ack[i]) {
-            // Late joiners start with the sender's current event sequence.
-            if (r.ack[i] == 0 || q.s == r.ack[i] + 1) {
-                if (mistrimulti_apply_event(i, q)) {
-                    r.ack[i] = q.s;
-                    if (q[$ "k"] == "look") remember = true;
-                }
-            }
-        }
+        // Delivers this peer's new events, in order, to the registered handlers.
+        mistrimulti_events_receive(i, p);
         if (remember) mistrimulti_remember_peer(i);
         if (p[$ "active"] == true) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
     }
 }
 
-function mistrimulti_apply_event(player, event) {
+function mistrimulti_look_event(player, look, ctx) {
     var r = __mistrimulti_runtime();
-    if (!is_string(event[$ "k"]) || !is_struct(event[$ "d"])) return true;
-    if (string_copy(event.k, 1, 8) == "profile_") {
-        try { return mistrimulti_player_receive(player, event.k, event.d); }
-        catch (e) {
-            r.player_error = "A player record could not be processed.";
-            mmapi_warn_rate_limited("mistrimulti_player_receive", "mistrimulti", r.player_error + " " + string(e));
-            return false;
-        }
-    }
-    if (r.peers[player][$ "active"] != true && event.k != "look") return true;
-    switch event.k {
-        case "look":
-            var look = event.d;
-            if (!mistrimulti_valid_look(look)) return true;
-            r.peers[player].look = look;
-            var ghost = r.peers[player][$ "ghost"];
-            if (ghost != undefined && instance_exists(ghost)) {
-                mistrimulti_apply_peer_look(ghost, look);
-            }
-            return true;
-        case "terrain_request":
-            if (r.mode == "host") return mistrimulti_accept_terrain(player, event.d);
-            return true;
-        case "terrain_commit":
-        case "terrain_snapshot":
-            if (player != 0 || r.mode != "join") return true;
-            if (!is_array(event.d[$ "tiles"]) || array_length(event.d.tiles) > 64) return true;
-            for (var i = 0; i < array_length(event.d.tiles); i++) mistrimulti_apply_terrain(event.d.tiles[i]);
-            return true;
-    }
+    var peer = r.peers[player];
+    if (!is_struct(peer) || !mistrimulti_valid_look(look)) return true;
+    peer.look = look;
+    var ghost = peer[$ "ghost"];
+    if (ghost != undefined && instance_exists(ghost)) mistrimulti_apply_peer_look(ghost, look);
+    mistrimulti_remember_peer(player);
     return true;
+}
+
+// A game that just joined missed earlier appearance events: send ours again (within a second).
+function mistrimulti_look_peer(slot, joined, stream) {
+    if (joined) __mistrimulti_runtime().look_signature = "";
 }
 
 function mistrimulti_update_look() {
@@ -269,7 +227,7 @@ function mistrimulti_update_look() {
     var look = ARI.animation_assets().serialize();
     var signature = json_stringify(look);
     if (signature != r.look_signature || r.mask != r.last_mask) {
-        if (mistrimulti_emit("look", look)) r.look_signature = signature;
+        if (mistrimulti_event_emit("look", look)) r.look_signature = signature;
     }
 }
 
@@ -324,8 +282,7 @@ function mistrimulti_debug_inspect() {
         }
     }
     var farm = GRIDS[LocationId.Farm];
-    return { ghosts: ghosts, room: mistrimulti_room_key(), ack: r.ack,
-        queue: array_length(r.queue), dims: farm.dims,
+    return { ghosts: ghosts, room: mistrimulti_room_key(), events: mistrimulti_events_debug(), dims: farm.dims,
         dirt: GroundKind.Dirt, soil: GroundKind.Soil,
         farm_id: LocationId.Farm, terrain_ground: TerrainKind.Ground,
         object_kind: string(global.__mistrimulti_peer_object) };
@@ -347,5 +304,5 @@ function mistrimulti_register() {
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
 }
 
-mmapi_mod_declare("mistrimulti", "0.1.0");
+mmapi_mod_declare("mistrimulti", "0.2.0");
 mistrimulti_register();

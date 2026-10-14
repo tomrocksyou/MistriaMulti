@@ -57,20 +57,18 @@ def main():
             peer.move(active=False)
             peers.append(peer)
             wait(lambda: mask() & (1 << slot))
-            peer.event('profile_request', {'uid':identity, 'world':world})
+            wait(lambda: peer.runtime.mask & 1)
+            peer.emit('profile_request', {'uid':identity, 'world':world}, 0)
             return peer
 
         def chunks(peer, profile, revision, stop_before_last=False):
+            """Uploads a record as one blob, or every chunk but the last (an interrupted upload)."""
             text = json.dumps(profile, separators=(',', ':'), ensure_ascii=False)
-            parts = [text[i:i+1536] for i in range(0, len(text), 1536)]
-            transaction = str(uuid.uuid4())
-            for index, part in enumerate(parts):
-                if stop_before_last and index == len(parts)-1:
-                    break
-                peer.event('profile_update', {'uid':profile['uid'],'world':world,'to':0,
-                    'peer_epoch':peer.frame['epoch'],'revision':revision,'transfer':transaction,
-                    'total':len(parts),'index':index,'text':part})
-            return len(parts)
+            meta = {'uid':profile['uid'], 'world':world, 'peer_epoch':peer.frame['epoch'], 'revision':revision}
+            if stop_before_last:
+                return peer.partial_blob('profile_update', text, 0, meta)
+            peer.blob('profile_update', text, 0, meta)
+            return 1
 
         try:
             assert game.call('checkpoint') is True
@@ -78,7 +76,7 @@ def main():
             assert saved_host['data']['stats'] == baseline['stats']
             result.append('Native host checkpoint persists inventory, stats and relationships')
             first = connect(uid, 1)
-            wait(lambda: any(e['k']=='profile_start' for e in list(first.events.values())))
+            wait(lambda: bool(first.received('profile_start')))
             profile = copy.deepcopy(baseline)
             profile['uid'] = profile['character']['uid'] = uid
             profile['character']['name'] = 'Test player'
@@ -90,7 +88,7 @@ def main():
             result.append('Interrupted multipart upload does not publish an incomplete player record')
             chunks(first, profile, 1)
             wait(lambda: player_file.exists())
-            wait(lambda: any(e['k']=='profile_saved' for e in list(first.events.values())))
+            wait(lambda: bool(first.received('profile_saved')))
             stored = read(player_file)
             assert stored['revision']==1 and stored['data']==profile
             result.append('Inactive guest handshake and multipart upload save an exact host record')
@@ -112,18 +110,13 @@ def main():
             time.sleep(1.2)
             second = connect(uid, 2)
             def received():
-                events = [e['d'] for e in list(second.events.values()) if e['k']=='profile_record']
-                if not events or len(events) < events[0]['total']:
-                    return None
-                parts = {e['index']:e['text'] for e in events}
-                if len(parts) != events[0]['total']:
-                    return None
-                return json.loads(''.join(parts[i] for i in range(len(parts))))
+                records = [text for kind, text, meta in list(second.blobs) if kind == 'profile_record']
+                return json.loads(records[-1]) if records else None
             wait(lambda: received() == profile, 30)
             result.append('Reconnect in a different player slot downloads the exact saved character')
 
             third = connect(uid_b, 1)
-            wait(lambda: any(e['k']=='profile_start' for e in list(third.events.values())))
+            wait(lambda: bool(third.received('profile_start')))
             independent = copy.deepcopy(profile)
             independent['uid'] = independent['character']['uid'] = uid_b
             independent['stats']['gold'] = 456

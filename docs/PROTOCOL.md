@@ -34,24 +34,28 @@ without valid traffic expires a peer. Unknown fields are not executed as command
 ## File bridge
 
 The game publishes `tx.frame` using a temporary file and rename. Its first two
-bytes are `0\n` (ordinary snapshot) or `1\n` (an event is waiting for acknowledgements).
-The rest is compact JSON. That prefix stays local; only JSON crosses the network.
+bytes are `0\n` (ordinary snapshot) or `1\n` (events are waiting for acknowledgements, or this
+game's own acknowledgements changed in the last 1.5 s). The rest is compact JSON. That prefix
+stays local; only JSON crosses the network.
 The helper publishes `rx_<slot>.json` and a one-second `status.json` in the bridge.
 It atomically replaces output files and leaves the last good output on a failed write.
 `status.json.heartbeat` contains the helper's monotonic millisecond clock. The
 game expires the local helper's peer list when this value stops advancing for
 three seconds, so an abruptly terminated helper cannot leave stale characters.
 
-Game snapshots include `v`, `id`, `epoch`, `active`, a fixed eight-slot ACK array `a`,
-movement/animation fields, and optional `q={s,k,d}`. Only one queued event is sent
-at a time. Each active peer acknowledges its application, and the sender then moves
-to the next event. The queue is bounded to 256 entries. There is no disk journal or
-resume-after-game-crash guarantee. Existing event types are idempotent appearance
-and terrain updates; item transactions need a stronger persistence design before
-they can be added safely.
+Game snapshots (`v: 2`) include `id`, `epoch`, `uid`, `world`, `active`, movement and
+animation fields, and `ev`, the event layer's window. `ev` carries the sender's stream id, the
+oldest unacknowledged sequence number, as many queued events as fit (at most 12 KB), and a
+cumulative ACK plus the acknowledged stream id for each of the eight slots. Events are ordered
+and delivered exactly once per sender session. Large payloads travel as blobs (up to 256 KB),
+and host-authoritative requests are applied once per request id. `docs/EVENT-LAYER.md`
+describes the format, the delivery rules, behaviour across reconnects and restarts, and why
+there is no disk journal (including what item transfers still need). Version-1 and version-2
+games ignore each other's frames.
 
 Updates are retried every 100 ms while reliable; otherwise an identical snapshot is
 sent once per second. This also heals loss of the final movement update when a player stops.
+The helper and its UDP protocol above are unchanged by the event layer.
 
 ## Host discovery (UDP 7776)
 
