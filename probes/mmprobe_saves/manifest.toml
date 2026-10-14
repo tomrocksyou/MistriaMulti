@@ -1,0 +1,6 @@
+name = "mmprobe_saves"
+author = "MistriMulti"
+version = "0.0.1"
+minInstallerVersion = "0.16.5"
+manifestVersion = 1
+requires_hooks = []
