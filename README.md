@@ -113,6 +113,11 @@ cryptographic authentication. No firewall or router settings are changed automat
 
 ## Linux / Steam Deck
 
+**Quick start: close Steam, then run `./install.sh`** from the project folder (Debian/Ubuntu/Steam Deck desktop mode). It builds or
+finds the programs, copies them to `~/.local/share/mistrimulti`, sets Steam's launch option for Fields of Mistria (with a backup),
+copies the mod into the game's `mods` folder and prints the remaining MOMI step. `--dry-run` previews, `--uninstall` undoes it,
+`--yes` lets it run the one `sudo apt-get install -y nasm binutils` it may need. The manual steps below are what it automates.
+
 Linux has the same one-click-in-Steam flow as Windows, built from three native assembly programs (raw Linux system
 calls, no C runtime, no Python). Keep them together in one folder, for example `~/mistrimulti`:
 

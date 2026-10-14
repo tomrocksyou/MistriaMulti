@@ -13,6 +13,8 @@ jobs:
       - name: Launcher and manager, natively on Linux with a fake game
         run: python3 tests/test_launcher_linux.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux build/mistrimulti-manager
       - run: python3 tests/test_world_linux.py build/mistrimulti-manager
+      - name: install.sh against a fake HOME and fake Steam tree
+        run: sh -n install.sh && python3 tests/test_install_linux.py
       - run: python3 tests/test_event_layer.py
       - run: python3 tests/test_event_features.py
       - run: python3 tests/test_containers.py

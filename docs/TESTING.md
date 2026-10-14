@@ -177,6 +177,24 @@ network namespace (`unshare -n`, loopback up) several can run side by side. `ONL
 Not covered: the real game on a real Steam Deck, the real Linux or Proton game's save folder, a real Steam identity probe,
 and the real Tailscale output. Those need a device.
 
+## Linux installer checks
+
+`tests/test_install_linux.py` runs `install.sh` against a throwaway `HOME` containing a fake Steam tree (a symlinked
+`~/.steam/steam`, `libraryfolders.vdf`, an appmanifest, one or two `userdata/<id>/config/localconfig.vdf` files) and dummy
+program files, so it needs neither `nasm` nor Steam:
+
+```sh
+sh -n install.sh && python3 tests/test_install_linux.py
+```
+
+It covers: a fresh install (programs, launch option, backup, mod copy, summary text), an app block with and without an
+existing `LaunchOptions`, running twice (nothing changes, the first backup is kept), an existing launch option (declined, no
+answer, accepted), Steam "running" (`MISTRIMULTI_STEAM_RUNNING=1`: no edit, line printed), a missing appmanifest, two Steam
+users and a second library folder, `--uninstall` (refused while Steam runs; restores the backups; only clears our own line if
+Steam changed the file since), `--dry-run` (nothing written), `MISTRIMULTI_DIR` with a space in the path, missing build tools
+(exactly one `sudo apt-get install` line) and a foreign mod already in the mods folder. Not covered: a real `localconfig.vdf`
+written by a real Steam, the real mods folder, and the real process check for Steam.
+
 ## World transfer checks
 
 `tests/test_world.py` runs the download client (`MistriMulti.exe --fetch <ip> <folder> <result file>`) against a fake host:
