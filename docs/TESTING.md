@@ -216,6 +216,14 @@ bins, seeded loot and randomised item-conservation runs.
 `python3 tests/test_farm_sync.py` (about 5 minutes) runs the real farm-object GML on the event layer at 5-10% loss: join,
 host changes and day change, guest harvest races (exactly one yield), tool swings, edits, conflicts, rejoin and hostile input.
 
+## Mines checks
+
+`python3 tests/test_dungeon.py` (about 20 s, no ports) runs the real mines GML on the event layer: one run seed for the
+itinerary and floors, the floor record and reconciliation, simultaneous kills (one killer, one drop set), pooled monster
+health and venom, rocks, chests and dig sites claimed once, one ladder, floors apart, leave and rejoin, host away and host
+restart, joins during fights, 15-25 % loss and a partition, hostile data. `python3 tests/mutate_dungeon.py` breaks the GML in 21
+ways and fails if any test still passes.
+
 ## Ranch checks
 
 `python3 tests/test_ranch.py` runs the real animal, pet, building and home GML on the event layer (19 scenarios: paid

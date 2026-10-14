@@ -51,9 +51,10 @@ Implemented:
   to the host, a lost or closed host returns the guest to the title screen with a message (`docs/SYNC-GUESTSAVE.md`).
 - F8 displays connection status in game.
 - Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
+- Mines: one shared run (same itinerary and floors for everyone), host-owned monster health with one kill and one drop set, and shared rocks, chests and ladders (`docs/SYNC-DUNGEON.md`, not yet run in the game).
 
 This is not feature-complete co-op. Still **not synchronized**: NPC schedules, quests/unlocks that belong to the world,
-cutscenes, and mines/dungeon generation and combat. Everything listed above was written against the game's scripts and
+cutscenes, and the seal and boss rooms of the mines. Everything listed above was written against the game's scripts and
 tested only against a stand-in game; none of it has been confirmed in the real game yet.
 
 Guests retain their local world's objects while the synchronized systems operate.

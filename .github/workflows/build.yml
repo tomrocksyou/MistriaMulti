@@ -23,6 +23,7 @@ jobs:
       - run: python3 tests/test_farm_sync.py
       - run: python3 tests/test_guestsave.py
       - run: python3 tests/test_wallet.py
+      - run: python3 tests/test_dungeon.py
       - run: python3 tests/test_event_bridge.py build/mistrimulti-helper-linux
       - uses: actions/upload-artifact@v4
         with:

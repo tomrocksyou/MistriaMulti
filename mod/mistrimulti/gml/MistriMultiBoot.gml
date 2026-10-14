@@ -73,6 +73,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.guestsave", mistrimulti_guestsave_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.import_character", mistrimulti_guestsave_import, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.wallet", mistrimulti_wallet_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.dungeon", mistrimulti_dungeon_debug, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -88,13 +89,14 @@ function mistrimulti_register_events() {
     mistrimulti_containers_register_events();
     mistrimulti_drops_register_events();
     mistrimulti_ranch_register_events();
+    mistrimulti_dungeon_register_events();
     mistrimulti_progress_register_events();
     mistrimulti_wallet_register_events();
 }
 
 function mistrimulti_room_key() {
     if (!instance_exists(obj_ari) || GRID == undefined) return "";
-    return location_id_to_string(CURRENT_LOCATION_ID) + ":" + string(GRID.dyn_index);
+    return location_id_to_string(CURRENT_LOCATION_ID) + ":" + string(GRID.dyn_index) + mistrimulti_dg_room_suffix();
 }
 
 function mistrimulti_tick() {
@@ -145,6 +147,7 @@ function mistrimulti_tick() {
         mistrimulti_containers_tick();
         mistrimulti_drops_tick();
         mistrimulti_ranch_tick();
+        mistrimulti_dungeon_tick();
         mistrimulti_farm_tick();
         mistrimulti_wallet_tick();
     } else {
@@ -348,6 +351,7 @@ function mistrimulti_register() {
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F9"), mistrimulti_drops_give_hotkey);
     mistrimulti_ranch_register_hooks();
+    mistrimulti_dungeon_register_hooks();
 }
 
 mmapi_mod_declare("mistrimulti", "0.2.0");
