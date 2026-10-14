@@ -1,7 +1,7 @@
 // Probe E: can a mod see the game's save list, and can it redirect the save folder?
 // Phase 1 (always): read-only report of CONFIG_DIRECTORY and the save manifest, at the title screen.
-// Phase 2 (only if mod_data/mmprobe_saves/do_swap.txt exists): point CONFIG_DIRECTORY at an empty
-// folder, rebuild the save list, report, then ALWAYS restore. Back up your saves folder first.
+// Phase 2 (automatic, right after the first report): point CONFIG_DIRECTORY at an empty
+// folder, rebuild the save list, report, then ALWAYS restore.
 function mmprobe_saves_say(text) { mmapi_log_info("mmprobe_saves", text); mmapi_log_flush("mmprobe_saves"); }
 
 function mmprobe_saves_report(tag) {
@@ -21,8 +21,7 @@ function mmprobe_saves_tick() {
     if (r.ticks mod 600 != 0 || r.reports >= 3) return;
     r.reports++;
     mmprobe_saves_report("report" + string(r.reports));
-    var flag = mmapi_mod_data_dir("mmprobe_saves") + "/do_swap.txt";
-    if (r.swapped || !file_exists(flag)) return;
+    if (r.swapped) return;
     r.swapped = true;
     var original = CONFIG_DIRECTORY;
     try {
