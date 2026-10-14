@@ -24,6 +24,8 @@ function mistrimulti_savespace_armed() {
 
 // "host", "join" or "" from control.json (written by the launcher for this session)
 function mistrimulti_savespace_mode() {
+    var kept = __mistrimulti_savespace();
+    if (kept.active && is_string(kept[$ "mode"]) && kept.mode != "") return kept.mode;   // read before the save folder switch
     var control = mmapi_mod_data_dir("mistrimulti") + "/control.json";
     if (!file_exists(control)) return "";
     var cfg = try_read_json_file(control);
@@ -110,7 +112,10 @@ function mistrimulti_savespace_chosen(kind, multiplayer, arg) {
     s.choosing = false;
     if (multiplayer && !mistrimulti_game_supported()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/offline_version_body"); return; }
     if (multiplayer && !mistrimulti_savespace_armed()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/needs_helper_body"); return; }
+    var mode_before = multiplayer ? mistrimulti_savespace_mode() : "";
+    try { mmapi_log_info("mistrimulti", "Multiplayer chosen, mode from control.json: [" + mode_before + "]"); } catch (e) {}
     if (!mistrimulti_savespace_try_set(multiplayer)) return;
+    s.mode = mode_before;
     if (kind == "new") {
         if (multiplayer) mistrimulti_savespace_enter_multiplayer(arg);
         else s.orig_enter_game(arg);
@@ -191,6 +196,7 @@ function mistrimulti_menu_opened(ctx) {
 function mistrimulti_title_entered(ctx) {
     var s = __mistrimulti_savespace();
     s.choosing = false;
+    s.mode = "";
     var rt = __mistrimulti_runtime();
     rt.enabled = false;
     rt.initialized = false;
