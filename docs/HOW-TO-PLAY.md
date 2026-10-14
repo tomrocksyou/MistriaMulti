@@ -1,6 +1,6 @@
-# How to play MistriMulti
+# How to play MistriaMulti
 
-Co-op for Fields of Mistria: one player hosts their farm, friends join it. Everyone needs the same MistriMulti version.
+Co-op for Fields of Mistria: one player hosts their farm, friends join it. Everyone needs the same MistriaMulti version.
 
 ## What you need
 
@@ -14,20 +14,20 @@ Co-op for Fields of Mistria: one player hosts their farm, friends join it. Every
 
 ### Windows
 
-1. Download `MistriMulti-<version>-Windows.zip` from the latest release on GitHub (Releases, on the right of the repository page).
-2. Unzip it into a place you will keep, for example `Documents`. It makes a `MistriMulti` folder. **Do not move that folder
+1. Download `MistriaMulti-<version>-Windows.zip` from the latest release on GitHub (Releases, on the right of the repository page).
+2. Unzip it into a place you will keep, for example `Documents`. It makes a `MistriaMulti` folder. **Do not move that folder
    afterwards**: Steam starts the game through a program in it.
 3. Close the game. Double-click `Install-Mod.bat`. It copies the mod into the game's `mods` folder.
-4. Open MOMI, tick **MistriMulti**, click **Install**.
+4. Open MOMI, tick **MistriaMulti**, click **Install**.
 5. Double-click `MistriMulti.exe` and press **Steam setup...**. It copies a line. In Steam: right-click Fields of Mistria >
    Properties > General > Launch Options, paste the line, close the window.
 
 ### Linux / Steam Deck (Desktop Mode)
 
-1. Download `MistriMulti-<version>-Linux.tar.gz` from the latest release and unpack it (it makes a `MistriMulti` folder).
+1. Download `MistriaMulti-<version>-Linux.tar.gz` from the latest release and unpack it (it makes a `MistriaMulti` folder).
 2. Close Steam. In that folder, open a terminal and run `./install.sh`. It copies the programs, sets Steam's launch option
    and copies the mod into the game's `mods` folder.
-3. Open MOMI, tick **MistriMulti**, click **Install**.
+3. Open MOMI, tick **MistriaMulti**, click **Install**.
 
 ## Play
 
@@ -44,7 +44,7 @@ Press **F8** in the game to see the connection status.
 
 ## Update
 
-Download the new zip (or tar.gz), unpack it **in the same place** so it replaces the old `MistriMulti` folder's files, close the game, run `Install-Mod.bat` (Linux:
+Download the new zip (or tar.gz), unpack it **in the same place** so it replaces the old `MistriaMulti` folder's files, close the game, run `Install-Mod.bat` (Linux:
 `./install.sh`), then MOMI > **Install** again. Every player must update.
 
 ## If something goes wrong

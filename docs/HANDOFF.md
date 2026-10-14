@@ -1,4 +1,4 @@
-# MistriMulti handoff (read this first in a new chat)
+# MistriaMulti handoff (read this first in a new chat)
 
 Written at the end of the first real two-computer test session. Repo `tomrocksyou/MistriaMulti`, working branch
 `claude/stoic-gates-o8v369` (was `claude/epic-meitner-jwbuc0`) (commit and push there; never open a pull request unless the user asks).
@@ -61,7 +61,7 @@ possibly for everyone once the repo is public. Their requirements, in their word
   scan, Save Solo, steam setup). Normal players should not need them any more.
 - **Event layer** (`gml/MistriMultiEvents.gml`, `docs/EVENT-LAYER.md`): reliable ordered host-authoritative events and blobs.
   Every synced feature uses it. The guide "How to add a synced feature" is in that doc.
-- **Feature packages** (each has `gml/MistriMulti<Area>.gml`, `docs/SYNC-<AREA>.md` with design, unverified assumptions and an
+- **Feature packages** (each has `gml/MistriaMulti<Area>.gml`, `docs/SYNC-<AREA>.md` with design, unverified assumptions and an
   in-game checklist, `tests/test_<area>.py`): Clock (time, weather, sleep vote), Containers (chests, ground items, gifts,
   seeded loot, shipping bins), Wallet (one shared gold pool, host-owned), Farm (crops, trees, rocks, forage), Ranch (animals,
   pets, buildings, furniture), Progress (per-player recipes, romance, quests; host save commits), Story (world quests,
@@ -93,14 +93,14 @@ Everything above is written and **passes the stand-in test matrix**, but **almos
   Prebuilt programs are committed in `dist/windows/` (MistriMulti.exe, MistriMultiLauncher.exe, mistrimulti-helper.exe,
   mistrimulti-steam-id.exe); keep them together; rebuild them after changing assembly (`scripts/build-*.sh`, then copy from `build/`).
 - Same Google account on both: **one Steam account can only be online on one computer**; use Steam > Go Offline on one of them.
-- MOMI (Mods of Mistria Installer, github.com/Garethp/Mods-of-Mistria-Installer) works on both. It lists MistriMulti from the game's
+- MOMI (Mods of Mistria Installer, github.com/Garethp/Mods-of-Mistria-Installer) works on both. It lists MistriaMulti from the game's
   `mods` folder; **bump the mod version in `mod/mistrimulti/manifest.toml` and `MistriMultiBoot.gml` when the mod changes**, or MOMI may not reinstall.
 
 ## 5. How to deploy a change to the test machines
 
 1. Change code, run tests (section 6), `sh scripts/make-release.sh` (regenerates `release/latest.txt`), commit, push.
 2. **Debian:** close the game and Steam, then `cd ~/MistriaMulti && git pull && ./install.sh` (rebuilds, copies programs to
-   `~/.local/share/mistrimulti`, sets the Steam launch option, copies the mod to the game's `mods` folder). Then MOMI > MistriMulti > Install.
+   `~/.local/share/mistrimulti`, sets the Steam launch option, copies the mod to the game's `mods` folder). Then MOMI > MistriaMulti > Install.
 3. **Windows:** `git pull`, run `Install-Mod.bat` (game closed), MOMI > Install. Programs come from `dist/windows`. One-time Steam
    launch option: `"<repo>\dist\windows\MistriMultiLauncher.exe" --steam %command%` (the **Steam setup...** button in `MistriMulti.exe` copies it).
 4. Always confirm the new mod is active (log shows `Mod tick is running.`), because stale installs wasted several rounds.

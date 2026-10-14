@@ -1,4 +1,4 @@
-// MistriMulti world items: loose items on the ground (obj_item) as host-owned objects with ids, pickup claims that are
+// MistriaMulti world items: loose items on the ground (obj_item) as host-owned objects with ids, pickup claims that are
 // granted to exactly one player, direct gifts between players, and host-seeded loot rolls. Protocol, assumptions and the
 // in-game checklist: docs/SYNC-CONTAINERS.md. Chest contents are in MistriMultiContainers.gml.
 //

@@ -1,5 +1,5 @@
 #!/bin/sh
-# MistriMulti installer for Linux (Debian/Ubuntu, Steam Deck desktop mode).  Run it once:   ./install.sh
+# MistriaMulti installer for Linux (Debian/Ubuntu, Steam Deck desktop mode).  Run it once:   ./install.sh
 # After that you only start the game from Steam: hosting and joining are chosen in the game's own Multiplayer menu.
 #
 #   ./install.sh               install (safe to run again)
@@ -168,12 +168,12 @@ apply_launch_option() {
                 say "  $f: Fields of Mistria already has this launch option:"
                 say "      $(vdf_unescape "$raw")"
                 if [ "$DRY" = 1 ]; then say "[dry run] would ask whether to replace it"; return 0; fi
-                printf '  Replace it with the MistriMulti one? (the old one stays in the backup) [y/N] '
+                printf '  Replace it with the MistriaMulti one? (the old one stays in the backup) [y/N] '
                 ans=n; read -r ans <&3 || ans=n
                 case $ans in y|Y|yes|YES) ;; *)
-                    say "  Left unchanged. To use MistriMulti, put this in Steam yourself, ahead of or instead of the old one:"
+                    say "  Left unchanged. To use MistriaMulti, put this in Steam yourself, ahead of or instead of the old one:"
                     say "      $LAUNCH_LINE"
-                    note "Existing Steam launch option kept in $f; MistriMulti's line was NOT added."
+                    note "Existing Steam launch option kept in $f; MistriaMulti's line was NOT added."
                     MANUAL=1; return 0 ;; esac
             fi
             setstate=option ;;
@@ -220,14 +220,14 @@ do_uninstall() {
                                 want=$(vdf_escape "$LAUNCH_LINE")
                 cur=$(MM_APPID=$APPID MM_WANT=$want vdf_awk get "$f" || true)
                 if [ "$cur" = "option:$want" ]; then
-                    act "clear MistriMulti's launch option in $f (the file changed since install, so the backup $backup is kept, not restored)"
+                    act "clear MistriaMulti's launch option in $f (the file changed since install, so the backup $backup is kept, not restored)"
                     if [ "$DRY" != 1 ]; then
                         if MM_APPID=$APPID MM_WANT= MM_STATE=option vdf_awk set "$f" > "$TMP/lc.new" && vdf_balanced "$TMP/lc.new"; then
                             cat "$TMP/lc.new" > "$f"; rm -f "$applied"
                         else say "  could not edit $f; remove the launch option in Steam by hand."; fi
                     fi
                 else
-                    say "  $f no longer has MistriMulti's launch option; leaving it alone."
+                    say "  $f no longer has MistriaMulti's launch option; leaving it alone."
                     [ "$DRY" = 1 ] || rm -f "$applied"
                 fi
             fi
@@ -245,7 +245,7 @@ do_uninstall() {
 # ---------------------------------------------------------------- main
 if [ "$UNINSTALL" = 1 ]; then do_uninstall; exit 0; fi
 
-say "MistriMulti installer"; [ "$DRY" = 1 ] && say '(dry run: nothing will be changed)'
+say "MistriaMulti installer"; [ "$DRY" = 1 ] && say '(dry run: nothing will be changed)'
 
 # 1. program files
 have_all() { for b in $BINS; do [ -f "$1/$b" ] || return 1; done; }
@@ -355,7 +355,7 @@ elif [ -z "$GAMEDIR" ]; then
     note 'Game folder not found; install the mod with MOMI (below).'
 else
     dest=$GAMEDIR/mods/mistrimulti
-    if [ -f "$dest/manifest.toml" ] && ! grep -q 'name = "MistriMulti"' "$dest/manifest.toml"; then
+    if [ -f "$dest/manifest.toml" ] && ! grep -Eq 'name = "Mistria?Multi"' "$dest/manifest.toml"; then
         say "Another mod already occupies $dest; not touched."
         note "Mod NOT copied: another mod is in $dest."
     else
@@ -382,7 +382,7 @@ if [ "$MANUAL" = 1 ]; then
 fi
 if [ "$MODDONE" = 1 ]; then
     say ''
-    say 'One more step for the mod: open MOMI (Mods of Mistria installer), select MistriMulti and click Install.'
+    say 'One more step for the mod: open MOMI (Mods of Mistria installer), select MistriaMulti and click Install.'
 else
     say ''
     say "To install the mod: open MOMI (Mods of Mistria installer), add the folder $SRC/mod/mistrimulti, and click Install."

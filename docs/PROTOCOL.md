@@ -1,4 +1,4 @@
-# MistriMulti protocol v2 (authenticated)
+# MistriaMulti protocol v2 (authenticated)
 
 UDP is used on a reachable IPv4 host/port. Each client speaks to the host; the host
 forwards fully accepted snapshots to the other clients. All integers in the protocol

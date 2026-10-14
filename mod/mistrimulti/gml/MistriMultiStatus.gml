@@ -1,5 +1,5 @@
 // "Multiplayer: Offline / Idle / Online" badge (bottom right) and the game-version check.
-//   Offline = the game was updated past the tested versions, or the MistriMulti launcher / helper is not running
+//   Offline = the game was updated past the tested versions, or the MistriaMulti launcher / helper is not running
 //             (the text says which, in plain words).
 //   Idle    = the launcher runs, nothing is hosted or joined: pick Multiplayer in New Game / Load Game.
 //   Online  = a host or join session runs and the network helper's heartbeat is moving.

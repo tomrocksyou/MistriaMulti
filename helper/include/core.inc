@@ -1,4 +1,4 @@
-; MistriMulti UDP transport.
+; MistriaMulti UDP transport.
 ; UDP snapshots with bounded fragmentation, per-source reassembly, and replay rejection.
 ; Game-level acknowledged event queues ride inside these snapshots.
 %define MAX_PLAYERS 8
@@ -73,13 +73,13 @@ tx_suffix db '/tx.frame',0
 rx_suffix db '/rx_0.json',0
 status_suffix db '/status.json',0
 stop_suffix db '/stop.flag',0
-usage db 'MistriMulti 0.1.0 - native NASM multiplayer helper',10
+usage db 'MistriaMulti 0.1.0 - native NASM multiplayer helper',10
     db 'host: mistrimulti-helper host LOCAL_PORT 0 SESSION_HEX BRIDGE_DIRECTORY',10
     db 'join: mistrimulti-helper join LOCAL_PORT PLAYER_ID SESSION_HEX BRIDGE_DIRECTORY HOST_IPV4 HOST_PORT',10
     db 'PLAYER_ID: host=0; each joining player uses a different number 1..7.',10
     db 'SESSION_HEX: shared eight-digit hex room code. IPv4 only.',10
     db 'The bridge directory must already exist. Create stop.flag there to exit.',10,0
-started db 'MistriMulti helper running. Ctrl+C or stop.flag exits.',10,0
+started db 'MistriaMulti helper running. Ctrl+C or stop.flag exits.',10,0
 bad_arguments db 'Invalid arguments. Run the helper without arguments for usage.',10,0
 socket_error db 'Could not create or bind UDP socket. Check port and network permissions.',10,0
 status_prefix db '{"running":true,"id":',0

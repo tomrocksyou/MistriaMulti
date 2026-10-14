@@ -1,4 +1,4 @@
-// MistriMulti event layer: batched, ordered, acknowledged events between game instances, blobs larger
+// MistriaMulti event layer: batched, ordered, acknowledged events between game instances, blobs larger
 // than one bridge frame, and host-authoritative requests. Design and feature guide: docs/EVENT-LAYER.md.
 //
 // tests/event_model.py is the executable specification; every function below mirrors the Python method

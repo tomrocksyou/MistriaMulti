@@ -1,4 +1,4 @@
-"""A small interpreter for the GML subset used by MistriMulti, for developer tests only.
+"""A small interpreter for the GML subset used by MistriaMulti, for developer tests only.
 
 The game is the only real GML runtime, and it cannot run here. This interpreter parses every mod file
 (a syntax check) and executes the engine-independent ones, such as MistriMultiEvents.gml, so that the

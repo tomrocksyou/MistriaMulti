@@ -11,12 +11,12 @@ $taskDestination = Join-Path $taskMods 'mistrimulti'
 New-Item -ItemType Directory -Path $taskMods -Force | Out-Null
 if (Test-Path -LiteralPath $taskDestination) {
     $taskExisting = Get-Content -LiteralPath (Join-Path $taskDestination 'manifest.toml') -Raw
-    if ($taskExisting -notmatch 'name = "MistriMulti"' -or $taskExisting -notmatch 'requires_hooks = .*game.save_guard') { throw 'Another mod already occupies the destination.' }
+    if ($taskExisting -notmatch 'name = "Mistria?Multi"' -or $taskExisting -notmatch 'requires_hooks = .*game.save_guard') { throw 'Another mod already occupies the destination.' }
 }
 New-Item -ItemType Directory -Path $taskDestination -Force | Out-Null
 Copy-Item -Path (Join-Path $taskSource '*') -Destination $taskDestination -Recurse -Force
 foreach ($taskNotice in @('LICENSE','CONTACT.md')) {
     Copy-Item -LiteralPath (Join-Path $taskProjectRoot $taskNotice) -Destination $taskDestination -Force
 }
-Write-Host "Copied MistriMulti to $taskDestination"
-Write-Host 'Open MOMI, select MistriMulti, and click Install.'
+Write-Host "Copied MistriaMulti to $taskDestination"
+Write-Host 'Open MOMI, select MistriaMulti, and click Install.'

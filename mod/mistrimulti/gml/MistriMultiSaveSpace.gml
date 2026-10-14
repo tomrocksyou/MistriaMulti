@@ -238,8 +238,8 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/no_world_title": return "No world to join yet";
         case "mistrimulti/no_world_body": return "The host's world was not found on this computer. Choose Multiplayer and Join a game again.";
         case "mistrimulti/offline_title": return "Multiplayer is offline";
-        case "mistrimulti/offline_version_body": return "The game was updated and MistriMulti has not been updated for it yet.";
-        case "mistrimulti/menu_failed_body": return "The multiplayer menu could not start. Singleplayer is not affected. Details are in the MistriMulti log.";
+        case "mistrimulti/offline_version_body": return "The game was updated and MistriaMulti has not been updated for it yet.";
+        case "mistrimulti/menu_failed_body": return "The multiplayer menu could not start. Singleplayer is not affected. Details are in the MistriaMulti log.";
     }
     if (is_string(ctx.key) && string_copy(ctx.key, 1, 14) == "mistrimulti/t/") return mistrimulti_menu_text_for_key(ctx.key);   // texts made by MistriMultiMenu.gml
     return undefined;

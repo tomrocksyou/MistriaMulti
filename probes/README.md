@@ -14,7 +14,7 @@ Results are written to each mod's own log: `%LOCALAPPDATA%\FieldsOfMistria\mod_d
 
 1. Close the game. Uninstall the old probes in MOMI (an error log means a probe failed to load).
 2. Copy every `probes/mmprobe_*` folder into the game's `mods/` folder; install them in MOMI
-   with MistriMulti unchecked.
+   with MistriaMulti unchecked.
 3. `python tools/probe_listener.py --data-dir %LOCALAPPDATA%\FieldsOfMistria\mod_data`
 4. Start the game, load a save, wait about 2 minutes.
 5. Run `powershell -ExecutionPolicy Bypass -File scripts\Collect-Logs.ps1` and send `mistri-logs.zip` from the Desktop.

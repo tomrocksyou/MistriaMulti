@@ -102,7 +102,7 @@ function mistrimulti_menu_poll() {
     if (!file_exists(path)) {
         m.status = undefined;
         m.alive = false;
-        m.why = "the launcher's status file does not exist (" + path + "): the game was not started through the MistriMulti launcher";
+        m.why = "the launcher's status file does not exist (" + path + "): the game was not started through the MistriaMulti launcher";
         return;
     }
     var st = mistrimulti_menu_clean(try_read_json_file(path));
@@ -156,12 +156,12 @@ function mistrimulti_menu_flush() {
 
 function mistrimulti_menu_error_text(code) {
     switch (code) {
-        case 1: return "The MistriMulti network helper program is missing. Run the MistriMulti installer again.";
-        case 2: return "The network helper could not start. Another program (or a second copy of the game) may be using the multiplayer port. Close it and try again. Details: helper.log in the MistriMulti data folder.";
+        case 1: return "The MistriaMulti network helper program is missing. Run the MistriaMulti installer again.";
+        case 2: return "The network helper could not start. Another program (or a second copy of the game) may be using the multiplayer port. Close it and try again. Details: helper.log in the MistriaMulti data folder.";
         case 3: return "That address or setting is not valid. An address looks like 100.101.102.103.";
         case 4: return "The host did not answer. Check the address, that the host is playing and chose Host a game, and that you are on the same network or on Tailscale. If your host uses a room code, ask for it.";
         case 5: return "That password cannot be used. It must be 1 to 64 letters, digits or punctuation marks, without spaces.";
-        case 6: return "MistriMulti could not write its settings file.";
+        case 6: return "MistriaMulti could not write its settings file.";
         case 7: return "Searching for hosts is not available on this computer. Choose Type an address instead.";
         case 21: return "Wrong password. Ask your host for the password and try again.";
         case 22: return "The host has blocked this computer.";
@@ -181,8 +181,8 @@ function mistrimulti_menu_error_text(code) {
 // Why Multiplayer is not available right now, in plain words, or "" when the launcher answers and its helper exists.
 function mistrimulti_menu_unavailable() {
     var m = __mistrimulti_menu();
-    if (m.status == undefined) return "MistriMulti is not running. Start the game from Steam with the MistriMulti launch option (the installer sets it; see the README).";
-    if (!m.alive) return "The MistriMulti launcher stopped answering. Close the game and start it again from Steam.";
+    if (m.status == undefined) return "MistriaMulti is not running. Start the game from Steam with the MistriaMulti launch option (the installer sets it; see the README).";
+    if (!m.alive) return "The MistriaMulti launcher stopped answering. Close the game and start it again from Steam.";
     if (!m.status.helper) return mistrimulti_menu_error_text(1);
     return "";
 }

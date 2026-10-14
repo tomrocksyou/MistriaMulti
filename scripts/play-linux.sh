@@ -78,7 +78,7 @@ finish() {
     printf '%s\n' '{"enabled":false}' > "$mod_data/control.json"
 }
 trap finish EXIT HUP INT TERM
-printf 'MistriMulti %s | player %s | room %s | UDP %s\n' "$mode" "$id" "$code" "$local_port"
+printf 'MistriaMulti %s | player %s | room %s | UDP %s\n' "$mode" "$id" "$code" "$local_port"
 printf '%s\n' 'Start Fields of Mistria in Steam, load a save, and keep this launcher open.'
 printf '%s\n' 'Press Enter here after closing the game.'
 read -r answer

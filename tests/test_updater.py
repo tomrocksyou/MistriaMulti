@@ -105,14 +105,14 @@ class Env:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.port = self.server.server_address[1]
         self.mod = {
-            "mod/mistrimulti/manifest.toml": b'name = "MistriMulti"\nversion = "0.2.0"\n',
+            "mod/mistrimulti/manifest.toml": b'name = "MistriaMulti"\nversion = "0.2.0"\n',
             "mod/mistrimulti/gml/A.gml": b"function a() { return 1; }\n" * 40,
             "mod/mistrimulti/gml/B.gml": b"function b() { return 2; }\n",
         }
         self.bins = {}
 
     def set_installed(self, version):
-        (self.game / "mods" / "mistrimulti" / "manifest.toml").write_text(f'name = "MistriMulti"\nversion = "{version}"\n')
+        (self.game / "mods" / "mistrimulti" / "manifest.toml").write_text(f'name = "MistriaMulti"\nversion = "{version}"\n')
 
     def publish(self, version="0.2.0", mod=None, bins=None, footer=True, extra=(), raw=None):
         """Writes the site files and latest.txt. `raw` replaces the whole list text."""

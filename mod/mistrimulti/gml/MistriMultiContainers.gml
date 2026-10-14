@@ -1,4 +1,4 @@
-// MistriMulti containers: host-owned chests, fridges and shipping bins (the host sells the bins at the end of its day and the
+// MistriaMulti containers: host-owned chests, fridges and shipping bins (the host sells the bins at the end of its day and the
 // proceeds go to the shared wallet, MistriMultiWallet.gml). Protocol, assumptions and the in-game
 // checklist: docs/SYNC-CONTAINERS.md. The world items that leave or enter containers are in MistriMultiDrops.gml.
 //

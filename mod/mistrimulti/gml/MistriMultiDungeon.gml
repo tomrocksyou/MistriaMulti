@@ -1,4 +1,4 @@
-// MistriMulti mines sync: one shared dungeon run, the same floors for everyone, host-owned monster health and
+// MistriaMulti mines sync: one shared dungeon run, the same floors for everyone, host-owned monster health and
 // kills, and host-arbitrated rocks, chests, forageables, dig sites and ladders, on the event layer.
 // Design, assumptions and the in-game checklist: docs/SYNC-DUNGEON.md.
 //

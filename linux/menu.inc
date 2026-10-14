@@ -73,7 +73,7 @@ st_stopped db 'stopped',0
 se_none db 'none',0
 se_host db 'host',0
 se_join db 'join',0
-r_standby db 'MistriMulti: no launcher.cfg is needed. Waiting for Host or Join in the in-game Multiplayer menu.',10,0
+r_standby db 'MistriaMulti: no launcher.cfg is needed. Waiting for Host or Join in the in-game Multiplayer menu.',10,0
 align 8
 sv_state_names dq st_idle, st_hosting, st_joining, st_download, st_ready, st_error, st_scanning, st_stopped
 sv_session_names dq se_none, se_host, se_join

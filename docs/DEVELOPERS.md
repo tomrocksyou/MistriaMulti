@@ -1,4 +1,4 @@
-# MistriMulti for developers
+# MistriaMulti for developers
 
 A native x86-64 NASM networking helper, launcher and manager (Win32/Winsock on Windows, raw syscalls on Linux) next to a GML
 mod loaded through MOMI/MMAPI. None of them needs Python, .NET, Rust, a paid server, or a third-party relay at runtime.
@@ -67,8 +67,8 @@ are blocked during multiplayer. The host can save its farm normally. See
    Windows executable is also included under `build/` in the supplied project.
 3. Get the mod into the game's `mods/` folder with the manager (`MistriMulti.exe`: **Check for updates**, then **Update**), or, when
    building from source, with `Install-Mod.bat`. Both copy **only this project's own mod**.
-4. Open MOMI, select **MistriMulti**, and click **Install** (the manager's **Open MOMI** button opens MOMI and lists these
-   steps; it asks you once where MOMI is). Close the game during installation. MistriMulti cannot press MOMI's Install for
+4. Open MOMI, select **MistriaMulti**, and click **Install** (the manager's **Open MOMI** button opens MOMI and lists these
+   steps; it asks you once where MOMI is). Close the game during installation. MistriaMulti cannot press MOMI's Install for
    you: see `docs/RELEASES.md` for why.
 5. **Once**, in Steam: right-click the game, Properties, Launch Options, and paste the launch line
    (`"<folder>\MistriMultiLauncher.exe" --steam %command%`; the manager's **Steam setup...** button copies it to the clipboard).
@@ -198,7 +198,7 @@ MOMI preflight must use an **absolute** mod path. Relative paths can make its co
 report a misleading "no gml/ tree" result:
 
 ```powershell
-& 'path\to\ModsOfMistriaInstaller-cli.exe' --lint 'C:\absolute\MistriMulti\mod\mistrimulti' 'C:\absolute\Fields of Mistria\assets.bak.zip' --strict-lints --compile-check require
+& 'path\to\ModsOfMistriaInstaller-cli.exe' --lint 'C:\absolute\MistriaMulti\mod\mistrimulti' 'C:\absolute\Fields of Mistria\assets.bak.zip' --strict-lints --compile-check require
 ```
 
 Use the pristine game archive for this check: MOMI's `assets.bak.zip` after

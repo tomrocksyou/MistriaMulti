@@ -98,7 +98,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.9 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriaMulti 0.3.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -354,7 +354,7 @@ function mistrimulti_show_status() {
     }
     var count = 0;
     for (var i = 0; i < 8; i++) if ((r.mask & (1 << i)) != 0) count++;
-    var text = "MistriMulti: " + r.mode + " | " + string(count) + " connected";
+    var text = "MistriaMulti: " + r.mode + " | " + string(count) + " connected";
     if (r.warning != "") text += " | " + r.warning;
     if (r.player_error != "") text += " | " + r.player_error;
     if (r.mode == "join" && r.player_revision > r.player_saved_revision) text += " | Saving player progress";
@@ -455,5 +455,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.9");
+mmapi_mod_declare("mistrimulti", "0.3.0");
 mistrimulti_register();

@@ -99,7 +99,7 @@ A return of the host inside its grace period (a short outage) cancels the state;
 died" from "my own connection died"; both show as `lost`.
 
 **The message** is the game's popup (`popup_creator`): "Disconnected from the host", with a body that says the character was
-saved on the host's computer a few seconds ago, that nothing was saved here, and to join again from MistriMulti. Its single
+saved on the host's computer a few seconds ago, that nothing was saved here, and to join again from MistriaMulti. Its single
 button is the game's own "Return to main menu"; it fades out and calls `Game.exit_to_menu()` exactly like the settings menu. It
 appears once. If the popup cannot be built the guest still goes to the title.
 
@@ -204,7 +204,7 @@ checks that a test fails each time. None of this runs the real game.
 Use two installs (host and guest), a host world on an autosave, and the MMAPI debug console for `mistrimulti.guestsave`
 (`blocked`, `state`, `exported`) when it is enabled.
 
-1. Startup: no error in the MistriMulti log; MOMI accepts the manifest (no new hook is declared).
+1. Startup: no error in the MistriaMulti log; MOMI accepts the manifest (no new hook is declared).
 2. **Save attempt.** As a guest, save at the journal. The notice appears, no file appears in `saves/` or `multiplayer/saves/`
    (check modification times), and the host's `players/<id>.json` updates within a couple of seconds.
 3. **End of day.** As a guest, sleep through the host's day end: the game continues normally (the "saved" icon is expected, the

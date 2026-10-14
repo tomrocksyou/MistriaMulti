@@ -1,4 +1,4 @@
-// MistriMulti shared wallet: one gold pool for everyone in a hosted world. Design, assumptions and the in-game checklist:
+// MistriaMulti shared wallet: one gold pool for everyone in a hosted world. Design, assumptions and the in-game checklist:
 // docs/SYNC-WALLET.md.
 //
 // The host owns the pool. Every gold change of the game goes through Ari.modify_gold(), which the MMAPI hook

@@ -334,8 +334,8 @@ function mistrimulti_guestsave_register_hooks() {
 function mistrimulti_guestsave_local_missing(value, ctx) {
     switch (ctx.key) {
         case "mistrimulti/guest_gone_title": return "Disconnected from the host";
-        case "mistrimulti/guest_lost_body": return "The connection to the host was lost. Your character was saved on the host's computer a few seconds ago, and nothing was saved here. Join again from MistriMulti to continue.";
-        case "mistrimulti/guest_closed_body": return "The host closed or restarted the world. Your character stays on the host's computer. Join again from MistriMulti to continue.";
+        case "mistrimulti/guest_lost_body": return "The connection to the host was lost. Your character was saved on the host's computer a few seconds ago, and nothing was saved here. Join again from MistriaMulti to continue.";
+        case "mistrimulti/guest_closed_body": return "The host closed or restarted the world. Your character stays on the host's computer. Join again from MistriaMulti to continue.";
     }
     return undefined;
 }

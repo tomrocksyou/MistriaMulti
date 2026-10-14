@@ -1,4 +1,4 @@
-; MistriMulti updater: a plain Win32 window written in NASM. No C runtime.
+; MistriaMulti updater: a plain Win32 window written in NASM. No C runtime.
 ; Shows the installed and latest version, updates the mod files, and backs up solo saves.
 bits 64
 default rel
@@ -25,7 +25,7 @@ WSTR clip_static, "STATIC"
 WSTR cls_name, "MistriMultiUpdater"
 WSTR cls_static, "STATIC"
 WSTR cls_button, "BUTTON"
-WSTR title, "MistriMulti"
+WSTR title, "MistriaMulti"
 WSTR txt_check, "Check for updates"
 WSTR txt_update, "Update"
 WSTR txt_save, "Save Solo"
@@ -50,7 +50,7 @@ WSTR msg_nogame, "Fields of Mistria was not found, so the mod cannot be updated.
 WSTR msg_current, "Everything is already up to date."
 fmt_done: dw __utf16__(`Updated to %s.\r\n\r\nFiles installed: %d (mod %d, programs %d).`), 0
 fmt_done_self: dw __utf16__(`\r\n\r\nMistriMulti.exe itself was updated. Close this window and open MistriMulti.exe again to use the new version.`), 0
-fmt_done_momi: dw __utf16__(`\r\n\r\nNext: press Open MOMI, select MistriMulti and click Install, then start the game.`), 0
+fmt_done_momi: dw __utf16__(`\r\n\r\nNext: press Open MOMI, select MistriaMulti and click Install, then start the game.`), 0
 fmt_saved: dw __utf16__(`Saved %d file(s) to:\r\n%s`), 0
 WSTR msg_nosaves, "No solo saves were found to back up."
 WSTR msg_nodocs, "Could not find your Documents folder."

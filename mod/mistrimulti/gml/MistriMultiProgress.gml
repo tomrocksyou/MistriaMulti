@@ -806,7 +806,7 @@ function mistrimulti_progress_capture() {
     return { v: MISTRIMULTI_PROGRESS_VERSION, uid: r.uid, world: r.world_key, sections: sections };
 }
 
-// Brings a stored envelope up to the current schema, or returns undefined (damaged, or written by a newer MistriMulti).
+// Brings a stored envelope up to the current schema, or returns undefined (damaged, or written by a newer MistriaMulti).
 // Sections this version does not know are dropped; a missing section restores as a new character's.
 function mistrimulti_progress_migrate(saved) {
     if (!is_struct(saved) || !is_real(saved[$ "v"]) || saved.v < 1 || saved.v > MISTRIMULTI_PROGRESS_VERSION) return undefined;

@@ -1,4 +1,4 @@
-; MistriMulti launcher (NASM, Windows x64, no C runtime).
+; MistriaMulti launcher (NASM, Windows x64, no C runtime).
 ;   MistriMultiLauncher.exe --steam <game exe> [game args]   Steam launch option: starts the helper, runs the game, cleans up.
 ;   MistriMultiLauncher.exe --configure                      asks host / join once and saves launcher.cfg
 ; Safety rules: the game is ALWAYS started, whatever fails first; every value read from launcher.cfg is validated

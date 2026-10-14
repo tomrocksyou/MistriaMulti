@@ -1,4 +1,4 @@
-; MistriMulti manager for Linux and the Steam Deck: the console twin of the Windows manager window (updater/mp.inc).
+; MistriaMulti manager for Linux and the Steam Deck: the console twin of the Windows manager window (updater/mp.inc).
 ;   mistrimulti-manager host [--password TEXT]   write the host setup (optionally with a room password) and show the addresses to give to friends
 ;   mistrimulti-manager join [IP]            find hosts (broadcast + Tailscale peers) and choose one, or join an IP directly
 ;                            [--player N] [--room CODE] [--port N] [--password TEXT]
@@ -48,7 +48,7 @@ s_userdirs db '/user-dirs.dirs',0
 s_env_xdg_docs db 'XDG_DOCUMENTS_DIR',0
 k_docs db 'XDG_DOCUMENTS_DIR="'
 k_docs_len equ $ - k_docs
-t_usage db 'MistriMulti manager',10
+t_usage db 'MistriaMulti manager',10
     db '  mistrimulti-manager host [--password TEXT]   set this computer up as the host (with an optional room password)',10
     db '                      and show the addresses to give to friends',10
     db '  mistrimulti-manager join [IP]       find hosts on your network and on Tailscale and join one (or join IP directly)',10

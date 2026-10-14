@@ -14,8 +14,8 @@ A release is a GitHub Release tagged `v<version>` (for example `v0.2.0`) whose a
 | `MistriMultiLauncher.exe` | The Steam launcher. |
 | `mistrimulti-helper.exe` | The network helper. |
 | `mistrimulti-steam-id.exe` | The Steam ID probe. |
-| `MistriMulti-<version>-Windows.zip` | For players: the four programs, `Install-Mod.bat`, the mod and `HOW-TO-PLAY.txt` in one `MistriMulti/` folder. |
-| `MistriMulti-<version>-Linux.tar.gz` | For players: the four Linux programs, `install.sh`, the mod and `HOW-TO-PLAY.txt` in one `MistriMulti/` folder. |
+| `MistriaMulti-<version>-Windows.zip` | For players: the four programs, `Install-Mod.bat`, the mod and `HOW-TO-PLAY.txt` in one `MistriaMulti/` folder. |
+| `MistriaMulti-<version>-Linux.tar.gz` | For players: the four Linux programs, `install.sh`, the mod and `HOW-TO-PLAY.txt` in one `MistriaMulti/` folder. |
 
 The two player downloads are made by `scripts/make-player-packages.sh <windows bin> <linux bin> <out>` (also runnable locally
 after the build scripts). The manager ignores them.
@@ -98,7 +98,7 @@ an equal mod version with a stale tool still offers an update.
 
 ## MOMI: what is known and what is not
 
-The manager's **Open MOMI** button opens MOMI and shows the steps (close the game, select MistriMulti, click Install). It
+The manager's **Open MOMI** button opens MOMI and shows the steps (close the game, select MistriaMulti, click Install). It
 does not run MOMI's command line. Reasons, from the files provided (the MOMI repository listing and the MMAPI docs):
 
 - Known: MOMI has a command-line project, `ModsOfMistriaCommandLine` (`Program.cs`); the README of this project calls its

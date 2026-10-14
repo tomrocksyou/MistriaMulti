@@ -269,7 +269,7 @@ Result: reloading a host save, from the same slot or after a crash, brings the w
 | Network cut during an upload | Nothing is stored (blobs are all-or-nothing); the next checkpoint repeats it |
 | Host disk fails between `.tmp` and the rename | The old record stays whole; the upload is retried after 2 s |
 | Primary progress file damaged | The `.bak` copy is used; the next upload repairs the primary |
-| Both copies unreadable, for another identity or world, or from a newer MistriMulti | The guest waits with "The host progress record needs recovery"; nothing is overwritten. Restore the file from a backup or from `commits/` |
+| Both copies unreadable, for another identity or world, or from a newer MistriaMulti | The guest waits with "The host progress record needs recovery"; nothing is overwritten. Restore the file from a backup or from `commits/` |
 | Host crashes and the save is reloaded | Rollback to the save's commit; the newer records are kept in `commits/discarded.json` |
 | The game rejects part of a record | That section is skipped (and not uploaded); F8 shows a message; the other sections work |
 | An update fails validation on the host | `progress_error`; that section is not sent again this session |

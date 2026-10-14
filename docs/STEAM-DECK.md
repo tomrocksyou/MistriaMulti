@@ -1,4 +1,4 @@
-# MistriMulti on the Steam Deck (and other Linux PCs)
+# MistriaMulti on the Steam Deck (and other Linux PCs)
 
 Status: the Linux launcher and manager are tested natively with a fake game (see `docs/TESTING.md`). They have **not**
 been run against the real game on a real Steam Deck yet, so treat the first session as a test and read "If something
@@ -20,7 +20,7 @@ goes wrong" at the end. Everything below also applies to a desktop Linux PC.
    If Steam is still running it does everything else and prints the launch option for you to paste (right-click the game,
    Properties, Launch Options). `./install.sh --dry-run` shows what it would do; `./install.sh --uninstall` undoes it.
    Running it twice is safe.
-4. **Finish the mod in MOMI.** Open the Linux build of MOMI (0.16.5, game 1.0.6), select **MistriMulti** and click Install,
+4. **Finish the mod in MOMI.** Open the Linux build of MOMI (0.16.5, game 1.0.6), select **MistriaMulti** and click Install,
    as on Windows. Close the game while installing.
 5. **Go back to Gaming Mode** (the "Return to Gaming Mode" icon on the desktop), press Play, and choose **Multiplayer** on
    New Game or Load Game. That is all: hosting and joining are chosen in the game (see below). There is nothing to type in
@@ -76,7 +76,7 @@ button to F8 if you want it in Gaming Mode.
 
 ## If something goes wrong
 
-- **The badge says "Offline - launcher not running".** The game was not started through the MistriMulti launch option. Run
+- **The badge says "Offline - launcher not running".** The game was not started through the MistriaMulti launch option. Run
   `./install.sh` again with Steam closed, or paste the launch line it prints into the game's Launch Options by hand. The
   reason is also in the game's log, and `<game folder>/mod_data/mistrimulti/launcher.log` says what the launcher did.
 - **The game starts but Multiplayer says it cannot start.** The reason is written to

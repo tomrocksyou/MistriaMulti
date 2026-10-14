@@ -55,8 +55,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Draft first, so "latest" never points at a release whose assets are still uploading.
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "MistriMulti ${GITHUB_REF_NAME#v}" \
-            --notes "Players: download MistriMulti-${GITHUB_REF_NAME#v}-Windows.zip (Windows) or MistriMulti-${GITHUB_REF_NAME#v}-Linux.tar.gz (Linux / Steam Deck) and follow HOW-TO-PLAY.txt inside. The other files are for the updater (docs/RELEASES.md)." \
-            dist/MistriMulti-*-Windows.zip dist/MistriMulti-*-Linux.tar.gz \
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "MistriaMulti ${GITHUB_REF_NAME#v}" \
+            --notes "Players: download MistriaMulti-${GITHUB_REF_NAME#v}-Windows.zip (Windows) or MistriaMulti-${GITHUB_REF_NAME#v}-Linux.tar.gz (Linux / Steam Deck) and follow HOW-TO-PLAY.txt inside. The other files are for the updater (docs/RELEASES.md)." \
+            dist/MistriaMulti-*-Windows.zip dist/MistriaMulti-*-Linux.tar.gz \
             dist/latest.txt dist/MistriMulti.exe dist/MistriMultiLauncher.exe dist/mistrimulti-helper.exe dist/mistrimulti-steam-id.exe
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest

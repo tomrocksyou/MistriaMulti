@@ -1,4 +1,4 @@
-"""Reference model of the MistriMulti event layer.
+"""Reference model of the MistriaMulti event layer.
 
 This is the executable specification of mod/mistrimulti/gml/MistriMultiEvents.gml. Every method mirrors
 one GML function, in the same order and with the same control flow:

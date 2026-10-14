@@ -16,10 +16,10 @@ WSTR mo_verb, "open"
 WSTR mo_cli, "-cli.exe"
 mo_filter: dw __utf16__("Programs (*.exe)"), 0, __utf16__("*.exe"), 0, 0
 WSTR mo_title, "Choose the Mods of Mistria (MOMI) program, the one with a window"
-mo_m_ok: dw __utf16__(`MOMI was opened.\r\n\r\n1. Close Fields of Mistria if it is running.\r\n2. In MOMI, select MistriMulti and click Install.\r\n3. Start the game from Steam.`), 0
+mo_m_ok: dw __utf16__(`MOMI was opened.\r\n\r\n1. Close Fields of Mistria if it is running.\r\n2. In MOMI, select MistriaMulti and click Install.\r\n3. Start the game from Steam.`), 0
 mo_m_none: dw __utf16__(`MOMI was not found. Press Open MOMI again and choose the MOMI program (the one with a window). The choice is remembered.`), 0
 mo_m_cli: dw __utf16__(`That is MOMI's command-line program, which this manager does not run. Choose the MOMI program that has a window.`), 0
-mo_m_fail: dw __utf16__(`MOMI could not be started. Open it yourself, select MistriMulti and click Install.`), 0
+mo_m_fail: dw __utf16__(`MOMI could not be started. Open it yourself, select MistriaMulti and click Install.`), 0
 
 section .bss
 momi_quiet resd 1

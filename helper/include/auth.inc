@@ -1,4 +1,4 @@
-; MistriMulti join authentication, identity keys and abuse limits (docs/SECURITY.md).
+; MistriaMulti join authentication, identity keys and abuse limits (docs/SECURITY.md).
 ;
 ; Layer choice: the UDP helper is the only code that sees every datagram, so slot admission and per-packet
 ; authentication live here, in assembly, on top of the SHA-256 the launchers already use (linux/sha256.inc).

@@ -1,4 +1,4 @@
-// MistriMulti farm world sync: crops, trees, stumps, rocks and ore, forageables, dig sites, weeds and grass, and
+// MistriaMulti farm world sync: crops, trees, stumps, rocks and ore, forageables, dig sites, weeds and grass, and
 // fences and sprinklers, on the event layer. Design, assumptions and the in-game checklist: docs/SYNC-FARM.md.
 // Soil and watering stay in MistriMultiTerrain.gml.
 //

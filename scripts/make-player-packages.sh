@@ -1,8 +1,8 @@
 #!/bin/sh
 # Builds the two downloads for players (no git, no build tools needed):
-#   MistriMulti-<version>-Windows.zip     the four Windows programs, Install-Mod.bat, the mod, HOW-TO-PLAY.txt
-#   MistriMulti-<version>-Linux.tar.gz    the four Linux programs, install.sh, the mod, HOW-TO-PLAY.txt
-# Each unpacks to one folder MistriMulti/ (no version in the name, so an update unpacks over it and the Steam launch line
+#   MistriaMulti-<version>-Windows.zip     the four Windows programs, Install-Mod.bat, the mod, HOW-TO-PLAY.txt
+#   MistriaMulti-<version>-Linux.tar.gz    the four Linux programs, install.sh, the mod, HOW-TO-PLAY.txt
+# Each unpacks to one folder MistriaMulti/ (no version in the name, so an update unpacks over it and the Steam launch line
 # stays valid), laid out like the repository, so Install-Mod.bat and install.sh work unchanged (they look for
 # mod/mistrimulti and the programs next to themselves).
 #   sh scripts/make-player-packages.sh <windows programs dir> <linux programs dir> <output dir>
@@ -16,7 +16,7 @@ mkdir -p "$3"
 out=$(CDPATH= cd -- "$3" && pwd)
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$project/mod/mistrimulti/manifest.toml" | head -n 1)
 [ -n "$version" ] || { echo "no version in manifest.toml" >&2; exit 1; }
-name=MistriMulti
+name=MistriaMulti
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 
@@ -37,8 +37,8 @@ done
 cp "$project/Install-Mod.bat" "$w/"
 cp "$project/scripts/Install-Mod.ps1" "$project/scripts/Find-Game.ps1" "$w/scripts/"
 sed 's/$/\r/' "$project/docs/HOW-TO-PLAY.md" > "$w/HOW-TO-PLAY.txt"
-rm -f "$out/MistriMulti-$version-Windows.zip"
-(cd "$stage/win" && zip -q -r -X "$out/MistriMulti-$version-Windows.zip" "$name")
+rm -f "$out/MistriaMulti-$version-Windows.zip"
+(cd "$stage/win" && zip -q -r -X "$out/MistriaMulti-$version-Windows.zip" "$name")
 
 # Linux
 l=$stage/lin/$name
@@ -52,7 +52,7 @@ done
 cp "$project/install.sh" "$l/"
 chmod 755 "$l/install.sh"
 cp "$project/docs/HOW-TO-PLAY.md" "$l/HOW-TO-PLAY.txt"
-tar -C "$stage/lin" -czf "$out/MistriMulti-$version-Linux.tar.gz" "$name"
+tar -C "$stage/lin" -czf "$out/MistriaMulti-$version-Linux.tar.gz" "$name"
 
-echo "$out/MistriMulti-$version-Windows.zip"
-echo "$out/MistriMulti-$version-Linux.tar.gz"
+echo "$out/MistriaMulti-$version-Windows.zip"
+echo "$out/MistriaMulti-$version-Linux.tar.gz"

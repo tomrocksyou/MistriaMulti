@@ -1,6 +1,6 @@
 # Security: who may join, who may be whom, and how much one player can ask
 
-MistriMulti is played with friends, but the host's UDP port may also be reachable by strangers (a port forward, a
+MistriaMulti is played with friends, but the host's UDP port may also be reachable by strangers (a port forward, a
 public IP, a shared Tailscale network). This page says what the mod protects, what it does not, how to switch the
 protection on, and how it was tested. Wire formats are in `docs/PROTOCOL.md`; the record handshake is in
 `docs/PLAYER-DATA.md`.

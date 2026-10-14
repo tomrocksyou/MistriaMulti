@@ -1,4 +1,4 @@
-"""Reference implementation of the MistriMulti join handshake and packet tags (docs/SECURITY.md).
+"""Reference implementation of the MistriaMulti join handshake and packet tags (docs/SECURITY.md).
 
 This is the executable specification the assembly helper is tested against, in both roles: `Guest` talks to a
 real host helper, `Host` plays the host for a real guest helper. It must stay byte-compatible with

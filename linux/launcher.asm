@@ -1,4 +1,4 @@
-; MistriMulti launcher for Linux and the Steam Deck (NASM, x86-64 ELF, raw system calls, no C runtime).
+; MistriaMulti launcher for Linux and the Steam Deck (NASM, x86-64 ELF, raw system calls, no C runtime).
 ;   mistrimulti-launcher --steam <game command...>    Steam launch option:  "<folder>/mistrimulti-launcher" --steam %command%
 ;   mistrimulti-launcher --configure                  asks host / join once and saves launcher.cfg (also: no arguments)
 ; This is the Linux twin of launcher/launcher.asm and keeps its safety rules: the game is ALWAYS started, whatever fails
@@ -77,7 +77,7 @@ r_config db 'Multiplayer not started: launcher.cfg is missing or invalid. Run mi
 r_control db 'Multiplayer not started: control.json could not be written. The game was started normally.',10,0
 r_auth db 'Multiplayer not started: auth.cfg could not be written, so the room password cannot be applied. The game was started normally.',10,0
 r_helper db 'Multiplayer not started: the network helper could not be started (is mistrimulti-helper-linux next to the launcher, and is the port free? see helper.log). The game was started normally.',10,0
-r_nogame db 'MistriMulti: could not start the game command.',10,0
+r_nogame db 'MistriaMulti: could not start the game command.',10,0
 p_mode db 'Host a game (H) or join a friend (J)? ',0
 p_ip db 'Host IPv4 address (for example 192.168.1.20): ',0
 p_port db 'Port (Enter for 7777): ',0

@@ -33,7 +33,7 @@ WSTR mp_s_badroom, "The room code must be 8 characters, 0-9 and a-f (or empty)."
 WSTR mp_s_needroom, "This host uses a room code. Ask them for it and type it below."
 WSTR mp_s_pick, "Select a host in the list first."
 WSTR mp_s_nosave, "Could not save the setup."
-WSTR mp_m_title, "MistriMulti"
+WSTR mp_m_title, "MistriaMulti"
 mp_f_list_a db '%s   -   %s%s',0
 WSTR mp_f_ip, "%d.%d.%d.%d"
 WSTR mp_f_cfgpath, "%s\FieldsOfMistria\mod_data\mistrimulti\launcher.cfg"
