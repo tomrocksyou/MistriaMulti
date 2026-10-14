@@ -57,7 +57,8 @@ host should save (sleep) before friends join; live state beyond terrain and play
 ## Known side effects / still to do
 - `settings.json` is also resolved through `CONFIG_DIRECTORY`, so settings changed during a multiplayer session are written
   to the multiplayer folder (solo settings are untouched).
-- Guest saves are still vetoed (`game.save_guard`) until the host-world transfer exists.
+- A guest's game never saves: every save is vetoed and the attempt sends the character to the host instead, a lost host returns the
+  guest to the title, and no multiplayer save may land in the solo folder (`docs/SYNC-GUESTSAVE.md`).
 - A mod cannot launch programs, so the helper is started by `MistriMultiLauncher.exe --steam` (the Steam launch option),
   or by `mistrimulti-launcher --steam` on Linux (same behaviour; backup folder names are UTC there).
 - If there are no solo saves the title screen has no Load Game button, so existing multiplayer worlds are unreachable until one solo save exists.

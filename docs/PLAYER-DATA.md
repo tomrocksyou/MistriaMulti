@@ -78,7 +78,7 @@ Disconnects or crashes can lose progress after the last confirmed checkpoint.
 Transfers may take longer than the checkpoint interval when peers or the network
 are waiting. The F8 status message shows pending saves and record-loading errors.
 Guest native saves are blocked throughout multiplayer to protect their local
-world. The host's own native save remains its main character save; its checkpoint
+world (`docs/SYNC-GUESTSAVE.md`: what a save attempt, a quit and a lost host do). The host's own native save remains its main character save; its checkpoint
 record is also mirrored alongside the guest records.
 
 ## Source

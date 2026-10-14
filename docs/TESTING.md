@@ -89,6 +89,18 @@ flush, the host save commit and rollback (restarts, two generations, missing, da
 one-partner-per-villager rule (race, break-up, host partner, restart, late joiner), a 134 KB record in blobs and a section
 that fails to restore. The in-game checklist (what these tests cannot show) is in `docs/SYNC-PROGRESS.md`.
 
+## Guest save checks
+
+```sh
+python3 tests/test_guestsave.py        # about 35 s
+python3 tests/mutate_guestsave.py      # breaks the GML 27 ways, about 1 minute
+```
+
+Runs the real `MistriMultiGuestSave.gml` with the player-sync, progress and identity files (the harness of `tests/test_progress.py`):
+the save veto, flush on a save attempt and on the Settings tab, the goodbye frame, rejoining through another slot, a host that
+crashes, quits or restarts, short outages, the character export/import and the real save guard of `MistriMultiBoot.gml`
+(`docs/SYNC-GUESTSAVE.md`).
+
 ## Updater checks
 
 `tests/test_updater.py` runs the assembly manager against a local HTTP server (under Wine with xvfb on Linux, directly on

@@ -45,6 +45,8 @@ Implemented:
 - Per-player progress (recipes, almanac, mail, personal quests, romance and children, cosmetics, counters) is stored on the host
   beside each player's record, committed with the host's save, and one villager can be romanced by one player at a time
   (`docs/SYNC-PROGRESS.md`).
+- A guest's game never saves (its character lives on the host); a save attempt or opening the settings menu sends the character
+  to the host, a lost or closed host returns the guest to the title screen with a message (`docs/SYNC-GUESTSAVE.md`).
 - F8 displays connection status in game.
 - Host-owned time, date and weather; the day ends once every player is asleep (`docs/SYNC-CLOCK.md`, not yet tried in the game).
 

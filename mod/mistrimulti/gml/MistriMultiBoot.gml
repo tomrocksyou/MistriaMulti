@@ -70,6 +70,8 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.containers", mistrimulti_containers_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.drops", mistrimulti_drops_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.ranch", mistrimulti_ranch_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.guestsave", mistrimulti_guestsave_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.import_character", mistrimulti_guestsave_import, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -126,6 +128,7 @@ function mistrimulti_tick() {
     }
     mistrimulti_player_data_tick();
     mistrimulti_character_tick();
+    mistrimulti_guestsave_tick();
     mistrimulti_drops_frame(); // every frame: the game's item pickup is checked against the host's claims
     if (r.ticks mod 3 != 0) return; // 20 Hz bridge; actors animate at the game frame rate.
     if (ARI != undefined && GRID != undefined) mistrimulti_read_peers();
@@ -249,8 +252,8 @@ function mistrimulti_update_look() {
 
 function mistrimulti_save_guard(ctx) {
     var r = __mistrimulti_runtime();
-    // Multiplayer characters must not overwrite the guest's local save.
-    if (r.enabled && r.mode == "join") return false;
+    // A guest never saves (its character lives on the host) and nobody saves into the solo folder: MistriMultiGuestSave.gml.
+    if (mistrimulti_guestsave_blocks(ctx)) return false;
     if (r.enabled && r.mode == "host") {
         mistrimulti_drops_before_save();
         mistrimulti_player_checkpoint();
@@ -335,6 +338,7 @@ function mistrimulti_register() {
     mmapi_on("ui.draw_gui", mistrimulti_draw_status);
     mmapi_filter("local.missing", mistrimulti_local_missing);
     mistrimulti_clock_register_hooks();
+    mistrimulti_guestsave_register_hooks();
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F9"), mistrimulti_drops_give_hotkey);
     mistrimulti_ranch_register_hooks();
