@@ -4,7 +4,9 @@ Grounded in the game's own scripts (read-only reference, not stored in this repo
 
 ## What the game does
 - A save is one checksummed "vault" file: `<CONFIG_DIRECTORY>/saves/game-<id>-<slot|autosave>.sav`.
-  `CONFIG_DIRECTORY` is a single global (`global.__config_directory`), `%LOCALAPPDATA%\FieldsOfMistria`.
+  `CONFIG_DIRECTORY` is a single global (`global.__config_directory`, assigned from GameMaker's `game_save_id` in
+  `SerdeUtils.gml`): `%LOCALAPPDATA%\FieldsOfMistria` on Windows. On Linux the scripts do not say where the runtime puts it;
+  the Linux tools search the usual places and `MISTRIMULTI_DATA_DIR` overrides (see `README.md`, "Where the game keeps its files").
 - `SaveManager()` scans `<CONFIG_DIRECTORY>/saves`, opens each vault and builds `Setup.save_manager.manifest`.
   The title menu's Continue / Load Game read that manifest and call `title_menu.enter_game(LoadState.Load(bundle))`.
 - `load_game(loader)` validates the vault checksum and rebuilds the world. `save_game(path)` writes a vault.
@@ -56,7 +58,8 @@ host should save (sleep) before friends join; live state beyond terrain and play
 - `settings.json` is also resolved through `CONFIG_DIRECTORY`, so settings changed during a multiplayer session are written
   to the multiplayer folder (solo settings are untouched).
 - Guest saves are still vetoed (`game.save_guard`) until the host-world transfer exists.
-- A mod cannot launch programs, so the helper is started by `MistriMultiLauncher.exe --steam` (the Steam launch option).
+- A mod cannot launch programs, so the helper is started by `MistriMultiLauncher.exe --steam` (the Steam launch option),
+  or by `mistrimulti-launcher --steam` on Linux (same behaviour; backup folder names are UTC there).
 - If there are no solo saves the title screen has no Load Game button, so existing multiplayer worlds are unreachable until one solo save exists.
 - Untested: wrapping the title menu's methods, popup text injection, and teardown on quit-to-title.
 - Host-world transfer to guests (helper file transfer) is not built.

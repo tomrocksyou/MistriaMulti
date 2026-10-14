@@ -13,7 +13,7 @@ regs = re.compile(r'^(r?[abcd]x|r?[sd]i|r?[sb]p|r\d+[dwb]?|e[abcd]x|e[sd]i|[abcd
 bad = 0
 root = sys.argv[1] if len(sys.argv) > 1 else "."
 files = []
-for pattern in ("updater/*.asm", "updater/*.inc", "launcher/*.asm", "common/*.inc", "tests/fakegame/*.asm", "helper/*.asm", "helper/include/*.inc"):
+for pattern in ("updater/*.asm", "updater/*.inc", "launcher/*.asm", "common/*.inc", "linux/*.asm", "linux/*.inc", "tests/fakegame/*.asm", "helper/*.asm", "helper/include/*.inc"):
     files += glob.glob(f"{root}/{pattern}")
 consts = set()
 for f in files:

@@ -1,8 +1,8 @@
 # MistriMulti
 
 A Fields of Mistria multiplayer mod with a native x86-64 NASM networking helper.
-The Windows helper calls Win32/Winsock; the Linux helper uses Linux syscalls. Neither
-helper needs Python, .NET, Rust, a paid server, or a third-party multiplayer relay at runtime.
+The Windows helper calls Win32/Winsock; the Linux helper, launcher and manager use Linux syscalls. None of
+them needs Python, .NET, Rust, a paid server, or a third-party multiplayer relay at runtime.
 GML and MOMI/MMAPI provide the supported connection to the game.
 
 ## Current version: 0.1.0 experimental
@@ -84,22 +84,48 @@ cryptographic authentication. No firewall or router settings are changed automat
 
 ## Linux / Steam Deck
 
-The native Linux helper passes transport tests in Ubuntu under WSL. Actual native
-game integration on a Steam Deck still requires device testing.
+Linux has the same one-click-in-Steam flow as Windows, built from three native assembly programs (raw Linux system
+calls, no C runtime, no Python). Keep them together in one folder, for example `~/mistrimulti`:
 
-Install the GML mod through the Linux MOMI build. Build with `sh scripts/build-linux.sh`
-(NASM and binutils), or use the supplied `build/mistrimulti-helper-linux` executable.
-Launch in Desktop Mode:
+| Program | What it does |
+| --- | --- |
+| `mistrimulti-launcher` | The Steam launch wrapper (`--steam %command%`) and the `--configure` questions. Starts the helper, writes `control.json`, backs up your solo saves, runs the game, answers host discovery (UDP 7776) and serves the world (TCP 7775) while you host, and refreshes the host's world when you join. The game always starts, whatever fails. |
+| `mistrimulti-manager` | Console version of the manager window: `host`, `join [IP]`, `scan`, `steam-setup`, `save-solo`. |
+| `mistrimulti-helper-linux` | The network helper (unchanged). The launcher starts it and ties its life to its own. |
 
-```sh
-sh scripts/play-linux.sh host a1b2c3d4
-sh scripts/play-linux.sh join 192.168.1.10 1 a1b2c3d4
-```
+1. Install the GML mod through the Linux MOMI build (MOMI **0.16.5**, game **1.0.6**, same as Windows).
+2. Build with `sh scripts/build-linux.sh` (needs `nasm` and `binutils`; the output is in `build/`), or take the
+   `mistrimulti-linux-x64` artifact from CI. `chmod +x` the three programs.
+3. **Host**: `./mistrimulti-manager host` shows the addresses (your Tailscale IP, your local-network IP) to give your friends.
+   **Join**: `./mistrimulti-manager join` scans the local network (broadcast) and your Tailscale peers (`tailscale status --json`,
+   if the `tailscale` command exists), lists the hosts, and joins the one you choose; `./mistrimulti-manager join 100.101.102.103`
+   joins an address directly. The port, a player number (1-7, kept between runs) and the default room code are filled in for you;
+   add `--player N`, `--room CODE` or `--port N` to change them. Joining also downloads the host's latest saved world.
+   (`./mistrimulti-launcher --configure` asks the same questions as the Windows setup and writes the same `launcher.cfg`.)
+4. **Once**, in Steam: right-click the game, Properties, Launch Options, and paste the line printed by
+   `./mistrimulti-manager steam-setup`, which looks like
+   `"/home/deck/mistrimulti/mistrimulti-launcher" --steam %command%`. Then click Play, as on Windows. It also works for the
+   Proton (Windows build) version of the game, because `%command%` simply expands to Proton's command line.
+5. The badge, the **New Game -> Multiplayer** flow, world download and save separation work exactly as in the Windows steps above.
+   Why multiplayer did not start (if the game opened normally) is written to
+   `<game folder>/mod_data/mistrimulti/launcher.log`; the helper's own messages are in `helper.log` next to it.
+6. `./mistrimulti-manager save-solo` copies your solo saves to `~/Documents/MistriMulti Backups/<UTC time>/`
+   (`$XDG_DOCUMENTS_DIR` and `user-dirs.dirs` are honoured). The launcher also keeps the newest 10 pre-launch backups
+   in `mod_data/mistrimulti/solo_backups`. Backup folder names use UTC time on Linux.
 
-If automatic data-directory detection fails, set `MISTRIMULTI_DATA_DIR` to the actual
-game configuration directory that contains `saves`. The Linux launcher leaves Steam
-launching to you and exits the helper when you press Enter after closing the game.
-Steam input can map a controller button to F8 for the status notification.
+**Where the game keeps its files.** The game stores everything under GameMaker's `game_save_id`, which the game's scripts do
+not spell out for Linux. The Linux tools therefore use `MISTRIMULTI_DATA_DIR` if you set it, and otherwise take the first of
+these that already holds a `saves` (or `mod_data`) folder: `$STEAM_COMPAT_DATA_PATH/pfx/drive_c/users/steamuser/AppData/Local/FieldsOfMistria`
+(Steam sets this for Proton games), `${XDG_CONFIG_HOME:-~/.config}/FieldsOfMistria`, `${XDG_DATA_HOME:-~/.local/share}/FieldsOfMistria`,
+and `steamapps/compatdata/*/pfx/.../AppData/Local/FieldsOfMistria` in the usual Steam libraries (Steam Deck with Proton).
+If your game keeps its files elsewhere, set `MISTRIMULTI_DATA_DIR=<that folder>` (for the Steam launch option:
+`MISTRIMULTI_DATA_DIR="/path" "/home/deck/mistrimulti/mistrimulti-launcher" --steam %command%`).
+
+Steam Deck users: see [`docs/STEAM-DECK.md`](docs/STEAM-DECK.md) for the Desktop Mode walkthrough. The Linux launcher and
+manager are tested natively with a fake game (`tests/test_launcher_linux.py`, `tests/test_world_linux.py`, run in CI);
+the real game on a real Steam Deck has **not** been tested yet, see `docs/TESTING.md`.
+`scripts/play-linux.sh` is the older manual way to run the helper without Steam; it still works.
+Steam Input can map a controller button to F8 for the status notification.
 
 ## Build, test, learn
 
@@ -113,7 +139,14 @@ python tests/test_transport.py build/mistrimulti-helper.exe
 python tests/test_packet_faults.py build/mistrimulti-helper.exe
 ```
 
-For Linux, run the same Python tests with `build/mistrimulti-helper-linux` on Linux.
+For Linux, run the same Python tests with `build/mistrimulti-helper-linux` on Linux, plus the native launcher and
+manager suites:
+
+```sh
+sh scripts/build-linux.sh
+python3 tests/test_launcher_linux.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux build/mistrimulti-manager
+python3 tests/test_world_linux.py build/mistrimulti-manager
+```
 Python is only used for developer tests. Both release binaries are native NASM code.
 Open `build/mistrimulti-helper.exe` in x64dbg; break on `mistria_main`, `read_local_frame`,
 `receive_fragment`, or `send_record`. Start with `docs/ASM-TOUR.md`.

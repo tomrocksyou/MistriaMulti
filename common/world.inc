@@ -65,62 +65,6 @@ FN sha256_raw
 .d:
 END_FN
 
-; rcx = ASCII file name -> eax 1 only for  game-<digits>-(autosave|<digits>).sav  (nothing else: no paths, no ".old.sav")
-FN wf_valid_name
-    mov rsi, rcx
-    cmp dword [rsi], 'game'
-    jne .no
-    cmp byte [rsi+4], '-'
-    jne .no
-    add rsi, 5
-    xor ecx, ecx
-.d1:
-    movzx eax, byte [rsi+rcx]
-    sub eax, '0'
-    cmp eax, 9
-    ja .d1end
-    inc ecx
-    cmp ecx, 12
-    jbe .d1
-    jmp .no
-.d1end:
-    test ecx, ecx
-    jz .no
-    cmp byte [rsi+rcx], '-'
-    jne .no
-    lea rsi, [rsi+rcx+1]
-    cmp dword [rsi], 'auto'
-    jne .digits
-    cmp dword [rsi+4], 'save'
-    jne .no
-    add rsi, 8
-    jmp .ext
-.digits:
-    xor ecx, ecx
-.d2:
-    movzx eax, byte [rsi+rcx]
-    sub eax, '0'
-    cmp eax, 9
-    ja .d2end
-    inc ecx
-    cmp ecx, 12
-    jbe .d2
-    jmp .no
-.d2end:
-    test ecx, ecx
-    jz .no
-    add rsi, rcx
-.ext:
-    cmp dword [rsi], '.sav'
-    jne .no
-    cmp byte [rsi+4], 0
-    jne .no
-    mov eax, 1
-    jmp .d
-.no:
-    xor eax, eax
-.d:
-END_FN
 
 ; Reads exactly edx bytes from [wf_sock] into rcx; every wait is at most r8d milliseconds. eax 1 ok / 0 fail
 FN wf_recv_exact
