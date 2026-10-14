@@ -26,6 +26,9 @@ Implemented:
 - An event layer for synced features: batched, ordered, acknowledged events per player, blobs up to
   256 KB delivered whole, and host-authoritative requests applied exactly once (`docs/EVENT-LAYER.md`,
   which includes the guide for adding a synced feature). Appearance, farm terrain and player records use it.
+- Ranch sync (written against the game's scripts, not yet run in the game): animals, the farm pet, barn products, furniture,
+  blueprints, new buildings, floors/wallpapers, apiaries and terrariums, farm expansion and house upgrades are host-owned;
+  guests pay only when the host agrees (`docs/SYNC-RANCH.md`).
 - Atomic game/helper file publication; bounded fragmentation and reassembly; replay rejection;
   one-second idle heartbeats; automatic helper shutdown from the Windows launcher.
 - Guest character creation uses the game's customization menu and saves an independent profile.

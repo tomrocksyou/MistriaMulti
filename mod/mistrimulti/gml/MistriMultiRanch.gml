@@ -562,7 +562,7 @@ function __mistrimulti_ranch_snapshot(rc, slot) {
     var all = __mistrimulti_ranch_stables();
     if (!mistrimulti_event_can_emit(array_length(all) + 4) || mistrimulti_event_backlog() > 24) return false;
     rc.sid++;
-    var ok = __mistrimulti_ranch_send("ranch_struct", { full: true, bld: rc.bnew, add: __mistrimulti_ranch_live_ledger(rc) }, slot);
+    var ok = __mistrimulti_ranch_send("ranch_struct", { bld: rc.bnew, add: __mistrimulti_ranch_live_ledger(rc) }, slot);
     for (var i = 0; i < array_length(all); i++) ok = __mistrimulti_ranch_publish(rc, all[i], slot, rc.sid) && ok;
     var world = __mistrimulti_ranch_world_record();
     world.fin = true;
@@ -892,7 +892,7 @@ function mistrimulti_ranch_reply(zero, result, ctx) {
     if (ctx.lost || ctx.expired || !is_struct(result)) {
         // The host restarted or forgot the answer: nothing was charged. A sale is decided by the next snapshot.
         if (p.a == "sell") array_push(rc.unresolved, { i: p.i, g: p.g });
-        else __mistrimulti_ranch_say("The host did not confirm that.");
+        else if (p.a != "pet" && p.a != "rename" && p.a != "move" && p.a != "collect" && p.a != "world") __mistrimulti_ranch_say("The host did not confirm that.");
         mistrimulti_event_emit("ranch_resync", {}, 0);
         return true;
     }
@@ -1658,6 +1658,7 @@ function __mistrimulti_ranch_apply_factories(fa) {
 }
 
 function __mistrimulti_ranch_apply_world(rc, rec) {
+    rc.world_defer = undefined;
     rc.applying++;
     try {
         // Rooms that are open are rebuilt by the game when it enters them: wait until the player is elsewhere.
@@ -1790,17 +1791,22 @@ function mistrimulti_ranch_tick() {
     var rc = __mistrimulti_ranch();
     rc.n++;
     if (rc.busy != "" && rc.n > rc.busy_until) rc.busy = "";
-    if (r.mode == "host") {
-        __mistrimulti_ranch_host_tick(r, rc);
-    } else if (r.mode == "join") {
-        __mistrimulti_ranch_session(rc);
-        __mistrimulti_ranch_resolve(rc);
-        if (rc.n mod 10 == 0) __mistrimulti_ranch_watch_animals(rc);
-        if (rc.n mod 20 == 3) __mistrimulti_ranch_watch_world(rc);
-        if (rc.n mod 20 == 7) __mistrimulti_ranch_retry_tick(rc);
-        if (rc.n mod 20 == 11) __mistrimulti_ranch_deferred_tick(rc);
+    // A failure here must never reach the game's frame: it is logged and tried again on the next tick.
+    try {
+        if (r.mode == "host") {
+            __mistrimulti_ranch_host_tick(r, rc);
+        } else if (r.mode == "join") {
+            __mistrimulti_ranch_session(rc);
+            __mistrimulti_ranch_resolve(rc);
+            if (rc.n mod 10 == 0) __mistrimulti_ranch_watch_animals(rc);
+            if (rc.n mod 20 == 3) __mistrimulti_ranch_watch_world(rc);
+            if (rc.n mod 20 == 7) __mistrimulti_ranch_retry_tick(rc);
+            if (rc.n mod 20 == 11) __mistrimulti_ranch_deferred_tick(rc);
+        }
+        if (rc.synced || r.mode == "host") __mistrimulti_ranch_collect_tick(rc);
+    } catch (e) {
+        __mistrimulti_ranch_warn("The ranch sync tick failed: " + string(e));
     }
-    if (rc.synced || r.mode == "host") __mistrimulti_ranch_collect_tick(rc);
 }
 
 function __mistrimulti_ranch_deferred_tick(rc) {

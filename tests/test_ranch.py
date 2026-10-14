@@ -677,6 +677,63 @@ def test_hostile_input():
     print("PASS: hostile input: malformed and forbidden requests change nothing; bad or forged state is ignored; no exceptions")
 
 
+def test_host_restart_structures():
+    world = make_world(18, loss=0.05, jitter=30)
+    host, g1, g2 = fakes(world)
+    settle(world, 3000)
+    hold(g1, ITEM_CHAIR, 1)
+    use_item(world.games[1].node, ITEM_CHAIR, 10, 10)
+    hold(host, ITEM_LAMP, 1)
+    use_item(world.games[0].node, ITEM_LAMP, 30, 30)
+    host.grids[FARM].write_node(30, 30, O_LAMP, 0)
+    host.find_animal(1001).heart_points = 222
+    settle(world, 5000)
+    assert object_at(g2, 10, 10) == O_CHAIR and object_at(g2, 30, 30) == O_LAMP and g2.find_animal(1001).heart_points == 222
+    # The host restarts from its save: the placements of the lost session are gone there, so they go here too.
+    world.start(0)
+    world.games[0].feature = Driver(world.games[0])
+    settle(world, 15000)
+    new_host = world.games[0].node.fake
+    assert object_at(new_host, 10, 10) is None and object_at(g1, 10, 10) is None and object_at(g2, 30, 30) is None
+    assert g2.find_animal(1001).heart_points == 0 and new_host.find_animal(1001).heart_points == 0
+    debug = world.games[2].node.call("mistrimulti_ranch_debug")
+    assert debug["synced"] is True
+    # And the new session works like the old one.
+    hold(g2, ITEM_CHAIR, 1)
+    use_item(world.games[2].node, ITEM_CHAIR, 12, 12)
+    settle(world, 4000)
+    assert object_at(new_host, 12, 12) == O_CHAIR and object_at(g1, 12, 12) == O_CHAIR and g2.items[ITEM_CHAIR] == 0
+    print("PASS: host restart: placements of the lost session are taken back on the guests, the new session works")
+
+
+def test_room_rules():
+    world = make_world(17, loss=0.0)
+    host, g1, g2 = fakes(world)
+    settle(world, 3000)
+    node = world.games[1].node
+    ask = lambda payload: node.call("mistrimulti_event_request", "ranch_act", payload)
+    # A player standing on the farm cannot act inside a barn or in the house.
+    ask({"a": "manger", "b": "72:52", "sd": 0, "it": ITEM_HAY})
+    ask({"a": "place", "t": "fl", "l": HOME, "it": ITEM_FLOOR_A})
+    ask({"a": "collect", "b": "72:52"})
+    host_node = world.games[0].node
+    host_node.hook("mistrimulti_ranch_product_drops", G(normal_products=make_list_of([ITEM_EGG]), golden_products=make_list_of([])),
+                   G(stable=host.buildings[0].stable))
+    settle(world, 3000)
+    ask({"a": "collect", "b": "72:52"})
+    settle(world, 3000)
+    assert all(slot is None for slot in host.buildings[0].stable.inventory)
+    assert host.decor.floorings["home"].flooring == "default_v1"
+    assert g1.items.get(ITEM_EGG, 0) == 0
+    # Walking into the barn collects by itself.
+    node.interp.builtins["GRID"] = G(dyn_index=11)
+    node.interp.builtins["CURRENT_LOCATION_ID"] = BARN
+    g1.location = BARN
+    settle(world, 4000)
+    assert g1.items.get(ITEM_EGG, 0) == 1, g1.items
+    print("PASS: room rules: barn and house requests are accepted only from a player who is in that room")
+
+
 def test_solo_and_hooks():
     world = make_world(14, guests=1)
     host, g1 = fakes(world)
