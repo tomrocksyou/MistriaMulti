@@ -15,6 +15,7 @@ jobs:
       - run: python3 tests/test_world_linux.py build/mistrimulti-manager
       - run: python3 tests/test_event_layer.py
       - run: python3 tests/test_event_features.py
+      - run: python3 tests/test_containers.py
       - run: python3 tests/test_event_bridge.py build/mistrimulti-helper-linux
       - uses: actions/upload-artifact@v4
         with:

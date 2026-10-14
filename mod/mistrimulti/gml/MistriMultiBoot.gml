@@ -65,6 +65,8 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.player_restore", mistrimulti_player_restore, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.events", mistrimulti_events_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.character", mistrimulti_debug_character, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.containers", mistrimulti_containers_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.drops", mistrimulti_drops_debug, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -76,6 +78,8 @@ function mistrimulti_register_events() {
     mistrimulti_terrain_register_events();
     mistrimulti_player_register_events();
     mistrimulti_clock_register_events();
+    mistrimulti_containers_register_events();
+    mistrimulti_drops_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -116,6 +120,7 @@ function mistrimulti_tick() {
     }
     mistrimulti_player_data_tick();
     mistrimulti_character_tick();
+    mistrimulti_drops_frame(); // every frame: the game's item pickup is checked against the host's claims
     if (r.ticks mod 3 != 0) return; // 20 Hz bridge; actors animate at the game frame rate.
     if (ARI != undefined && GRID != undefined) mistrimulti_read_peers();
     mistrimulti_events_tick();
@@ -126,6 +131,8 @@ function mistrimulti_tick() {
         if (r.mode == "host" && (r.mask & ~r.last_mask) != 0) r.snapshot_pending = true;
         r.last_mask = r.mask;
         mistrimulti_stream_terrain();
+        mistrimulti_containers_tick();
+        mistrimulti_drops_tick();
     } else {
         mistrimulti_remove_ghosts();
     }
@@ -236,7 +243,10 @@ function mistrimulti_save_guard(ctx) {
     var r = __mistrimulti_runtime();
     // Multiplayer characters must not overwrite the guest's local save.
     if (r.enabled && r.mode == "join") return false;
-    if (r.enabled && r.mode == "host") mistrimulti_player_checkpoint();
+    if (r.enabled && r.mode == "host") {
+        mistrimulti_drops_before_save();
+        mistrimulti_player_checkpoint();
+    }
     return undefined;
 }
 
@@ -297,6 +307,10 @@ function mistrimulti_register() {
     mmapi_filter("tool.targets", mistrimulti_tool_targets);
     mmapi_guard("game.save_guard", mistrimulti_save_guard);
     mmapi_on("game.new_day", mistrimulti_new_day);
+    mmapi_on("game.new_day", mistrimulti_drops_new_day);
+    mmapi_override("object.interact", mistrimulti_containers_interact);
+    mmapi_on("dungeon.treasure_chest", mistrimulti_drops_treasure);
+    mmapi_on("resource.node_picked", mistrimulti_drops_rock);
     mmapi_on("game.room_changed", mistrimulti_room_changed);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
@@ -304,6 +318,7 @@ function mistrimulti_register() {
     mmapi_filter("local.missing", mistrimulti_local_missing);
     mistrimulti_clock_register_hooks();
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
+    mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F9"), mistrimulti_drops_give_hotkey);
 }
 
 mmapi_mod_declare("mistrimulti", "0.2.0");

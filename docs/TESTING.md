@@ -157,6 +157,13 @@ real host: it sends the newest valid save with a correct checksum, ignores look-
 answers "no world" when there is nothing; and a joining launcher downloads the world as the game starts without being
 delayed by an unreachable host.
 
+## Container and item checks
+
+`python3 tests/test_containers.py` (about 40 s, no ports) runs the real chest/drop GML on the event layer with the engine
+stubbed: simultaneous takes, stale replicas, 21 hostile requests, a guest cut off mid-transaction, host restart with a
+request in flight (never applied twice), snapshots, drop/claim races under loss, day change, gifts, per-player shipping
+bins, seeded loot and randomised item-conservation runs.
+
 ## Transport checks
 
 From the project folder on Windows:
