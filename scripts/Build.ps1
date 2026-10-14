@@ -44,6 +44,17 @@ if ($Target -in @('Windows','Both')) {
     & $taskLinker @taskSteamArgs
     if ($LASTEXITCODE -ne 0) { throw 'Steam identity linking failed.' }
     Write-Host 'Windows Steam identity probe built.'
+    $taskUpdaterObject = Join-Path $taskBuildRoot 'updater-win.obj'
+    & $taskNasm -f win64 @taskDebugFlags -I $taskIncludes (Join-Path $taskProjectRoot 'updater\updater.asm') -o $taskUpdaterObject
+    if ($LASTEXITCODE -ne 0) { throw 'Updater assembly failed.' }
+    $taskUpdaterExe = Join-Path $taskBuildRoot 'MistriMultiUpdater.exe'
+    $taskUpdaterArgs = @('/nologo','/machine:x64','/subsystem:windows','/entry:start','/nodefaultlib','/incremental:no',
+        "/out:$taskUpdaterExe", $taskUpdaterObject, "/libpath:$taskLibraries",
+        'kernel32.lib','user32.lib','shell32.lib','gdi32.lib','ole32.lib','winhttp.lib','bcrypt.lib')
+    if (-not $Release) { $taskUpdaterArgs += '/debug' }
+    & $taskLinker @taskUpdaterArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Updater linking failed.' }
+    Write-Host 'Windows updater built.'
 }
 if ($Target -in @('Linux','Both')) {
     $taskObject = Join-Path $taskBuildRoot 'helper-linux.o'
