@@ -65,7 +65,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb
+      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb xauth
+      - name: Prepare the Wine prefix once (its first start must not race the first test)
+        run: WINEPREFIX=/tmp/wp WINEDEBUG=-all xvfb-run -a /usr/lib/wine/wine64 wineboot --init && WINEPREFIX=/tmp/wp wineserver -w || true
       - name: Release list is current
         run: sh scripts/make-release.sh && git diff --exit-code release/latest.txt
       - run: python3 scripts/lint-asm.py .
@@ -81,7 +83,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb
+      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb xauth
+      - name: Prepare the Wine prefix once (its first start must not race the first test)
+        run: WINEPREFIX=/tmp/wp WINEDEBUG=-all xvfb-run -a /usr/lib/wine/wine64 wineboot --init && WINEPREFIX=/tmp/wp wineserver -w || true
       - run: python3 scripts/lint-asm.py .
       - run: sh scripts/build-launcher.sh
       - run: sh scripts/build-updater.sh

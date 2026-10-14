@@ -33,6 +33,15 @@ def wpath(p):
     return str(p) if on_windows else "Z:" + str(p).replace("/", "\\")
 
 
+def run_checked(cmd, **kw):
+    """subprocess.run that shows the program's own output when it fails (a bare exit status says nothing on CI)."""
+    res = subprocess.run(cmd, capture_output=True, **kw)
+    if res.returncode != 0:
+        raise AssertionError(f"{cmd} exited with {res.returncode}\nstdout: {res.stdout.decode(errors='replace')[-2000:]}"
+                             f"\nstderr: {res.stderr.decode(errors='replace')[-2000:]}")
+    return res
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -131,7 +140,7 @@ class Env:
         cmd = [str(target)] if on_windows else ["xvfb-run", "-a", WINE, str(target)]
         env = dict(os.environ, WINEDEBUG="-all", WINEPREFIX=PREFIX,
                    MISTRIMULTI_SAVES_DIR=wpath(self.saves), MISTRIMULTI_DOCS_DIR=wpath(self.docs), **(extra_env or {}))
-        subprocess.run(cmd + args, env=env, timeout=90, check=True, capture_output=True)
+        run_checked(cmd + args, env=env, timeout=90)
         return out.read_bytes().decode("utf-16-le")
 
     def snapshot(self):
@@ -485,8 +494,8 @@ def test_production_urls():
     try:
         out = e.tmp / "urls.txt"
         cmd = [str(e.exe)] if on_windows else ["xvfb-run", "-a", WINE, str(e.exe)]
-        subprocess.run(cmd + ["--urls", "0.2.0", wpath(out)], env=dict(os.environ, WINEDEBUG="-all", WINEPREFIX=PREFIX),
-                       timeout=90, check=True, capture_output=True)
+        run_checked(cmd + ["--urls", "0.2.0", wpath(out)], env=dict(os.environ, WINEDEBUG="-all", WINEPREFIX=PREFIX),
+                    timeout=90)
         lines = out.read_bytes().decode("utf-16-le").split("\r\n")[:3]
         want = ["github.com /tomrocksyou/MistriaMulti/releases/latest/download/latest.txt",
                 "raw.githubusercontent.com /tomrocksyou/MistriaMulti/v0.2.0/mod/mistrimulti/gml/A.gml",

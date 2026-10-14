@@ -14,7 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb
+      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb xauth
+      - name: Prepare the Wine prefix once (its first start must not race the first test)
+        run: WINEPREFIX=/tmp/wp WINEDEBUG=-all xvfb-run -a /usr/lib/wine/wine64 wineboot --init && WINEPREFIX=/tmp/wp wineserver -w || true
       - name: The tag is the mod version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
