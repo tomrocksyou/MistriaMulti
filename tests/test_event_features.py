@@ -54,7 +54,7 @@ class FeatureNode(GmlNode):
         self.calls = []
         mist = gml.GStruct(is_running=lambda: False)
         return {
-            "GRIDS": gml.GArray([self.grid.struct]), "LocationId": gml.GStruct(Farm=0),
+            "GRIDS": gml.GArray([self.grid.struct]), "LocationId": gml.GStruct(Farm=0, Dungeon=2),
             "TerrainKind": gml.GStruct(Ground=GROUND), "GroundKind": gml.GStruct(Dirt=DIRT, Soil=SOIL),
             "CURRENT_LOCATION_ID": 0, "water_chunk": self.grid.water,
             "location_id_to_string": lambda i: "farm", "point_distance": lambda a, b, c, d: ((a - c) ** 2 + (b - d) ** 2) ** 0.5,

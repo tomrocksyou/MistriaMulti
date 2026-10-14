@@ -46,9 +46,10 @@ function __mistrimulti_dr() {
     return dr;
 }
 
-// The location this game is in, or -1 when items are not shared here (no world, or a per-player dungeon floor).
+// The location this game is in, or -1 when items are not shared here (no world, an interior, or the mines, whose floors differ per player).
 function __mistrimulti_dr_room() {
-    if (!instance_exists(obj_ari) || GRID == undefined || ARI == undefined || GRID.dyn_index != undefined) return -1;
+    if (!instance_exists(obj_ari) || GRID == undefined || ARI == undefined || GRID.dyn_index != undefined
+        || CURRENT_LOCATION_ID == LocationId.Dungeon) return -1;
     return CURRENT_LOCATION_ID;
 }
 
