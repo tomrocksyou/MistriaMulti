@@ -36,11 +36,40 @@ in `README.md` remains outside the current prototype.
 
 ## Updater checks
 
-`tests/test_updater.py` runs the assembly updater against a local HTTP server (under Wine with xvfb on Linux, directly on
-Windows): update detection, verified download and install, rejection of a file with a bad checksum (nothing installed,
-no staged files left), "up to date" afterwards, and the Save Solo backup into Documents. Build with
-`sh scripts/build-updater.sh`. Regenerate the published file list with `sh scripts/make-release.sh` whenever the mod
-changes; CI fails when `release/latest.txt` is stale.
+`tests/test_updater.py` runs the assembly manager against a local HTTP server (under Wine with xvfb on Linux, directly on
+Windows). It always runs a COPY of the exe from a temporary folder, because the manager installs the tools next to itself.
+Build with `sh scripts/build-updater.sh` (and `sh scripts/build-launcher.sh` for `fakegame.exe`, which stands in for MOMI):
+
+```sh
+python3 tests/test_updater.py build/MistriMulti.exe build/fakegame.exe
+```
+
+- Mod: update detection, verified download and install, "up to date" afterwards, only changed files downloaded,
+  fresh install, bad checksum (nothing installed, no staged files), Save Solo into Documents.
+- Tools (launcher, helper, probe) and self-update: a stale tool is reported even when the mod version is equal; the running
+  `MistriMulti.exe` is renamed to `.old`, the new build is verified, runs, and removes the `.old` at its next start;
+  leftover `.old`/`.new` files of our tools are deleted at start and foreign files are not.
+- Failure paths: a blocked staging file (nothing changes); a replacement that fails after the manager and the launcher were
+  already replaced (everything is put back and the original exe still works); a mod replacement that fails (files and
+  `manifest.toml` version unchanged, because the manifest is installed last).
+- Versions: numeric comparison (`0.10.0` is newer than `0.9.0`, `0.2` equals `0.2.0`), an unreadable installed version is
+  updated, and a newer installed version than the published one is reported as such and never touched.
+- Hostile lists (about 65 cases, all rejected whole, with the list as the only request made): `..`, absolute and drive paths,
+  backslashes, streams, other roots, tool names outside the whitelist, hidden names, trailing dots, Windows device names,
+  8.3 names, non-ASCII, bad or upper-case hashes, duplicates, a missing/wrong footer, lists cut at a line or in a line,
+  content after the footer, bad versions, a missing `manifest.toml`, too many files, an oversized list; comments, blank
+  lines and CRLF are accepted.
+- Hostile downloads: wrong content for a tool, the manager or a mod file, a truncated download, a 2 MB and a 1 MiB + 1 file,
+  a 404, an empty body: nothing is installed and no `.new` file remains.
+- `MistriMulti.exe --urls <version> <file>` prints the production server and URL path for the list, a mod file and a tool
+  (no network), so the GitHub URLs are checked exactly.
+- Open MOMI: not found, the command-line program refused, started with no arguments, the saved choice, a vanished saved path.
+
+Regenerate the committed mod list with `sh scripts/make-release.sh` whenever the mod changes; CI fails when
+`release/latest.txt` is stale. The complete list with the tools (`make-release.sh --bin <dir> <file>`) is built by the
+release workflow, see `docs/RELEASES.md`. The suite takes a few minutes (one Wine start per case). Not tested: the real
+GitHub servers (the repository is private, and redirects from `github.com` release downloads go through GitHub's CDN) and
+the real MOMI.
 
 ## Launcher checks
 

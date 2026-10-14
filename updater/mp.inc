@@ -37,7 +37,7 @@ WSTR mp_f_cfgpath, "%s\FieldsOfMistria\mod_data\mistrimulti\launcher.cfg"
 WSTR mp_f_tsexe, "%s\Tailscale\tailscale.exe"
 WSTR mp_f_tscmd, `"%s" status --json`
 WSTR mp_f_tmp, "%smistrimulti-ts.tmp"
-WSTR mp_f_launcher, `"%s\MistriMultiLauncher.exe" --steam `
+WSTR mp_f_launcher, `"%s\\MistriMultiLauncher.exe" --steam `
 WSTR mp_e_local, "LOCALAPPDATA"
 WSTR mp_e_pf, "ProgramFiles"
 WSTR mp_e_extra, "MISTRIMULTI_SCAN_EXTRA"

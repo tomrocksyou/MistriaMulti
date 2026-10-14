@@ -8,5 +8,5 @@ cd "$project/build"
 nasm -f win64 -I ../helper/include/ -I ../common/ -I ../updater/ ../updater/updater.asm -o updater.obj
 lld-link /nologo /machine:x64 /subsystem:windows /entry:start /nodefaultlib /incremental:no \
     /out:MistriMulti.exe updater.obj /libpath:winlibs \
-    kernel32.lib user32.lib shell32.lib gdi32.lib ole32.lib winhttp.lib bcrypt.lib ws2_32.lib iphlpapi.lib
+    kernel32.lib user32.lib shell32.lib gdi32.lib ole32.lib winhttp.lib bcrypt.lib ws2_32.lib iphlpapi.lib comdlg32.lib
 echo "Updater built: build/MistriMulti.exe"

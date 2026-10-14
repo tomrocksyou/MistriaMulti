@@ -48,7 +48,8 @@ jobs:
         run: sh scripts/make-release.sh && git diff --exit-code release/latest.txt
       - run: python3 scripts/lint-asm.py .
       - run: sh scripts/build-updater.sh
-      - run: python3 tests/test_updater.py build/MistriMulti.exe
+      - run: sh scripts/build-launcher.sh
+      - run: python3 tests/test_updater.py build/MistriMulti.exe build/fakegame.exe
       - run: python3 tests/test_world.py build/MistriMulti.exe
       - uses: actions/upload-artifact@v4
         with:
@@ -62,12 +63,7 @@ jobs:
       - run: python3 scripts/lint-asm.py .
       - run: sh scripts/build-launcher.sh
       - run: sh scripts/build-updater.sh
-      - name: Build the Windows helper
-        run: |
-          sh scripts/winlibs.sh build/winlibs
-          cd build
-          nasm -f win64 -I ../helper/include/ ../helper/windows.asm -o helper-win.obj
-          lld-link /nologo /machine:x64 /subsystem:console /entry:mistria_main /nodefaultlib /incremental:no /out:mistrimulti-helper.exe helper-win.obj /libpath:winlibs kernel32.lib ws2_32.lib shell32.lib
+      - run: sh scripts/build-helper.sh
       - run: python3 tests/test_launcher.py build/MistriMultiLauncher.exe build/mistrimulti-helper.exe build/fakegame.exe build/MistriMulti.exe
       - uses: actions/upload-artifact@v4
         with:
