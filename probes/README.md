@@ -1,7 +1,7 @@
 # Transport and save-discovery probes
 
 Throwaway mods, each separate so one unavailable function cannot hide the others.
-Results are written to the MMAPI logs: `%LOCALAPPDATA%\FieldsOfMistria\mod_data\mmapi\logs\<mod>.log`.
+Results are written to each mod's own log: `%LOCALAPPDATA%\FieldsOfMistria\mod_data\<mod>\logs\<mod>.log`. Run `scripts\Collect-Logs.ps1` to zip them all onto the Desktop.
 
 | Probe | Question |
 | --- | --- |
@@ -17,4 +17,4 @@ Results are written to the MMAPI logs: `%LOCALAPPDATA%\FieldsOfMistria\mod_data\
    with MistriMulti unchecked.
 3. `python tools/probe_listener.py --data-dir %LOCALAPPDATA%\FieldsOfMistria\mod_data`
 4. Start the game, load a save, wait about 2 minutes.
-5. Send every `mmprobe_*.log` from `mod_data\mmapi\logs`.
+5. Run `powershell -ExecutionPolicy Bypass -File scripts\Collect-Logs.ps1` and send `mistri-logs.zip` from the Desktop.
