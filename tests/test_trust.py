@@ -348,11 +348,11 @@ def test_hijack(env):
 
 
 def test_password(env):
-    password = "correct horse battery"
+    password = "correct-horse-battery"
     host = Node(env, "host", 0, password=password).start()
     bad = new_wire(host, 1, password=b"")
     assert bad.join() == ("reject", mmauth.REJECT_AUTH)
-    wrong = new_wire(host, 1, password=b"wrong password")
+    wrong = new_wire(host, 1, password=b"wrong-password")
     assert wrong.join() == ("reject", mmauth.REJECT_AUTH)
     good = new_wire(host, 1, password=password.encode())
     assert good.join() == "ok"
@@ -736,7 +736,7 @@ def test_guest_join(env):
 
 def test_guest_rejections(env):
     # a password-protected host and a guest without one
-    fake = FakeHost(password=b"hunter2 is bad")
+    fake = FakeHost(password=b"hunter2-is-bad")
     guest = Node(env, "join", 1, host_port=fake.port).start()
     assert fake.until("hello", 5)
     wait_until(lambda: guest.auth(0) and guest.auth(0)["reject"] == 6, 6, "password required is reported")
@@ -745,9 +745,9 @@ def test_guest_rejections(env):
     assert not any(p[:4] == b"MSAU" and p[4] == 3 for p in fake.log), "no PROOF without the password"
     guest.stop()
     fake.close()
-    # a wrong password: the host rejects, the guest reports it and backs off
-    fake = FakeHost(password=b"right password")
-    guest = Node(env, "join", 1, host_port=fake.port, password="wrong password").start()
+    # a wrong-password: the host rejects, the guest reports it and backs off
+    fake = FakeHost(password=b"right-password")
+    guest = Node(env, "join", 1, host_port=fake.port, password="wrong-password").start()
     assert fake.until("proof-rejected", 8)
     wait_until(lambda: guest.auth(0) and guest.auth(0)["reject"] == 1, 6, "bad password reported")
     guest.stop()
@@ -762,7 +762,7 @@ def test_guest_rejections(env):
     assert guest.auth(0) is None or guest.auth(0)["state"] != 2
     guest.stop()
     fake.close()
-    passed("guest helper: missing and wrong passwords reported, an impostor host without the right tag is not believed")
+    passed("guest helper: missing and wrong-passwords reported, an impostor host without the right tag is not believed")
 
 
 def test_guest_resync(env):
@@ -797,7 +797,7 @@ def test_guest_resync(env):
 
 
 def test_config(env):
-    for blob in (b"pass=" + b"x" * 65 + b"\r\n", b"pass=\xc3\xa9t\xc3\xa9\r\n", b"pass=tab\there\n", b"pass=ok\npass=" + b"y" * 80 + b"\n"):
+    for blob in (b"pass=" + b"x" * 65 + b"\r\n", b"pass=\xc3\xa9t\xc3\xa9\r\n", b"pass=tab\there\n", b"pass=two words\n", b"pass=\x7f\n", b"pass=ok\npass=" + b"y" * 80 + b"\n"):
         node = Node(env, "host", 0, config=blob)
         node.process = subprocess.Popen(node.command(), env=dict(os.environ, WINEDEBUG="-all"),
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -809,9 +809,9 @@ def test_config(env):
         assert code == 4, (code, blob)
         node.process = None
     # a very long file, no newline at the end, unknown keys, CRLF, a key path that is a folder
-    junk = b"unknown=1\r\n" + b"k" * 5000 + b"\r\nkey=" + b"/" * 2000 + b"\r\nkeys=\r\ndeny=\r\npass=a b c"
+    junk = b"unknown=1\r\n" + b"k" * 5000 + b"\r\nkey=" + b"/" * 2000 + b"\r\nkeys=\r\ndeny=\r\npass=a!b#c"
     node = Node(env, "host", 0, config=junk).start()
-    wire = new_wire(node, 1, password=b"a b c")
+    wire = new_wire(node, 1, password=b"a!b#c")
     assert wire.join() == "ok"
     wire.close()
     node.stop()

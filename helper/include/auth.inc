@@ -47,7 +47,7 @@ status_limited db ',"limited":',0
 status_authfail db ',"authfail":',0
 status_denied db ',"denied":',0
 status_unknown db ',"unknown":',0
-bad_password db 'Invalid host password in auth.cfg (1 to 64 printable characters).',10,0
+bad_password db 'Invalid host password in auth.cfg (1 to 64 printable characters, no spaces).',10,0
 random_error db 'The system random number generator is unavailable.',10,0
 align 8
 cfg_table:
@@ -873,7 +873,7 @@ FN auth_init
     jae .pwok
     lea rax, [pass_text]
     movzx eax, byte [rax+rbx]
-    cmp eax, 32
+    cmp eax, 33
     jb .badpass
     cmp eax, 126
     ja .badpass

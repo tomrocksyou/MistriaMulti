@@ -44,6 +44,7 @@ function mistrimulti_initialize() {
     r.bridge = native_root + string(cfg.id);
     directory_create(r.bridge);
     mistrimulti_identity_initialize(cfg);
+    mistrimulti_trust_initialize();
     mistrimulti_player_data_initialize();
     mistrimulti_events_initialize();
     mistrimulti_register_events();
@@ -70,6 +71,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.containers", mistrimulti_containers_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.drops", mistrimulti_drops_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.ranch", mistrimulti_ranch_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -283,6 +285,8 @@ function mistrimulti_show_status() {
     if (r.warning != "") text += " | " + r.warning;
     if (r.player_error != "") text += " | " + r.player_error;
     if (r.mode == "join" && r.player_revision > r.player_saved_revision) text += " | Saving player progress";
+    var trust = mistrimulti_trust_status_text();
+    if (trust != "") text += " | " + trust;
     create_notification(ANCHOR.wrap_for_local(text));
 }
 
@@ -337,6 +341,9 @@ function mistrimulti_register() {
     mistrimulti_clock_register_hooks();
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F9"), mistrimulti_drops_give_hotkey);
+    // Host: approve / refuse a player identity that needs approval. Guest: accept a changed host identity.
+    mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F7"), mistrimulti_trust_hotkey_approve);
+    mmapi_hotkey_register_binding(mmapi_hotkey_binding_from_name("SHIFT+F7"), mistrimulti_trust_hotkey_refuse);
     mistrimulti_ranch_register_hooks();
 }
 

@@ -145,7 +145,11 @@ function mistrimulti_events_receive(slot, frame) {
     var e = is_struct(frame) ? frame[$ "ev"] : undefined;
     if (slot == r.id || !__mistrimulti_ev_valid(e)) return;
     var rx = ev.rx[slot];
+    // The host's abuse limits for guests (MistriMultiTrust.gml); absent elsewhere, so a guest never throttles the host.
+    var gate = r[$ "trust_gate"];
     if (rx.s != e.s) {
+        // A guest that keeps announcing new streams is ignored (each one re-runs every on_peer snapshot).
+        if (gate != undefined && !gate(slot, undefined)) return;
         // First contact or a restarted sender: start at its oldest unacknowledged event.
         rx.s = e.s;
         rx.x = e.b;
@@ -167,6 +171,11 @@ function mistrimulti_events_receive(slot, frame) {
         if (!is_struct(item) || !is_real(item[$ "s"]) || item.s != e.b + i || !is_string(item[$ "k"])) break;
         if (item.s < rx.x) continue;
         if (item.s > rx.x) break;
+        // Over its rate: wait, the event stays unacknowledged and the sender keeps it queued.
+        if (gate != undefined && !gate(slot, item)) {
+            ev.stalls++;
+            break;
+        }
         if (!__mistrimulti_ev_deliver(slot, item, rx)) {
             ev.stalls++;
             break;
@@ -508,6 +517,8 @@ function __mistrimulti_ev_peers() {
         }
         var old = ev.peer_stream[p];
         if (s == old) continue;
+        // A stream the host's limits refused (mistrimulti_events_receive ignored it) is not announced either.
+        if (s != "" && r[$ "trust_gate"] != undefined && ev.rx[p].s != s) continue;
         ev.peer_stream[p] = s;
         if (old != "") __mistrimulti_ev_notify("on_peer", p, false, old);
         if (s != "") __mistrimulti_ev_notify("on_peer", p, true, s);

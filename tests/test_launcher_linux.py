@@ -1195,11 +1195,120 @@ def test_manager_save_solo():
         sb.cleanup()
 
 
+def test_password():
+    """launcher.cfg password=: invalid ones stop multiplayer, valid ones reach the real helper (auth.cfg) and discovery."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import mmauth
+    for name, text in {"space": "password=two words", "too long": "password=" + "x" * 65, "accent": "password=café",
+                       "control": "password=ab\x01"}.items():
+        sb = Sandbox()
+        try:
+            sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\n" + text + "\r\n")
+            code = finish(sb.steam())
+            assert code == 7 and sb.ran() is not None, f"{name}: game must still start"
+            assert not (sb.mod / "control.json").exists() and not list(sb.mod.glob("bridge_*")), f"{name}: multiplayer started"
+        finally:
+            sb.cleanup()
+
+    def handshake(password, slot=1, port=47911):
+        guest = mmauth.Guest(0xA1B2C3D4, slot, password=password)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(2)
+        try:
+            s.sendto(guest.hello(), ("127.0.0.1", port))
+            challenge = s.recvfrom(256)[0]
+            proof = guest.proof(challenge)
+            s.sendto(proof, ("127.0.0.1", port))
+            reply = s.recvfrom(256)[0]
+            return challenge, ("ok" if guest.welcome(reply) else ("reject", reply[8]))
+        finally:
+            s.close()
+
+    sb = Sandbox()
+    try:
+        sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\npassword=s3cret!pw\r\n")
+        proc = sb.steam(["--quick"])
+        bridge = sb.mod / "bridge_0"
+        assert wait_for(lambda: (bridge / "auth.cfg").exists() and (bridge / "status.json").exists()), "helper did not start"
+        auth = bridge / "auth.cfg"
+        assert auth.read_text().split("\n")[:4] == [f"key={sb.mod}/install.key", f"keys={sb.mod}/trust_keys.txt",
+                                                    f"deny={sb.mod}/deny.txt", "pass=s3cret!pw"], auth.read_text()
+        assert stat.S_IMODE(auth.stat().st_mode) == 0o600, oct(auth.stat().st_mode)
+        assert wait_for(lambda: (sb.mod / "install.key").exists() and (sb.mod / "install.key").stat().st_size == 32), "no install key"
+        assert stat.S_IMODE((sb.mod / "install.key").stat().st_mode) == 0o600
+        challenge, result = handshake(b"s3cret!pw")
+        assert result == "ok", result
+        hfp = challenge[32:48]
+        assert handshake(b"wrong")[1] == ("reject", 1)
+        assert handshake(b"")[1] == ("reject", 1)
+        for _ in range(20):
+            reply = query_host(0.5)
+            if reply:
+                break
+        assert reply is not None and reply[5] & 2, "the password flag is announced in discovery"
+        finish(proc)
+        # a second launch: same install key, so the same host fingerprint; no password configured now
+        sb.config("mode=host\r\nport=47911\r\nroom=a1b2c3d4\r\n")
+        proc = sb.steam(["--quick"])
+        assert wait_for(lambda: (bridge / "status.json").exists() and "pass=" not in auth.read_text()), "auth.cfg keeps a removed password"
+        time.sleep(0.5)
+        challenge, result = handshake(b"")
+        assert result == "ok" and challenge[32:48] == hfp, "the host fingerprint must survive a restart"
+        for _ in range(20):
+            reply = query_host(0.5)
+            if reply:
+                break
+        assert reply is not None and not reply[5] & 2
+        finish(proc)
+        # --configure keeps a stored password; an unusable one is never written back
+        sb.config("mode=host\r\nport=7777\r\nroom=a1b2c3d4\r\npassword=keep!me\r\n")
+        run_configure(sb, "h\n\n\n")
+        assert "password=keep!me" in (sb.mod / "launcher.cfg").read_text()
+        sb.config("mode=host\r\nport=7777\r\nroom=a1b2c3d4\r\npassword=bad pass\r\n")
+        run_configure(sb, "h\n\n\n")
+        assert "password" not in (sb.mod / "launcher.cfg").read_text()
+        print("password: invalid ones stop multiplayer, valid ones reach the helper (auth.cfg 0600), wrong ones are refused, "
+              "discovery flag, stable host fingerprint, configure keeps it")
+    finally:
+        sb.cleanup()
+
+
+def test_manager_password():
+    if manager is None:
+        return
+    sb = Sandbox()
+    try:
+        cfg = sb.mod / "launcher.cfg"
+        out, err, rc = run_manager(sb, ["host", "--password", "pa$$w0rd!"])
+        assert rc == 0 and cfg.read_bytes() == b"mode=host\r\nport=7777\r\nplayer=0\r\nroom=\r\npassword=pa$$w0rd!\r\n", (rc, err, cfg.read_bytes())
+        assert stat.S_IMODE(cfg.stat().st_mode) == 0o600
+        out, err, rc = run_manager(sb, ["host"])
+        assert rc == 0 and cfg.read_bytes() == b"mode=host\r\nport=7777\r\nplayer=0\r\nroom=\r\n", "host without --password drops the old one"
+        before = cfg.read_bytes()
+        for bad in (["host", "--password", "two words"], ["host", "--password"], ["host", "--password", "x" * 65], ["host", "--bogus"],
+                    ["join", "1.2.3.4", "--password", "a b"], ["join", "1.2.3.4", "--password"], ["join", "1.2.3.4", "--password", "é"]):
+            out, err, rc = run_manager(sb, bad)
+            assert rc == 2 and cfg.read_bytes() == before, (bad, rc, out, err)
+        out, err, rc = run_manager(sb, ["join", "127.0.0.1", "--player", "3", "--room", "abcd1234", "--password", "tops3cret"])
+        assert rc == 0, (out, err)
+        assert cfg.read_bytes() == b"mode=join\r\nhost=127.0.0.1\r\nport=7777\r\nplayer=3\r\nroom=abcd1234\r\npassword=tops3cret\r\n", cfg.read_bytes()
+        # the launcher accepts what the manager wrote
+        proc = sb.steam(["--quick"])
+        assert wait_for(lambda: json.loads((sb.mod / "control.json").read_text())["enabled"] is True), "launcher rejected the password setup"
+        assert wait_for(lambda: (sb.mod / "bridge_3" / "auth.cfg").exists())
+        assert "pass=tops3cret" in (sb.mod / "bridge_3" / "auth.cfg").read_text()
+        finish(proc)
+        print("manager: --password for host and join written (0600), invalid ones refused, accepted by the launcher")
+    finally:
+        sb.cleanup()
+
+
 ALL = [test_host, test_time_stamps, test_helper_args, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune,
        test_configure, test_fuzz, test_discovery_responder, test_scan, test_scan_tailscale, test_world_server,
        test_world_round_trip, test_guest_refreshes_world, test_helper_dies_with_launcher, test_steam_probe_and_identity,
        test_data_dir_discovery_and_proton, test_exit_codes_and_signals,
-       test_manager_host_and_steam_setup, test_manager_join, test_manager_join_interactive, test_manager_save_solo]
+       test_manager_host_and_steam_setup, test_manager_join, test_manager_join_interactive, test_manager_save_solo,
+       test_password, test_manager_password]
 only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_host,test_fuzz runs just those
 for fn in ALL:
     if not only or fn.__name__ in only:

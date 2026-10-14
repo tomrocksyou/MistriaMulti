@@ -1,7 +1,7 @@
 ; MistriMulti manager for Linux and the Steam Deck: the console twin of the Windows manager window (updater/mp.inc).
-;   mistrimulti-manager host                 write the host setup and show the addresses to give to friends
+;   mistrimulti-manager host [--password TEXT]   write the host setup (optionally with a room password) and show the addresses to give to friends
 ;   mistrimulti-manager join [IP]            find hosts (broadcast + Tailscale peers) and choose one, or join an IP directly
-;                            [--player N] [--room CODE] [--port N]
+;                            [--player N] [--room CODE] [--port N] [--password TEXT]
 ;   mistrimulti-manager scan                 only list the hosts that can be found
 ;   mistrimulti-manager steam-setup          print the Steam launch option for the launcher
 ;   mistrimulti-manager save-solo            copy the solo saves to ~/Documents/MistriMulti Backups
@@ -36,6 +36,11 @@ o_room db '--room',0
 o_port db '--port',0
 cfg_host_text db 'mode=host',13,10,'port=7777',13,10,'player=0',13,10,'room=',13,10
 cfg_host_len equ $ - cfg_host_text
+    db 0
+o_pass db '--password',0
+t_badpass db 'The password must be 1 to 64 letters, digits or punctuation, without spaces or accents.',10,0
+t_cfg_pass_line db 'password=',0
+t_crlf_z db 13,10,0
 n_launcher db '/mistrimulti-launcher',0
 n_backups_dir db '/MistriMulti Backups',0
 s_documents db '/Documents',0
@@ -44,9 +49,10 @@ s_env_xdg_docs db 'XDG_DOCUMENTS_DIR',0
 k_docs db 'XDG_DOCUMENTS_DIR="'
 k_docs_len equ $ - k_docs
 t_usage db 'MistriMulti manager',10
-    db '  mistrimulti-manager host            set this computer up as the host and show the addresses to give to friends',10
+    db '  mistrimulti-manager host [--password TEXT]   set this computer up as the host (with an optional room password)',10
+    db '                      and show the addresses to give to friends',10
     db '  mistrimulti-manager join [IP]       find hosts on your network and on Tailscale and join one (or join IP directly)',10
-    db '                      [--player N] [--room CODE] [--port N]',10
+    db '                      [--player N] [--room CODE] [--port N] [--password TEXT]',10
     db '  mistrimulti-manager scan            list the hosts that can be found',10
     db '  mistrimulti-manager steam-setup     print the Steam launch option for the launcher',10
     db '  mistrimulti-manager save-solo       copy your solo saves to ~/Documents/MistriMulti Backups',10,0
@@ -61,6 +67,8 @@ t_scanning db 'Looking for hosts...',10,0
 t_found db 'Hosts found on your network and on Tailscale:',10,0
 t_none db 'No host found. Make sure your friend is hosting, then scan again (or type the host IP address).',10,0
 t_needroom db '   [needs a room code]',0
+t_needpass db '   [needs a password]',0
+t_passask db 'This host uses a room password. Ask them for it and type it here: ',0
 t_pick db 'Number of the host to join, R to scan again, or an IPv4 address (Enter to quit): ',0
 t_roomask db 'Room code (just press Enter unless your host gave you one): ',0
 t_roomneed db 'This host uses a room code. Ask them for it and type it here: ',0
@@ -96,6 +104,7 @@ join_port resd 1
 join_flags resd 1
 opt_player resd 1
 opt_room resb 16
+host_pass resb 72
 opt_have_room resd 1
 opt_port resd 1
 copied resd 1
@@ -185,17 +194,87 @@ END_FN
 
 ; ---------------- host ----------------
 FN do_host
+    mov byte [a_pass], 0
+    mov r12d, 2
+.hargs:
+    cmp r12, [argc_v]
+    jae .hparsed
+    mov ecx, r12d
+    call arg_n
+    mov r13, rax
+    inc r12d
+    mov rcx, r13
+    lea rdx, [o_pass]
+    call a_equal
+    test eax, eax
+    jz .husage
+    mov ecx, r12d
+    call arg_n
+    test rax, rax
+    jz .husage
+    inc r12d
+    mov r13, rax
+    mov rcx, rax
+    call v_pass
+    test eax, eax
+    jz .hbadpass
+    lea rdi, [a_pass]
+    mov rsi, r13
+    mov ecx, 65
+.hcp:
+    lodsb
+    stosb
+    test al, al
+    jz .hargs
+    dec ecx
+    jnz .hcp
+    jmp .hbadpass
+.husage:
+    lea rcx, [t_usage]
+    call say_err
+    mov eax, 2
+    jmp .d
+.hbadpass:
+    lea rcx, [t_badpass]
+    call say_err
+    mov eax, 2
+    jmp .d
+.hparsed:
     call prepare_paths
     test eax, eax
     jz .fail
+    lea rcx, [out_buf]
+    mov edx, 512
+    call pb_start
+    lea rcx, [cfg_host_text]
+    call pb_str
+    cmp byte [a_pass], 0
+    je .hnopass
+    lea rcx, [t_cfg_pass_line]
+    call pb_str
+    lea rcx, [a_pass]
+    call pb_str
+    lea rcx, [t_crlf_z]
+    call pb_str
+.hnopass:
+    call pb_end
+    cmp eax, -1
+    je .nosave
+    mov r14d, eax
     lea rcx, [p1]
     lea rdx, [mod_dir]
     lea r8, [n_cfg]
     call path2
     lea rcx, [p1]
-    lea rdx, [cfg_host_text]
-    mov r8d, cfg_host_len
+    lea rdx, [out_buf]
+    mov r8d, r14d
+    mov dword [wf_mode], 0644o
+    cmp byte [a_pass], 0
+    je .hwrite
+    mov dword [wf_mode], 0600o
+.hwrite:
     call write_file
+    mov dword [wf_mode], 0644o
     test eax, eax
     jz .nosave
     mov dword [mp_tgt_count], 0
@@ -526,6 +605,12 @@ FN list_hosts                   ; prints the numbered list of mp_host_*
     lea rcx, [t_needroom]
     call say
 .nc:
+    lea rax, [mp_host_flags]
+    test byte [rax+r12], 2
+    jz .np
+    lea rcx, [t_needpass]
+    call say
+.np:
     lea rcx, [t_nl]
     call say
     inc r12d
@@ -758,6 +843,32 @@ FN choose_host
 .rescan:
     jmp .scan
 .chosen:
+    test dword [join_flags], 2
+    jz .chosen_ok
+    cmp byte [a_pass], 0
+    jne .chosen_ok
+.askpass:
+    lea rcx, [t_passask]
+    lea rdx, [host_pass]
+    mov r8d, 70
+    call ask
+    cmp eax, -1
+    je .nothing
+    test eax, eax
+    jz .nothing                          ; this host cannot be joined without its password
+    lea rcx, [host_pass]
+    call v_pass
+    test eax, eax
+    jnz .gotpass
+    lea rcx, [t_badpass]
+    call say
+    jmp .askpass
+.gotpass:
+    lea rsi, [host_pass]
+    lea rdi, [a_pass]
+    mov ecx, 65
+    rep movsb
+.chosen_ok:
     mov eax, 1
     jmp .d
 .nothing:
@@ -771,6 +882,7 @@ FN do_join
     mov dword [opt_have_room], 0
     mov dword [opt_port], 7777
     mov qword [arg_ip], 0
+    mov byte [a_pass], 0
     mov r12d, 2
 .args:
     cmp r12, [argc_v]
@@ -794,6 +906,11 @@ FN do_join
     call a_equal
     test eax, eax
     jnz .o_port
+    mov rcx, r13
+    lea rdx, [o_pass]
+    call a_equal
+    test eax, eax
+    jnz .o_pass
     cmp byte [r13], '-'
     je .usage
     cmp qword [arg_ip], 0
@@ -831,6 +948,28 @@ FN do_join
     rep movsb
     mov dword [opt_have_room], 1
     jmp .args
+.o_pass:
+    mov ecx, r12d
+    call arg_n
+    test rax, rax
+    jz .usage
+    inc r12d
+    mov r13, rax
+    mov rcx, rax
+    call v_pass
+    test eax, eax
+    jz .badpass
+    lea rdi, [a_pass]
+    mov rsi, r13
+    mov ecx, 65
+.pcp:
+    lodsb
+    stosb
+    test al, al
+    jz .args
+    dec ecx
+    jnz .pcp
+    jmp .badpass
 .o_port:
     mov ecx, r12d
     call arg_n
@@ -887,6 +1026,9 @@ FN do_join
     jmp .err
 .badroom:
     lea rcx, [t_badroom]
+    jmp .err
+.badpass:
+    lea rcx, [t_badpass]
     jmp .err
 .badport:
     lea rcx, [t_badport]

@@ -8,6 +8,7 @@ function mistrimulti_player_reset_session() {
     r.player_request = "";
     r.player_sessions = array_create(8, undefined);
     r.player_error = "";
+    if (is_struct(r[$ "trust"])) r.trust.host_verified = false;
     mistrimulti_progress_reset_session();
     r.epoch += "_" + string(get_timer());
     // A new world session: nothing queued for the previous one may be delivered to it.
@@ -70,7 +71,12 @@ function mistrimulti_player_data_tick() {
             r.world_key = host.world;
             r.player_host_epoch = host.epoch;
         }
-        if (r.player_request == "" && mistrimulti_event_can_emit(1)) {
+        // Never hand a character to a host whose identity changed since this guest last joined it (F7 accepts).
+        var verify = r[$ "trust_host_ok"];
+        if (verify != undefined && r.player_request == "" && r.ticks mod 15 == 0) r.trust.host_verified = verify();
+        if (verify != undefined && r.player_request == "" && !r.trust.host_verified) {
+            r.player_error = r.trust.warning != "" ? r.trust.warning : "Waiting for the host to prove its identity.";
+        } else if (r.player_request == "" && mistrimulti_event_can_emit(1)) {
             if (mistrimulti_event_emit("profile_request", { world: r.world_key, uid: r.uid }, 0)) r.player_request = r.epoch;
             r.player_error = "Loading player progress from the host.";
         }
@@ -122,6 +128,12 @@ function mistrimulti_player_request(player, data) {
     if (data[$ "world"] != r.world_key || data[$ "uid"] != peer[$ "uid"] || !mistrimulti_valid_uid(data.uid)) return true;
     if (data.uid == r.uid) return mistrimulti_event_emit("profile_error",
         { peer_epoch: peer.epoch, message: "The host is already using this player identity." }, player);
+    // The uid is only a claim: the record belongs to the install the helper verified (MistriMultiTrust.gml).
+    var admit = r[$ "trust_admit"];
+    if (admit != undefined) {
+        var verdict = admit(player, data.uid, peer[$ "name"], data);
+        if (!verdict.ok) return mistrimulti_event_emit("profile_error", { peer_epoch: peer.epoch, message: verdict.message }, player);
+    }
     for (var i = 1; i < 8; i++) {
         var existing = r.player_sessions[i];
         if (i != player && (r.mask & (1 << i)) != 0 && is_struct(existing) && existing.uid == data.uid) {
@@ -186,6 +198,9 @@ function mistrimulti_player_receive_record(player, upload, text, meta) {
         var uid = upload ? r.peers[player][$ "uid"] : r.uid;
         if (meta[$ "peer_epoch"] != epoch || meta[$ "uid"] != uid || meta[$ "world"] != r.world_key) return true;
         if (upload && (!is_struct(session) || session.epoch != epoch || session.uid != uid)) return true;
+        // An upload is stored only while the slot still belongs to the install this record is bound to.
+        var bound = r[$ "trust_bound"];
+        if (upload && bound != undefined && !bound(player, uid)) return true;
         var revision = meta[$ "revision"];
         if (!is_real(revision) || revision < 0 || revision != floor(revision)) return true;
         if (upload && revision == session.revision) return mistrimulti_event_emit("profile_saved",
