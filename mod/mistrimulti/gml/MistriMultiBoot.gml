@@ -98,7 +98,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriMulti 0.2.8 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriMulti 0.2.9 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -441,6 +441,7 @@ function mistrimulti_register() {
     mmapi_guard("dialogue.romance_prompt_guard", mistrimulti_romance_prompt_guard);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
+    mmapi_on("ui.menu_opened", mistrimulti_map_opened);
     mmapi_on("ui.draw_gui", mistrimulti_draw_gui);
     mmapi_filter("local.missing", mistrimulti_local_missing);
     mistrimulti_clock_register_hooks();
@@ -454,5 +455,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.2.8");
+mmapi_mod_declare("mistrimulti", "0.2.9");
 mistrimulti_register();

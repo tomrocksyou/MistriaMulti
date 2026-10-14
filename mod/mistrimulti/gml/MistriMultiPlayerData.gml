@@ -121,6 +121,7 @@ function mistrimulti_player_restore(data) {
     ARI.mana_max = int64(data.stats.mana_max);
     ARI.inventory.deserialize(data.inventory);
     ARI.armor.deserialize(data.armor);
+    mistrimulti_player_touch_inventory();
     ARI.held_item_index = 0;
     ARI.skill_xp = clone_value(data.xp);
     ARI.perks = clone_value(data.perks);
@@ -152,6 +153,7 @@ function mistrimulti_player_fresh() {
     ARI.inventory.deserialize(Inventory(10).serialize());
     var items = fiddle_get("misc/ari_stats/starting_inventory");
     for (var i = 0; i < array_length(items); i++) ARI.inventory.add(string_to_item_id(items[i]));
+    mistrimulti_player_touch_inventory();
     var armor = fiddle_get("misc/ari_stats/starting_armor");
     var tags = ["head", "chest", "legs", "boots", "accessory"];
     for (var i = 0; i < ArmorSlot.LEN; i++) {
@@ -223,5 +225,14 @@ function mistrimulti_player_store(uid, revision, data) {
         r.player_error = "Player progress could not be saved on the host.";
         mmapi_warn_rate_limited("mistrimulti_player_save", "mistrimulti", r.player_error);
         return false;
+    }
+}
+
+// Inventory.deserialize sets the slots without counting an update, so the toolbar (an InventorySubscriber that redraws on
+// changed `updates`) kept showing the host's items after a guest's own inventory was restored. Count one update per slot.
+function mistrimulti_player_touch_inventory() {
+    var invs = [ARI.inventory, ARI.armor];
+    for (var k = 0; k < array_length(invs); k++) {
+        for (var i = 0; i < invs[k].size(); i++) invs[k].slot(i).updates += 1;
     }
 }

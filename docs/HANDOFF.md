@@ -22,7 +22,10 @@ real game (the stand-in tests could not catch them; keep them in mind for every 
 - Info lines do appear in the mod log (the earlier "warnings only" note was wrong).
 - Verified in the real game (0.2.7): characters, clock, sleep/new day, hoe/water/plant both ways, chest both ways,
   shipping bin and shared gold, town trip without crash.
-- User requests: show the other player on the map (needs the game's map scripts: ask for `gml.zip`); guest clock
+- 0.2.9: other players on the map (MapMenu.select_location wrapped from ui.menu_opened); toolbar refresh after a guest's
+  inventory restore (Inventory.deserialize does not bump slot `updates`). The user re-provided `gml.zip` (game scripts +
+  MMAPI); use it as reference only, never commit it. Villagers: same area, a few seconds apart (by design: plan + room only).
+- Earlier user requests: guest clock
   jumps to world time when more than 5 game minutes behind (0.2.8, was 30).
 - Next: walk the `docs/SYNC-*.md` checklists in the real game (clock first), then the badge.
 
