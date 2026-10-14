@@ -56,7 +56,7 @@ until the test has finished.
 1. Close the game. Enable the MMAPI debug agent by adding `"debug_enabled": true`
    to `%LOCALAPPDATA%/FieldsOfMistria/mod_data/mmapi/mmapi.json`. Preserve any
    other existing settings. A new file can contain `{ "debug_enabled": true }`.
-2. Start `Host.bat`, note its room code, and enter a test world on the farm.
+2. Start `Play.bat` and choose host, note its room code, and enter a test world on the farm.
 3. Run:
 
 ```powershell

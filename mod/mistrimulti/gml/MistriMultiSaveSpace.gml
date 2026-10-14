@@ -4,7 +4,7 @@
 // The game finds saves through one global (CONFIG_DIRECTORY), so switching spaces = pointing it at
 // the other folder and rebuilding Setup's save list. The title screen always starts in the solo space.
 // New Game and Load Game ask "Singleplayer or Multiplayer?" first; Multiplayer needs the helper to be
-// running (Host.bat / Join.bat), because a mod cannot start programs.
+// running (Play.bat), because a mod cannot start programs.
 function __mistrimulti_savespace() {
     if (global[$ "__mistrimulti_savespace"] == undefined) {
         global.__mistrimulti_savespace = {
@@ -156,7 +156,7 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/singleplayer": return "Singleplayer";
         case "mistrimulti/multiplayer": return "Multiplayer";
         case "mistrimulti/needs_helper_title": return "Multiplayer isn't running";
-        case "mistrimulti/needs_helper_body": return "Close the game and start it with Host.bat or Join.bat to play multiplayer.";
+        case "mistrimulti/needs_helper_body": return "Close the game and start it with Play.bat to play multiplayer.";
     }
     return undefined;
 }

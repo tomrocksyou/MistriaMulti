@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('host','join')][string]$Mode = 'host',
+    [ValidateSet('','host','join')][string]$Mode = '',
     [string]$GameDirectory = '',
     [string]$HostAddress = '',
     [ValidateRange(1,65535)][int]$Port = 7777,
@@ -17,6 +17,28 @@ if (-not (Test-Path -LiteralPath $taskHelper)) { throw 'Build the helper first u
 if (-not (Test-Path -LiteralPath (Join-Path $GameDirectory 'FieldsOfMistria.exe'))) { throw 'Set -GameDirectory to your Fields of Mistria install.' }
 if (-not (Test-Path -LiteralPath (Join-Path $GameDirectory 'mods\mistrimulti\manifest.toml'))) { throw 'Run scripts\Install-Mod.ps1, then install MistriMulti in MOMI.' }
 if (Get-Process -Name FieldsOfMistria -ErrorAction SilentlyContinue) { throw 'Close Fields of Mistria before starting a multiplayer session.' }
+# One launcher for everything: it asks host or join once, then remembers the details.
+$taskConfigPath = Join-Path $env:LOCALAPPDATA 'FieldsOfMistria\mod_data\mistrimulti\launcher.json'
+$taskSaved = $null
+if (Test-Path -LiteralPath $taskConfigPath) {
+    try { $taskSaved = Get-Content -LiteralPath $taskConfigPath -Raw | ConvertFrom-Json } catch { $taskSaved = $null }
+}
+$taskReenter = $false
+if (-not $Mode) {
+    if ($taskSaved -and $taskSaved.mode -in @('host','join')) {
+        $taskLast = if ($taskSaved.mode -eq 'host') { 'host a game' } else { "join $($taskSaved.hostAddress)" }
+        $taskPick = Read-Host "Last time: $taskLast. Press Enter to repeat, H to host, J to join a friend (re-enter details)"
+    } else { $taskPick = Read-Host 'Host a game (H) or join a friend (J)?' }
+    if ($taskPick -match '^[hH]') { $Mode = 'host' }
+    elseif ($taskPick -match '^[jJ]') { $Mode = 'join'; $taskReenter = $true }
+    elseif (-not $taskPick -and $taskSaved -and $taskSaved.mode -in @('host','join')) { $Mode = $taskSaved.mode }
+    else { throw 'Type H to host or J to join.' }
+}
+if ($taskSaved -and $taskSaved.mode -eq $Mode -and -not $taskReenter) {
+    if (-not $HostAddress -and $taskSaved.hostAddress) { $HostAddress = [string]$taskSaved.hostAddress }
+    if (-not $RoomCode -and $taskSaved.roomCode) { $RoomCode = [string]$taskSaved.roomCode }
+    if ($Mode -eq 'join' -and $PlayerId -eq 0 -and $taskSaved.playerId) { $PlayerId = [int]$taskSaved.playerId }
+}
 if ($Mode -eq 'host') { $PlayerId = 0; if ($LocalPort -eq 0) { $LocalPort = $Port }; if (-not $HostAddress) { $HostAddress = '127.0.0.1' } }
 else {
     if ($PlayerId -eq 0) { $PlayerId = [int](Read-Host 'Your player number (1-7; different from each friend)') }
@@ -40,6 +62,9 @@ if (-not $RoomCode) {
     } else { $RoomCode = Read-Host 'Eight-digit room code from the host' }
 }
 if ($RoomCode -notmatch '^[0-9a-fA-F]{8}$') { throw 'The room code must contain exactly eight hexadecimal digits.' }
+New-Item -ItemType Directory -Path (Split-Path -Parent $taskConfigPath) -Force | Out-Null
+$taskRemember = @{ mode = $Mode; hostAddress = $HostAddress; port = $Port; playerId = $PlayerId; roomCode = $RoomCode }
+[IO.File]::WriteAllText($taskConfigPath, ($taskRemember | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
 $taskModData = (Join-Path $env:LOCALAPPDATA 'FieldsOfMistria\mod_data\mistrimulti').Replace('\','/')
 $taskBridge = "$taskModData/bridge_$PlayerId"
 New-Item -ItemType Directory -Path $taskBridge -Force | Out-Null

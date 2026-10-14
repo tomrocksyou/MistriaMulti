@@ -50,9 +50,11 @@ are blocked during multiplayer. The host can save its farm normally. See
    Windows executable is also included under `build/` in the supplied project.
 3. Run `Install-Mod.bat`. It copies **only this project's own mod** into your game's `mods/` folder.
 4. Open MOMI, select **MistriMulti**, and click **Install**. Close the game during installation.
-5. Host: run `Host.bat`, then load a save. The launcher displays an eight-digit room code.
-6. Friends: install the same mod, run `Join.bat`, choose different player numbers (1–7),
-   and enter the host's reachable IPv4 address and room code. Load a save and visit the same location.
+5. Everyone runs `Play.bat`. It asks once whether you want to host (H) or join a friend (J), and remembers
+   your answer. Host: it shows an eight-digit room code that stays the same every session. Friends: enter the
+   host's reachable IPv4 address, the room code and a player number (1-7, different for each friend) once;
+   next time just press Enter to repeat.
+6. In the game choose **New Game** or **Load Game**, then **Multiplayer**. Choose **Singleplayer** for normal solo play.
 
 The Windows launchers search Steam libraries for the game. To select an installation
 explicitly, pass `-GameDirectory`:
