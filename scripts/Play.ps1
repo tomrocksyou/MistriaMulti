@@ -9,6 +9,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Find-Game.ps1')
+. (Join-Path $PSScriptRoot 'SaveGuard.ps1')
 $GameDirectory = Find-MistriMultiGame $GameDirectory
 $taskProjectRoot = Split-Path -Parent $PSScriptRoot
 $taskHelper = Join-Path $taskProjectRoot 'build\mistrimulti-helper.exe'
@@ -93,6 +94,10 @@ $taskControl = @{ enabled=$true; mode=$Mode; id=$PlayerId; uid=$taskUid; epoch=[
 $taskArgs = @($Mode, "$LocalPort", "$PlayerId", $RoomCode, ('"' + $taskBridge + '"'))
 if ($Mode -eq 'join') { $taskArgs += @($HostAddress, "$Port") }
 $taskHelperProcess = $null
+# Snapshot solo saves before the game can touch them.
+$taskSavesDir = Get-MistriMultiSavesDir
+$taskBackup = New-SoloBackup -SavesDir $taskSavesDir -BackupRoot "$taskModData/solo_backups"
+Write-Host "Solo saves backed up to $($taskBackup.Path)"
 try {
     $taskHelperProcess = Start-Process -FilePath $taskHelper -ArgumentList $taskArgs -WindowStyle Hidden -PassThru
     $taskHelperProcess.Id | Set-Content -LiteralPath "$taskBridge/helper.pid"
@@ -115,5 +120,15 @@ try {
     if ($taskHelperProcess -and -not $taskHelperProcess.HasExited) {
         'stop' | Set-Content -LiteralPath "$taskBridge/stop.flag"
         if (-not $taskHelperProcess.WaitForExit(2500)) { Stop-Process -Id $taskHelperProcess.Id }
+    }
+    if (Get-Process -Name FieldsOfMistria -ErrorAction SilentlyContinue) {
+        Write-Warning 'The game is still running, so solo saves were not checked. Close the game and check %LOCALAPPDATA%\FieldsOfMistria\saves against the newest folder in mod_data\mistrimulti\solo_backups.'
+    } else {
+        # Guests never keep changes to solo saves. The host's own saves may change legitimately,
+        # so for the host differences are reported and the backup is kept.
+        $taskDiff = Test-SoloSaves -Backup $taskBackup -SavesDir $taskSavesDir -QuarantineRoot "$taskModData/quarantine" -Restore:($Mode -eq 'join')
+        if ($taskDiff.Count -eq 0) { Write-Host 'Solo saves unchanged.' }
+        elseif ($Mode -eq 'join') { Write-Warning ("Solo saves were modified and have been restored. Originals of the changed files are in $taskModData/quarantine: " + ($taskDiff -join '; ')) }
+        else { Write-Host ("Saves changed during hosting (backup kept at $($taskBackup.Path)): " + ($taskDiff -join '; ')) }
     }
 }
