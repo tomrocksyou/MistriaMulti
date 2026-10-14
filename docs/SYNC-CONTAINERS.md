@@ -12,7 +12,7 @@ host exactly once or refused as a whole.
 | Thing | Decision |
 | --- | --- |
 | Chests, fridges, turn-in boxes (any furniture node with `interaction_chest`) | Host-owned. Replicated to every guest. |
-| **Shipping bins** | **Per player, never synced.** See below. |
+| **Shipping bins** | Host-owned and synced like chests; the **host** sells them once at its end of day, into the shared wallet. See below. |
 | Items on the ground (`obj_item`) | Host-owned table with ids, published 2 s after they appear. |
 | Gifts between players | An entry in the same table that only the recipient can claim (F9). |
 | Loot rolls (treasure chests, rocks) | Seeded from the host's seed, so the roll depends only on (host seed, source). |
@@ -22,19 +22,25 @@ host exactly once or refused as a whole.
 
 ### Shipping bins (decision)
 
-The game's end-of-day sequence calls `sell_shipping_bin_items()` in every game that runs it, and pays the local player. If a
-bin were shared, every game would sell the same items and every player would be paid for all of them. So bins are **per
-player**:
+Money is collective (one pool for everyone, [SYNC-WALLET.md](SYNC-WALLET.md)), so the bins are shared too. The game's
+end-of-day sequence calls `sell_shipping_bin_items()` in every game that runs it and pays the local player with
+`ARI.modify_gold`. To sell each item once:
 
-- `MistriMultiContainers.gml` skips every node whose `interaction_chest.shipping_bin` is true: nothing about it is sent or
-  received, and its menu is the game's own, untouched.
-- Each game sells its own bin at its own end of day, and the proceeds go to its own player. A bin can therefore never be sold
-  twice.
-- A guest's copy of the world comes from the host's save and may contain the **host's** items in the bin. On its first sight
-  of each bin in a session, a guest empties its copy (without giving anything to the player) so that it does not sell the
-  host's items too. The host keeps and sells them.
-- Limitation: what a guest has put in its bin when it leaves before sleeping is lost with its game (guests do not save the
-  world). Players should sleep before leaving, or use a chest for items to keep.
+- `MistriMultiContainers.gml` treats every node whose `interaction_chest.shipping_bin` is true like any other chest: the host's
+  bins are the truth, every guest has a replica, and any player may put items in or take them back (provenance is not tracked,
+  as for chests).
+- The **host's** end of day sells the host's bins, which hold everything every player put in. Its payment goes into the pool
+  with the host's perks (`bin_value` applies the seller's perks, e.g. Back in Vogue). Items the host did not hold yet (a request
+  still in flight) stay in the bin and sell the next day.
+- A **guest's** end of day also runs `sell_shipping_bin_items()` on its replica. Its payment is dropped by the wallet (the
+  first gold change of an end-of-day sequence on a guest is that payment), so nothing is paid twice. The guest's end-of-day
+  summary shows what its own copy held, which may differ from what the host really sold.
+- The emptying of the replica by that guest's end of day is not a player's move: it is not sent to the host. The guest asks the
+  host for the bin again (`chest_open`) and shows the host's contents, so the bin is not shown empty while the host still holds
+  its items. A host broadcast that arrives between the game's emptying and the guest's next tick replaces the slot as it is
+  (no "take back" of items the player never had).
+- Order does not matter: whoever sleeps first, the host's sale happens once, when the host's own end of day runs.
+- Limitation: if the host never ends the day, nothing is sold; items put in after the host's sale wait for the next day.
 
 ## Chests: protocol
 
@@ -168,8 +174,8 @@ through the player record. `store.purchase`, `store.stock` and `items.give` are 
 7. `instance_destroy` inside `game.save_guard` is honoured before the game runs `store_loose_items_as_lost()` in the same call.
 8. `random_set_seed` followed by `randomize()` leaves no lasting effect; the hooks `dungeon.treasure_chest` and
    `resource.node_picked` fire before the respective rolls (as the hook documentation states).
-9. `end_of_day_status` is set while the end-of-day sequence changes containers (used to ignore the game's own bin changes
-   on guests; bins are skipped anyway).
+9. `end_of_day_status` or `end_of_day_sequence` is set while the end-of-day sequence changes containers (used to ignore the
+   game's own bin changes on guests and to recognise the shipping payment, see SYNC-WALLET.md).
 10. JSON `null` in a parsed item may arrive as `undefined` or `pointer_null`; `is_nullish` is used everywhere.
 11. `mistrimulti_player_load/store` and `r.player_sessions[slot]` keep their meaning, and storing a record with the same revision
     is accepted by the guest's next upload.
@@ -189,7 +195,7 @@ through the player record. `store.purchase`, `store.stock` and `items.give` are 
   returns the items a moment later).
 - Entries in a location other than the host's are only spawned when someone enters it.
 - Furniture placement/removal is not synced here; removing a chest on a guest drops its replica contents as private items.
-- Shipping-bin contents are lost if the guest leaves without sleeping.
+- Shipping bins are sold by the host only: nothing is sold if the host never ends the day (see Shipping bins).
 
 ## In-game checklist
 
@@ -203,7 +209,9 @@ through the player record. `store.purchase`, `store.stock` and `items.give` are 
 7. Drop an item on the farm as the guest; the host sees it after about 2 s; both walk to it: only one receives it.
 8. F9 with a stack in hand next to the other player; only they can pick it up; walk away from a refused give.
 9. Sleep with unclaimed items on the ground: they are in the host's lost items next day, nothing is left on guests.
-10. Shipping bins: put items in the host's and the guest's bins, sleep: each is paid for their own items only, nobody for the other's.
+10. Shipping bins: put items in the host's and the guest's bins; both see all of them. The host sleeps: the whole content is sold
+    once and the gold goes to the shared pool (every HUD changes by the same amount). The guest then sleeps: no extra gold.
+    Repeat with the guest sleeping first.
 11. Break a rock and open a dungeon treasure chest on both players' games (same node, same day): same loot; random drops
     elsewhere still vary.
 12. `mistrimulti.containers` and `mistrimulti.drops` (debug agent) show chests/synced/transactions and table/tracked/pending.

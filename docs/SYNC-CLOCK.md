@@ -65,8 +65,8 @@ After its own new day a guest that wakes before the host waits at 6 am until the
   (`ARI.last_bed_used`, the "slept last minute" fact) and shows a "Sleeping / Get up" popup. The popup pauses
   this game (its clock stops, as when asleep). "Get up" or Back closes it and cancels.
 - **eod**: committed. Set by `player.pass_out`, by the end-of-day menu opening (`ui.menu_opened`, `Menu.Eod`), or
-  when the mod starts the sleep scene. Cannot be cancelled: the game has already run `end_day()` (shipping bins
-  sold, the player's clock set to 2 am).
+  when the mod starts the sleep scene. Cannot be cancelled: the game has already run `end_day()` (the player's clock set to 2 am; the shipping
+  bins are sold a moment later by the end-of-day menu, by the host only in effect, see docs/SYNC-WALLET.md).
 - States carry the day number (`total_days()`), so a state is never counted for another day.
 
 ### The host's decision
@@ -168,8 +168,9 @@ These come from the game's scripts and the MMAPI documentation and could not be 
 
 ## Known limitations
 
-- **Shipping bins**: `end_day` sells every shipping bin on each game. If another feature synchronises bin contents,
-  every game would sell the same items. Bins must be per player or sold only on the host (chests area).
+- **Shipping bins**: every game runs the end-of-day sale (`sell_shipping_bin_items`) on its own copy of the bins. Bins are
+  synced and sold once by the **host**; a guest's payment is dropped by the shared wallet (docs/SYNC-WALLET.md,
+  docs/SYNC-CONTAINERS.md).
 - **World simulation**: each game still runs its own `new_day()` (crops, NPCs, forageables). The grid day is
   seeded from the save and the day, so it usually matches, and terrain is re-sent, but other world state that
   differs is not reconciled here.

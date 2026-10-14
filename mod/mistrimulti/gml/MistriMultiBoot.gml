@@ -72,6 +72,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.ranch", mistrimulti_ranch_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.guestsave", mistrimulti_guestsave_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.import_character", mistrimulti_guestsave_import, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.wallet", mistrimulti_wallet_debug, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriMulti 0.2.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -88,6 +89,7 @@ function mistrimulti_register_events() {
     mistrimulti_drops_register_events();
     mistrimulti_ranch_register_events();
     mistrimulti_progress_register_events();
+    mistrimulti_wallet_register_events();
 }
 
 function mistrimulti_room_key() {
@@ -144,6 +146,7 @@ function mistrimulti_tick() {
         mistrimulti_drops_tick();
         mistrimulti_ranch_tick();
         mistrimulti_farm_tick();
+        mistrimulti_wallet_tick();
     } else {
         mistrimulti_remove_ghosts();
     }
@@ -332,6 +335,9 @@ function mistrimulti_register() {
     mmapi_on("game.room_changed", mistrimulti_room_changed);
     mmapi_on("save.game_saving", mistrimulti_progress_game_saving);
     mmapi_on("save.game_loaded", mistrimulti_progress_game_loaded);
+    mmapi_on("save.game_saving", mistrimulti_wallet_game_saving);
+    mmapi_on("save.game_loaded", mistrimulti_wallet_game_loaded);
+    mmapi_filter("player.gold_delta", mistrimulti_wallet_gold_delta);
     mmapi_guard("dialogue.romance_prompt_guard", mistrimulti_romance_prompt_guard);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);

@@ -40,8 +40,10 @@ Implemented:
   money, skill XP, perks, spells, friendship points and relationship status.
 - Guests load their hosted-world record on reconnect. New guests start with the game's
   starter inventory and customize their character before publishing progress.
-- Host-owned chests, items on the ground and F9 gifts that never duplicate or lose items; shipping bins stay per
-  player (`docs/SYNC-CONTAINERS.md`, experimental and not yet run in the game).
+- Host-owned chests, items on the ground and F9 gifts that never duplicate or lose items
+  (`docs/SYNC-CONTAINERS.md`, experimental and not yet run in the game).
+- One shared gold pool for the whole world, owned by the host, and shared shipping bins sold once by the host
+  (`docs/SYNC-WALLET.md`, not yet run in the game).
 - Per-player progress (recipes, almanac, mail, personal quests, romance and children, cosmetics, counters) is stored on the host
   beside each player's record, committed with the host's save, and one villager can be romanced by one player at a time
   (`docs/SYNC-PROGRESS.md`).
