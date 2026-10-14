@@ -18,6 +18,10 @@ function __mistrimulti_runtime() {
     return global.__mistrimulti;
 }
 
+function __mistrimulti_init_stop(reason) {
+    try { mmapi_log_warn("mistrimulti", "Multiplayer not started: " + reason); mmapi_log_flush("mistrimulti"); } catch (e) {}
+}
+
 function mistrimulti_initialize() {
     var r = __mistrimulti_runtime();
     r.initialized = true;
@@ -25,18 +29,18 @@ function mistrimulti_initialize() {
     mmapi_log_info("mistrimulti", "Data directory: " + mmapi_mod_data_dir("mistrimulti"));
     mmapi_log_flush("mistrimulti");
     var control = mmapi_mod_data_dir("mistrimulti") + "/control.json";
-    if (!file_exists(control)) return;
+    if (!file_exists(control)) { __mistrimulti_init_stop("control.json not found at " + control); return; }
     var cfg = try_read_json_file(control);
-    if (!is_struct(cfg) || cfg[$ "enabled"] != true) return;
-    if (cfg[$ "mode"] != "host" && cfg[$ "mode"] != "join") return;
-    if (!is_real(cfg[$ "id"]) || cfg.id < 0 || cfg.id > 7 || floor(cfg.id) != cfg.id) return;
-    if ((cfg.mode == "host") != (cfg.id == 0)) return;
-    if (!is_string(cfg[$ "epoch"]) || !is_string(cfg[$ "bridge"])) return;
+    if (!is_struct(cfg) || cfg[$ "enabled"] != true) { __mistrimulti_init_stop("control.json is unreadable or not enabled"); return; }
+    if (cfg[$ "mode"] != "host" && cfg[$ "mode"] != "join") { __mistrimulti_init_stop("control.json has no valid mode"); return; }
+    if (!is_real(cfg[$ "id"]) || cfg.id < 0 || cfg.id > 7 || floor(cfg.id) != cfg.id) { __mistrimulti_init_stop("control.json has an invalid player id"); return; }
+    if ((cfg.mode == "host") != (cfg.id == 0)) { __mistrimulti_init_stop("mode " + string(cfg.mode) + " does not match player id " + string(cfg.id)); return; }
+    if (!is_string(cfg[$ "epoch"]) || !is_string(cfg[$ "bridge"])) { __mistrimulti_init_stop("control.json has no epoch or bridge"); return; }
     // Bridge paths are confined to this mod's own data folder.
     var native_root = mmapi_mod_data_dir("mistrimulti") + "/bridge_";
     var root = string_replace_all(native_root, "\\", "/");
     var bridge = string_replace_all(cfg.bridge, "\\", "/");
-    if (string_lower(bridge) != string_lower(root + string(cfg.id))) return;
+    if (string_lower(bridge) != string_lower(root + string(cfg.id))) { __mistrimulti_init_stop("bridge path [" + bridge + "] differs from the expected [" + root + string(cfg.id) + "]"); return; }
     r.boot_stage = "bridge directory";
     r.id = cfg.id;
     r.epoch = cfg.epoch;
@@ -105,6 +109,10 @@ function mistrimulti_room_key() {
 
 function mistrimulti_tick() {
     var r = __mistrimulti_runtime();
+    if (!variable_struct_exists(r, "tick_seen")) {
+        r.tick_seen = true;
+        try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
+    }
     // Multiplayer starts only after the player picked the multiplayer save space.
     if (!r.initialized && !__mistrimulti_savespace().active) return;
     if (!r.initialized) {
