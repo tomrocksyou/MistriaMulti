@@ -6,14 +6,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y nasm binutils
+      - run: python3 scripts/lint-asm.py .
       - run: sh scripts/build-linux.sh
       - run: python3 tests/test_transport.py build/mistrimulti-helper-linux
       - run: python3 tests/test_packet_faults.py build/mistrimulti-helper-linux
+      - name: Launcher and manager, natively on Linux with a fake game
+        run: python3 tests/test_launcher_linux.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux build/mistrimulti-manager
+      - run: python3 tests/test_world_linux.py build/mistrimulti-manager
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-linux-x64
           path: |
             build/mistrimulti-helper-linux
+            build/mistrimulti-launcher
+            build/mistrimulti-manager
             build/mistrimulti-steam-id-linux
             LICENSE
             CONTACT.md

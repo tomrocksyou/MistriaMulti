@@ -22,6 +22,19 @@
    syscall argument, and SYSCALL clobbers RCX and R11. This is different from the
    normal System V userspace function-call convention.
 
+## The Linux launcher and manager
+
+`linux/launcher.asm` and `linux/manager.asm` are the Linux twins of `launcher/launcher.asm` and the manager window; they use the
+same routine convention (`abi.inc`) over raw syscalls. The pieces:
+
+- `linux/sys.inc`: syscall wrappers (`sys_*` return -errno), the bounded string builder (`pb_start` / `pb_str` / `pb_int` /
+  `pb_end`), files and directories, UTC time stamps, `spawn` (fork + `PR_SET_PDEATHSIG` + dup2 + execve / PATH search).
+- `common/textutil.inc`: validators and parsers shared with the Windows build (`v_ipv4`, `v_room`, `a2i`, `wf_valid_name`...).
+- `linux/config.inc`: where the game keeps its files, and `launcher.cfg` reading (strict validation) and writing.
+- `linux/sha256.inc`: SHA-256 (the Windows build asks bcrypt). Follow `sha_block`: the big sigmas are written as nested rotates
+  to fit in three temporary registers.
+- `linux/net.inc`: the world download client, interface and Tailscale scan, discovery query.
+
 ## Memory and performance
 
 `helper/steam_windows.asm` and `helper/steam_linux.asm` load the installed game's

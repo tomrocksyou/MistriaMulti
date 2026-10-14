@@ -82,6 +82,34 @@ being stopped when the launcher is killed, the host's discovery responder (valid
 launcher. Build with `sh scripts/build-launcher.sh` and `sh scripts/build-updater.sh`. `python3 scripts/lint-asm.py .`
 rejects `[label+register]` addresses, which crash 64-bit Windows programs.
 
+## Linux launcher and manager checks
+
+`tests/test_launcher_linux.py` runs the native Linux `mistrimulti-launcher` and `mistrimulti-manager` against a fake game
+(`tests/fakegame/fakegame_linux.asm`, an ELF written in assembly) with no Wine and no display. It needs only the build from
+`sh scripts/build-linux.sh`:
+
+```sh
+python3 tests/test_launcher_linux.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux build/mistrimulti-manager
+python3 tests/test_world_linux.py build/mistrimulti-manager
+```
+
+It ports every case of the Windows suite: helper start and cleanup, `control.json` lifecycle, the helper's exact command line,
+exit-code pass-through (including a game killed by a signal and SIGTERM/SIGINT sent to the launcher), the stable identity (plus a
+fake Steam identity probe that prints rubbish, hangs or fails), the rolling backup (newest 10 kept, foreign folders untouched),
+every invalid-configuration fallback including a missing, non-executable or instantly exiting helper and an unknown game folder,
+`--mistrimulti-direct`, other programs, Proton style and `PATH` game commands, the `--configure` prompts, 40 fuzzed
+configuration files, the helper dying with the launcher (`PR_SET_PDEATHSIG`), the discovery responder (valid 64-byte queries
+only), the world server (newest valid save, SHA-256, junk requests, a client that resets the connection, a silent client) and the
+download client against it (seven sizes up to 5 MB), the backup folder date arithmetic against Python's `gmtime`, a guest refreshing the world at start, the manager's scan with a fake host and a
+fake `tailscale`, `host`, `join` (by IP, interactive, every bad input), `steam-setup` and `save-solo`, and how the game folder
+is found (`~/.config`, `XDG_CONFIG_HOME`, Steam `compatdata`, `STEAM_COMPAT_DATA_PATH`) including the Proton `C:/...` bridge path.
+`tests/test_world_linux.py` is the native twin of `tests/test_world.py` (the same cases against the manager's `--fetch`).
+The tests use fixed ports 7775/7776 (the protocol's discovery and world ports), so run one suite at a time; inside a private
+network namespace (`unshare -n`, loopback up) several can run side by side. `ONLY=test_host,test_fuzz python3 tests/test_launcher_linux.py ...` runs just those tests.
+
+Not covered: the real game on a real Steam Deck, the real Linux or Proton game's save folder, a real Steam identity probe,
+and the real Tailscale output. Those need a device.
+
 ## World transfer checks
 
 `tests/test_world.py` runs the download client (`MistriMulti.exe --fetch <ip> <folder> <result file>`) against a fake host:

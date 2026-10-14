@@ -300,7 +300,7 @@ FN mp_tailscale
 .ok:
     mov [rdi+rcx], al
     inc ecx
-    cmp ecx, 15
+    cmp ecx, 16                       ; 15 characters is the longest address (100.101.102.103); the 16th must be the closing quote
     jb .cp
     jmp .next
 .endtok:

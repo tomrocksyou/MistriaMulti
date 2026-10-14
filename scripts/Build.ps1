@@ -79,6 +79,17 @@ if ($Target -in @('Linux','Both')) {
     & wsl -d Ubuntu -- ld @taskStripFlags $taskWslObject -o $taskWslOutput
     if ($LASTEXITCODE -ne 0) { throw 'Linux linking failed. WSL Ubuntu with binutils is required.' }
     Write-Host 'Linux helper built.'
+    foreach ($taskProgram in @('launcher','manager')) {
+        $taskProgramObject = Join-Path $taskBuildRoot "$taskProgram-linux.o"
+        & $taskNasm -f elf64 @taskDebugFlags -I $taskIncludes -I ((Join-Path $taskProjectRoot 'common').Replace('\','/') + '/') -I ((Join-Path $taskProjectRoot 'linux').Replace('\','/') + '/') (Join-Path $taskProjectRoot "linux\$taskProgram.asm") -o $taskProgramObject
+        if ($LASTEXITCODE -ne 0) { throw "Linux $taskProgram assembly failed." }
+        $taskWslProgramObject = (& wsl -d Ubuntu -- wslpath -a $taskProgramObject.Replace('\','/')).Trim()
+        $taskProgramOutput = (Join-Path $taskBuildRoot "mistrimulti-$taskProgram").Replace('\','/')
+        $taskWslProgramOutput = (& wsl -d Ubuntu -- wslpath -a $taskProgramOutput).Trim()
+        & wsl -d Ubuntu -- ld @taskStripFlags $taskWslProgramObject -o $taskWslProgramOutput
+        if ($LASTEXITCODE -ne 0) { throw "Linux $taskProgram linking failed." }
+    }
+    Write-Host 'Linux launcher and manager built.'
     $taskSteamObject = Join-Path $taskBuildRoot 'steam-linux.o'
     $taskDebugFlags = if ($Release) { @() } else { @('-g','-F','dwarf') }
     & $taskNasm -f elf64 @taskDebugFlags -I $taskIncludes (Join-Path $taskProjectRoot 'helper\steam_linux.asm') -o $taskSteamObject
