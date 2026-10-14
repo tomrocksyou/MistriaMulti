@@ -15,7 +15,7 @@ from event_sim import GmlNode, World
 import gml_subset as gml
 from ranch_fake import (A, G, Fake, FARM, HOME, BARN, LOCATION_NAMES, CHICKEN, COW, SMALL, LARGE, ITEM_HAY, ITEM_TREAT, ITEM_APPLE, ITEM_CHAIR,
                         ITEM_LAMP, ITEM_BP, ITEM_FLOOR_A, ITEM_FLOOR_B, ITEM_WALL_A, ITEM_WALL_B, ITEM_PET_TREAT, ITEM_SWORD,
-                        ITEM_EGG, ITEM_MILK, ITEM_HONEY, O_CHAIR, O_LAMP, O_BARN, O_TABLE, O_APIARY, USE_NONE, USE_PLACE)
+                        ITEM_EGG, ITEM_MILK, ITEM_HONEY, O_CHAIR, O_LAMP, O_BARN, O_TABLE, O_APIARY, USE_PLACE)
 
 PLAN = {
     "buildings": [(72, 52, 11, LARGE, 4), (100, 52, 12, SMALL, 4)],
@@ -280,7 +280,7 @@ def test_treat_and_manger():
         press(world.games[1].node, "misc_local/place_animal_feed", G(left=True))
         settle(world, 2500)
     assert all(slot is not None for slot in host.buildings[0].stable.inventory)
-    assert g1.items[ITEM_HAY] == 2 or g1.items[ITEM_HAY] == 5 - 0 or True
+    assert g1.items[ITEM_HAY] == 5, "the refusal for a full manger must be free (the last of four attempts)"
     assert any("full" in n for n in g1.notes), g1.notes
     assert_clean(world)
     print("PASS: breeding treat and manger: validated by the host, pairing replicated, arrays edited in place, refusals are free")
