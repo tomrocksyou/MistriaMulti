@@ -134,6 +134,15 @@ function mistrimulti_tick() {
             } else { r.mask = 0; }
         } else { r.mask = 0; }
     }
+    if (r.ticks mod 900 == 1) {
+        try {
+            var st_text = is_struct(r.status) ? json_stringify(r.status) : "none";
+            mmapi_log_warn("mistrimulti", "status: mode=" + r.mode + " id=" + string(r.id) + " mask=" + string(r.mask)
+                + " player_ready=" + string(r.player_ready) + " pending=" + string(r.character_pending)
+                + " helper=" + st_text);
+            mmapi_log_flush("mistrimulti");
+        } catch (e) {}
+    }
     mistrimulti_player_data_tick();
     mistrimulti_character_tick();
     mistrimulti_guestsave_tick();
