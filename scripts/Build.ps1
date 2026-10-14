@@ -9,6 +9,7 @@ if (-not $taskNasm) {
 }
 if (-not (Test-Path -LiteralPath $taskNasm)) { throw 'Install NASM and add it to PATH.' }
 $taskIncludes = (Join-Path $taskProjectRoot 'helper\include').Replace('\','/') + '/'
+$taskSha = (Join-Path $taskProjectRoot 'linux').Replace('\','/') + '/'   # sha256.inc is shared with the helper
 if ($Target -in @('Windows','Both')) {
     $taskVswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $taskVsRoot = & $taskVswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -23,12 +24,12 @@ if ($Target -in @('Windows','Both')) {
     if (-not $taskSdk) { throw 'Install a Windows SDK.' }
     $taskObject = Join-Path $taskBuildRoot 'helper-win.obj'
     $taskDebugFlags = if ($Release) { @() } else { @('-g','-F','cv8') }
-    & $taskNasm -f win64 @taskDebugFlags -I $taskIncludes (Join-Path $taskProjectRoot 'helper\windows.asm') -o $taskObject
+    & $taskNasm -f win64 @taskDebugFlags -I $taskIncludes -I $taskSha (Join-Path $taskProjectRoot 'helper\windows.asm') -o $taskObject
     if ($LASTEXITCODE -ne 0) { throw 'NASM Windows assembly failed.' }
     $taskExecutable = Join-Path $taskBuildRoot 'mistrimulti-helper.exe'
     $taskLibraries = Join-Path $taskSdk.FullName 'um\x64'
     $taskArguments = @('/nologo','/machine:x64','/subsystem:console','/entry:mistria_main','/nodefaultlib','/incremental:no',
-        "/out:$taskExecutable", $taskObject, "/libpath:$taskLibraries", 'kernel32.lib','ws2_32.lib','shell32.lib')
+        "/out:$taskExecutable", $taskObject, "/libpath:$taskLibraries", 'kernel32.lib','ws2_32.lib','shell32.lib','bcrypt.lib')
     if (-not $Release) { $taskArguments += '/debug' }
     & $taskLinker @taskArguments
     if ($LASTEXITCODE -ne 0) { throw 'Windows linking failed.' }
@@ -70,7 +71,7 @@ if ($Target -in @('Windows','Both')) {
 if ($Target -in @('Linux','Both')) {
     $taskObject = Join-Path $taskBuildRoot 'helper-linux.o'
     $taskDebugFlags = if ($Release) { @() } else { @('-g','-F','dwarf') }
-    & $taskNasm -f elf64 @taskDebugFlags -I $taskIncludes (Join-Path $taskProjectRoot 'helper\linux.asm') -o $taskObject
+    & $taskNasm -f elf64 @taskDebugFlags -I $taskIncludes -I $taskSha (Join-Path $taskProjectRoot 'helper\linux.asm') -o $taskObject
     if ($LASTEXITCODE -ne 0) { throw 'NASM Linux assembly failed.' }
     $taskWslObject = (& wsl -d Ubuntu -- wslpath -a $taskObject.Replace('\','/')).Trim()
     $taskLinuxOutput = (Join-Path $taskBuildRoot 'mistrimulti-helper-linux').Replace('\','/')
