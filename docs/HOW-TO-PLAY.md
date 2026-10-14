@@ -5,7 +5,7 @@ Co-op for Fields of Mistria: one player hosts their farm, friends join it. Every
 ## What you need
 
 - Fields of Mistria on Steam.
-- **MOMI** (Mods of Mistria Installer): https://github.com/Garethp/Mods-of-Mistria-Installer
+- **MOMI** (Mods of Mistria Installer): https://github.com/Garethp/Mods-of-Mistria-Installer/releases
 - **Tailscale** (free), so your computers can reach each other over the Internet: https://tailscale.com/download
   Install it on every computer, log in, and invite your friends to your Tailscale network (or share your computer with them
   from the Tailscale admin page). Players on the same home network can skip Tailscale.

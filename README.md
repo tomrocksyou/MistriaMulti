@@ -8,7 +8,7 @@ Made for fun to play with friends, so expect the odd bug.
 
 You need:
 - Fields of Mistria on Steam
-- [MOMI](https://github.com/Garethp/Mods-of-Mistria-Installer) (the mod installer)
+- [MOMI](https://github.com/Garethp/Mods-of-Mistria-Installer/releases) (the mod installer)
 - [Tailscale](https://tailscale.com/download), so you and your friends can reach each other (not needed on the same home network)
 
 Then grab the latest download from **Releases** (on the right).

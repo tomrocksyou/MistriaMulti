@@ -20,3 +20,4 @@ foreach ($taskNotice in @('LICENSE','CONTACT.md')) {
 }
 Write-Host "Copied MistriaMulti to $taskDestination"
 Write-Host 'Open MOMI, select MistriaMulti, and click Install.'
+Write-Host 'No MOMI yet? Get it here: https://github.com/Garethp/Mods-of-Mistria-Installer/releases'

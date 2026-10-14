@@ -383,9 +383,11 @@ fi
 if [ "$MODDONE" = 1 ]; then
     say ''
     say 'One more step for the mod: open MOMI (Mods of Mistria installer), select MistriaMulti and click Install.'
+    say 'No MOMI yet? Get it here: https://github.com/Garethp/Mods-of-Mistria-Installer/releases'
 else
     say ''
     say "To install the mod: open MOMI (Mods of Mistria installer), add the folder $SRC/mod/mistrimulti, and click Install."
+    say 'No MOMI yet? Get it here: https://github.com/Garethp/Mods-of-Mistria-Installer/releases'
 fi
 say ''
 say 'That is all the setup. Start Fields of Mistria from Steam (press Play), choose New Game or Load Game, then Multiplayer:'
