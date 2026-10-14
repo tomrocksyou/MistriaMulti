@@ -42,6 +42,7 @@ function mistrimulti_savespace_rebuild_menu() {
                 header.preset = player_animation_assets_deserialize(header.preset);
                 header.load_bundle = load_bundle;
                 header.path = path;
+                header.farm_name = string(header.farm_name) + (__mistrimulti_savespace().active ? "  [Multi]" : "  [Single]");
                 Setup.load_menu_data.push(header);
             } catch (e) { fail = true; }
         }
@@ -59,8 +60,8 @@ function mistrimulti_savespace_set(multiplayer) {
     vault_close_all_vaults();
     CONFIG_DIRECTORY = multiplayer ? s.solo_dir + "/multiplayer" : s.solo_dir;
     Setup.save_manager = new SaveManager();
-    mistrimulti_savespace_rebuild_menu();
     s.active = multiplayer;
+    mistrimulti_savespace_rebuild_menu();
     mmapi_log_info("mistrimulti", (multiplayer ? "Multiplayer" : "Singleplayer") + " save space: " + CONFIG_DIRECTORY);
     mmapi_log_flush("mistrimulti");
 }
@@ -79,8 +80,8 @@ function mistrimulti_savespace_try_set(multiplayer) {
     }
 }
 
-function mistrimulti_savespace_needs_helper() {
-    var popup = popup_creator("mistrimulti/needs_helper_title", "mistrimulti/needs_helper_body");
+function mistrimulti_savespace_popup(title_key, body_key) {
+    var popup = popup_creator(title_key, body_key);
     popup.create_button("misc_local/cancel");
     popup.spawn();
 }
@@ -98,7 +99,8 @@ function mistrimulti_savespace_choose(kind, arg) {
 function mistrimulti_savespace_chosen(kind, multiplayer, arg) {
     var s = __mistrimulti_savespace();
     s.choosing = false;
-    if (multiplayer && !mistrimulti_savespace_armed()) { mistrimulti_savespace_needs_helper(); return; }
+    if (multiplayer && !mistrimulti_game_supported()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/offline_version_body"); return; }
+    if (multiplayer && !mistrimulti_savespace_armed()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/needs_helper_body"); return; }
     if (!mistrimulti_savespace_try_set(multiplayer)) return;
     if (kind == "new") s.orig_enter_game(arg);
     else s.orig_transition_to(Menu.Load);
@@ -147,7 +149,9 @@ function mistrimulti_title_entered(ctx) {
     var rt = __mistrimulti_runtime();
     rt.enabled = false;
     rt.initialized = false;
-    if (s.active) mistrimulti_savespace_try_set(false);
+    if (s.active) { mistrimulti_savespace_try_set(false); return; }
+    try { mistrimulti_savespace_rebuild_menu(); }   // tag the solo list with [Single]
+    catch (e) { mmapi_log_error("mistrimulti", "Could not label the solo save list: " + string(e)); }
 }
 
 function mistrimulti_local_missing(value, ctx) {
@@ -155,8 +159,9 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/choose_mode": return "Singleplayer or Multiplayer?";
         case "mistrimulti/singleplayer": return "Singleplayer";
         case "mistrimulti/multiplayer": return "Multiplayer";
-        case "mistrimulti/needs_helper_title": return "Multiplayer isn't running";
-        case "mistrimulti/needs_helper_body": return "Close the game and start it with Play.bat to play multiplayer.";
+        case "mistrimulti/offline_title": return "Multiplayer is offline";
+        case "mistrimulti/offline_version_body": return "The game was updated and MistriMulti has not been updated for it yet.";
+        case "mistrimulti/needs_helper_body": return "Multiplayer is not set up. Run Play.bat once, then start the game from Steam.";
     }
     return undefined;
 }

@@ -342,6 +342,7 @@ function mistrimulti_register() {
     mmapi_on("game.room_changed", mistrimulti_room_changed);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
+    mmapi_on("ui.draw_gui", mistrimulti_draw_status);
     mmapi_filter("local.missing", mistrimulti_local_missing);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
 }

@@ -5,11 +5,38 @@ param(
     [ValidateRange(1,65535)][int]$Port = 7777,
     [ValidateRange(0,65535)][int]$LocalPort = 0,
     [ValidateRange(0,7)][int]$PlayerId = 0,
-    [string]$RoomCode = ''
+    [string]$RoomCode = '',
+    [switch]$FromSteam,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$GameCommand
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Find-Game.ps1')
 . (Join-Path $PSScriptRoot 'SaveGuard.ps1')
+
+# Steam's launch option runs "SteamLaunch.cmd %command%": this script then starts the helper and the game.
+# -FromSteam must never stop the game from starting, so any failure falls back to a plain solo launch.
+$script:taskGameLaunched = $false
+function Start-GameDirect {
+    param([string[]]$Command)
+    $script:taskGameLaunched = $true
+    $taskExe = $Command[0]
+    $taskRest = @()
+    if ($Command.Count -gt 1) { $taskRest = @($Command[1..($Command.Count - 1)] | Where-Object { $_ -ne '--mistrimulti-direct' }) }
+    if ($taskRest.Count -gt 0) { Start-Process -FilePath $taskExe -ArgumentList $taskRest -WorkingDirectory (Split-Path -Parent $taskExe) -Wait }
+    else { Start-Process -FilePath $taskExe -WorkingDirectory (Split-Path -Parent $taskExe) -Wait }
+}
+trap {
+    if ($FromSteam -and -not $script:taskGameLaunched -and $GameCommand) {
+        Write-Host ("MistriMulti could not start, launching the game without multiplayer: " + $_)
+        Start-GameDirect $GameCommand
+        exit 0
+    }
+    break
+}
+if ($FromSteam) {
+    try { Start-Transcript -Path (Join-Path $env:LOCALAPPDATA 'FieldsOfMistria\mod_data\mistrimulti\launcher.log') -Force | Out-Null } catch {}
+    if ($GameCommand -contains '--mistrimulti-direct') { Start-GameDirect $GameCommand; exit 0 }
+}
 $GameDirectory = Find-MistriMultiGame $GameDirectory
 $taskProjectRoot = Split-Path -Parent $PSScriptRoot
 $taskHelper = Join-Path $taskProjectRoot 'build\mistrimulti-helper.exe'
@@ -24,6 +51,20 @@ if (Test-Path -LiteralPath $taskConfigPath) {
     try { $taskSaved = Get-Content -LiteralPath $taskConfigPath -Raw | ConvertFrom-Json } catch { $taskSaved = $null }
 }
 $taskReenter = $false
+if ($FromSteam) {
+    $taskValid = $false
+    if ($taskSaved -and $taskSaved.mode -in @('host','join') -and ([string]$taskSaved.roomCode) -match '^[0-9a-fA-F]{8}$') {
+        $taskAddr = $null
+        if ($taskSaved.mode -eq 'host') { $taskValid = $true }
+        elseif ([Net.IPAddress]::TryParse([string]$taskSaved.hostAddress,[ref]$taskAddr) -and [int]$taskSaved.playerId -ge 1 -and [int]$taskSaved.playerId -le 7) { $taskValid = $true }
+    }
+    if (-not $taskValid) {
+        Write-Host 'Multiplayer is not set up yet (run Play.bat once). Starting the game normally.'
+        Start-GameDirect $GameCommand
+        exit 0
+    }
+    $Mode = $taskSaved.mode
+}
 if (-not $Mode) {
     if ($taskSaved -and $taskSaved.mode -in @('host','join')) {
         $taskLast = if ($taskSaved.mode -eq 'host') { 'host a game' } else { "join $($taskSaved.hostAddress)" }
@@ -65,6 +106,9 @@ if ($RoomCode -notmatch '^[0-9a-fA-F]{8}$') { throw 'The room code must contain 
 New-Item -ItemType Directory -Path (Split-Path -Parent $taskConfigPath) -Force | Out-Null
 $taskRemember = @{ mode = $Mode; hostAddress = $HostAddress; port = $Port; playerId = $PlayerId; roomCode = $RoomCode }
 [IO.File]::WriteAllText($taskConfigPath, ($taskRemember | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
+if (-not $FromSteam) {
+    Write-Host ('Tip: to start multiplayer from the Play button in Steam, set the game''s launch option to:  "' + (Join-Path (Split-Path -Parent $PSScriptRoot) 'SteamLaunch.cmd') + '" %command%')
+}
 $taskModData = (Join-Path $env:LOCALAPPDATA 'FieldsOfMistria\mod_data\mistrimulti').Replace('\','/')
 $taskBridge = "$taskModData/bridge_$PlayerId"
 New-Item -ItemType Directory -Path $taskBridge -Force | Out-Null
@@ -131,14 +175,19 @@ try {
     Write-Host 'Load a save in the game. F8 shows multiplayer status. Keep this launcher open.'
     Start-Sleep -Milliseconds 400
     if ($taskHelperProcess.HasExited) { throw 'The helper could not start. Check the port and run the helper in a terminal for its error.' }
-    Start-Process 'steam://rungameid/2142790'
-    $taskDeadline = (Get-Date).AddMinutes(2)
-    do {
-        Start-Sleep -Milliseconds 500
-        $taskGame = Get-Process -Name FieldsOfMistria -ErrorAction SilentlyContinue
-    } while (-not $taskGame -and (Get-Date) -lt $taskDeadline)
-    if (-not $taskGame) { throw 'The game did not start.' }
-    Wait-Process -Id $taskGame.Id
+    if ($FromSteam) {
+        Start-GameDirect $GameCommand
+    } else {
+        # The extra argument tells SteamLaunch.cmd (if installed) that this launcher already started the helper.
+        Start-Process 'steam://rungameid/2142790//--mistrimulti-direct'
+        $taskDeadline = (Get-Date).AddMinutes(2)
+        do {
+            Start-Sleep -Milliseconds 500
+            $taskGame = Get-Process -Name FieldsOfMistria -ErrorAction SilentlyContinue
+        } while (-not $taskGame -and (Get-Date) -lt $taskDeadline)
+        if (-not $taskGame) { throw 'The game did not start.' }
+        Wait-Process -Id $taskGame.Id
+    }
 } finally {
     $taskControl.enabled = $false
     [IO.File]::WriteAllText($taskControlPath, ($taskControl | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))

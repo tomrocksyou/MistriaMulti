@@ -48,7 +48,7 @@ Any failure restores the solo folder. Quitting to the title tears the session do
 - `settings.json` is also resolved through `CONFIG_DIRECTORY`, so settings changed during a multiplayer session are written
   to the multiplayer folder (solo settings are untouched).
 - Guest saves are still vetoed (`game.save_guard`) until the host-world transfer exists.
-- The helper must still be started by Play.bat (a mod cannot launch programs).
+- A mod cannot launch programs, so the helper is started by `SteamLaunch.cmd` (Steam launch option) or `Play.bat`.
 - If there are no solo saves the title screen has no Load Game button, so existing multiplayer worlds are unreachable until one solo save exists.
 - Untested: wrapping the title menu's methods, popup text injection, and teardown on quit-to-title.
 - Host-world transfer to guests (helper file transfer) is not built.

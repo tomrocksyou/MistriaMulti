@@ -50,11 +50,18 @@ are blocked during multiplayer. The host can save its farm normally. See
    Windows executable is also included under `build/` in the supplied project.
 3. Run `Install-Mod.bat`. It copies **only this project's own mod** into your game's `mods/` folder.
 4. Open MOMI, select **MistriMulti**, and click **Install**. Close the game during installation.
-5. Everyone runs `Play.bat`. It asks once whether you want to host (H) or join a friend (J), and remembers
+5. Everyone runs `Play.bat` once. It asks whether you want to host (H) or join a friend (J) and remembers
    your answer. Host: it shows an eight-digit room code that stays the same every session. Friends: enter the
-   host's reachable IPv4 address, the room code and a player number (1-7, different for each friend) once;
-   next time just press Enter to repeat.
-6. In the game choose **New Game** or **Load Game**, then **Multiplayer**. Choose **Singleplayer** for normal solo play.
+   host's reachable IPv4 address, the room code and a player number (1-7, different for each friend) once.
+   Run `Play.bat` again whenever those details change (press Enter to repeat, H or J to change).
+6. **Click Play in Steam from now on.** One time only: in Steam, right-click the game, Properties, Launch Options,
+   and paste the line `Play.bat` prints (`"<this folder>\SteamLaunch.cmd" %command%`). Steam then starts the
+   network helper with your saved details and launches the game. Without saved details the game just starts normally.
+7. A badge at the bottom right shows **Multiplayer Online** (green) or **Multiplayer Offline** (red: the game was
+   updated past the versions this mod was tested on, the helper is not running, or setup was not done).
+8. In the game choose **New Game** or **Load Game**, then **Singleplayer** or **Multiplayer**. Saves are labelled
+   `[Single]` or `[Multi]` and are kept in separate folders. After a game update, add the new version to
+   `mistrimulti_supported_versions()` in `MistriMultiStatus.gml` once you have tested the mod with it.
 
 The Windows launchers search Steam libraries for the game. To select an installation
 explicitly, pass `-GameDirectory`:
