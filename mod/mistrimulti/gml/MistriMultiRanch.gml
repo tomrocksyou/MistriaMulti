@@ -64,6 +64,7 @@ function __mistrimulti_ranch_reset(rc) {
     rc.unresolved = [];       // guest: sales whose answer was lost (decided by the next snapshot)
     rc.deferred = {};         // guest: building records for buildings that do not exist yet
     rc.retry = [];            // guest: structures that could not be placed yet
+    rc.applied = [];          // guest: placements applied for the current host session { rec, node, grid }
     rc.use = undefined;       // the item being used this frame
     rc.world_known = undefined;
     rc.world_defer = undefined;
@@ -321,6 +322,7 @@ function __mistrimulti_ranch_upsert(rc, b, rec) {
     var a = find_animal(rec.i, false);
     if (a == undefined) {
         if (find_animal(rec.i, true) != undefined) return;     // in the daycare: not shared
+        if (struct_exists(rc.inflight, "sell:" + string(rec.i))) return;     // this player just sold it
         if (!__mistrimulti_ranch_free_stall(stable)) {
             __mistrimulti_ranch_warn("A shared animal did not fit in its building.");
             return;
@@ -340,7 +342,9 @@ function __mistrimulti_ranch_upsert(rc, b, rec) {
             stable.register(a);
             if (a.is_present() && a.instance == undefined) spawn_animal(a);
         }
+        var typed = a.name;
         __mistrimulti_ranch_set_fields(a, rec);
+        if (struct_exists(rc.inflight, "rename:" + string(a.idx))) a.name = typed;     // the host has not seen the new name yet
     }
     __mistrimulti_ranch_note(rc, a, __mistrimulti_ranch_bid(b));
 }
@@ -374,6 +378,8 @@ function __mistrimulti_ranch_apply_stable(rc, rec) {
     }
     struct_remove(rc.deferred, rec.b);
     var stable = b.stable;
+    // What the player did since the last look is reported before the host's version overwrites it.
+    __mistrimulti_ranch_watch_animals(rc);
     rc.applying++;
     try {
         var keep = {};
@@ -387,11 +393,6 @@ function __mistrimulti_ranch_apply_stable(rc, rec) {
             if (!struct_exists(keep, string(here[j].idx))) array_push(extra, here[j]);
         }
         for (var k = 0; k < array_length(extra); k++) __mistrimulti_ranch_drop(rc, extra[k]);
-        // Animals this guest already took out of the barn (a sale it reported) are not in the record either.
-        var believed = struct_get_names(rc.known);
-        for (var q = 0; q < array_length(believed); q++) {
-            if (rc.known[$ believed[q]].b == rec.b && !struct_exists(keep, believed[q])) struct_remove(rc.known, believed[q]);
-        }
         stable.incubating_fetuses.clear();
         for (var f = 0; f < array_length(rec.fe); f++) {
             var e = rec.fe[f];
@@ -463,7 +464,9 @@ function __mistrimulti_ranch_session(rc) {
     var host = __mistrimulti_runtime().peers[0];
     var stream = is_struct(host) && is_struct(host[$ "ev"]) ? host.ev.s : "";
     if (stream == rc.host_stream) return;
+    if (rc.host_stream != "") __mistrimulti_ranch_revert_applied(rc);
     rc.host_stream = stream;
+    rc.retry = [];
     rc.synced = false;
     rc.known = {};
     rc.fin = undefined;
@@ -571,20 +574,23 @@ function __mistrimulti_ranch_snapshot(rc, slot) {
 function __mistrimulti_ranch_host_tick(r, rc) {
     if (r.world_path != "" && !rc.pool_loaded) __mistrimulti_ranch_pool_load(rc);
     if (GRIDS == undefined) return;
-    if (!rc.binit) __mistrimulti_ranch_scan_buildings(rc);
+    // The ledger and the building list are kept even while nobody else is here: a later joiner needs them.
+    if (!rc.binit || rc.n mod 10 == 0) __mistrimulti_ranch_scan_buildings(rc);
+    if (rc.n mod 10 == 0) __mistrimulti_ranch_watch_own(rc);
+    if (rc.n mod 40 == 15) __mistrimulti_ranch_ledger_check(rc);
     if (r.mask == 0) return;
     if (array_length(rc.snaps) > 0 && __mistrimulti_ranch_snapshot(rc, rc.snaps[0])) array_delete(rc.snaps, 0, 1);
-    if (rc.n mod 10 == 0) {
-        __mistrimulti_ranch_scan_buildings(rc);
-        __mistrimulti_ranch_scan(rc);
-        __mistrimulti_ranch_watch_own(rc);
-    }
+    if (rc.n mod 10 == 0) __mistrimulti_ranch_scan(rc);
     if (rc.n mod 20 == 5) {
         var world = __mistrimulti_ranch_world_record();
         var text = json_stringify(world);
         if (text != rc.wsent && mistrimulti_event_can_emit(2) && __mistrimulti_ranch_send("ranch_world", world, -1)) rc.wsent = text;
     }
-    if (rc.n mod 40 == 15) __mistrimulti_ranch_ledger_check(rc);
+    // Repair: a guest's own day-change work may have disturbed its copy; each barn is sent again now and then.
+    if (rc.n mod 60 == 30) {
+        var all = __mistrimulti_ranch_stables();
+        if (array_length(all) > 0) struct_remove(rc.sent, __mistrimulti_ranch_bid(all[(rc.n div 60) mod array_length(all)]));
+    }
 }
 
 // ---- host: validating guest requests -----------------------------------------------------------------
@@ -601,14 +607,14 @@ function mistrimulti_ranch_request(from, data, ctx) {
         if (a == "pet") res = __mistrimulti_ranch_do_pet(rc, data);
         else if (a == "feed") res = __mistrimulti_ranch_do_feed(rc, data);
         else if (a == "treat") res = __mistrimulti_ranch_do_treat(rc, data);
-        else if (a == "manger") res = __mistrimulti_ranch_do_manger(rc, data);
+        else if (a == "manger") res = __mistrimulti_ranch_do_manger(rc, data, from);
         else if (a == "adopt") res = __mistrimulti_ranch_do_adopt(rc, data);
         else if (a == "sell") res = __mistrimulti_ranch_do_sell(rc, data);
         else if (a == "rename") res = __mistrimulti_ranch_do_rename(rc, data);
         else if (a == "move") res = __mistrimulti_ranch_do_move(rc, data);
-        else if (a == "collect") res = __mistrimulti_ranch_do_collect(rc, data);
-        else if (a == "place") res = __mistrimulti_ranch_do_place(rc, data);
-        else if (a == "fgive") res = __mistrimulti_ranch_do_factory(rc, data);
+        else if (a == "collect") res = __mistrimulti_ranch_do_collect(rc, data, from);
+        else if (a == "place") res = __mistrimulti_ranch_do_place(rc, data, from);
+        else if (a == "fgive") res = __mistrimulti_ranch_do_factory(rc, data, from);
         else if (a == "world") res = __mistrimulti_ranch_do_world(rc, data);
     } catch (err) {
         __mistrimulti_ranch_warn("A shared request failed: " + string(err));
@@ -616,6 +622,15 @@ function mistrimulti_ranch_request(from, data, ctx) {
     }
     res.a = a;
     return res;
+}
+
+// Where a player is comes from their own frames (the room key of the boot tick): requests that act on a room
+// are accepted only from a player who is in it.
+function __mistrimulti_ranch_here(from, loc, dyn) {
+    var r = __mistrimulti_runtime();
+    if (from == r.id) return true;
+    var peer = r.peers[from];
+    return is_struct(peer) && peer[$ "room"] == location_id_to_string(loc) + ":" + string(dyn);
 }
 
 function __mistrimulti_ranch_no(why) {
@@ -694,10 +709,11 @@ function __mistrimulti_ranch_do_treat(rc, d) {
     return { ok: true, pay: __mistrimulti_ranch_pay_item(d.it) };
 }
 
-function __mistrimulti_ranch_do_manger(rc, d) {
+function __mistrimulti_ranch_do_manger(rc, d, from) {
     if (!__mistrimulti_ranch_text(d[$ "b"], 24) || !__mistrimulti_ranch_int(d[$ "sd"], 0, 1) || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
     var b = __mistrimulti_ranch_stable_by_id(d.b);
     if (b == undefined) return __mistrimulti_ranch_no("gone");
+    if (!__mistrimulti_ranch_here(from, b.prototype.location_id, b.dyn_index)) return __mistrimulti_ranch_no("not_here");
     var proto = ITEM_PROTOTYPES[d.it];
     if (proto.animal_feed == undefined || proto.animal_feed.animal_size != b.prototype.permitted_animal_size) return __mistrimulti_ranch_no("refused");
     var inventory = b.stable[$ "inventory"];
@@ -775,13 +791,15 @@ function __mistrimulti_ranch_do_move(rc, d) {
 }
 
 // Everything waiting in a barn goes to the first player who asks, once.
-function __mistrimulti_ranch_do_collect(rc, d) {
+function __mistrimulti_ranch_do_collect(rc, d, from) {
     if (!__mistrimulti_ranch_text(d[$ "b"], 24)) return __mistrimulti_ranch_no("bad_request");
+    var b = __mistrimulti_ranch_stable_by_id(d.b);
+    if (b == undefined) return __mistrimulti_ranch_no("gone");
+    if (!__mistrimulti_ranch_here(from, b.prototype.location_id, b.dyn_index)) return __mistrimulti_ranch_no("not_here");
     var items = rc.pool[$ d.b];
     if (!is_array(items) || array_length(items) == 0) return __mistrimulti_ranch_no("empty");
     rc.pool[$ d.b] = [];
-    var b = __mistrimulti_ranch_stable_by_id(d.b);
-    if (b != undefined) __mistrimulti_ranch_publish(rc, b, -1, 0);
+    __mistrimulti_ranch_publish(rc, b, -1, 0);
     return { ok: true, items: items };
 }
 
@@ -856,6 +874,7 @@ function __mistrimulti_ranch_why(why) {
     if (why == "blocked") return "Something is in the way.";
     if (why == "full") return "That is full.";
     if (why == "empty") return "";
+    if (why == "not_here") return "You are not close enough.";
     if (why == "pregnant") return "That animal is expecting.";
     if (why == "hearts") return "That animal needs more hearts first.";
     if (why == "taken") return "Another animal already took a treat.";
@@ -878,6 +897,7 @@ function mistrimulti_ranch_reply(zero, result, ctx) {
         return true;
     }
     if (p.a == "sell") struct_remove(rc.known, string(p.i));      // answered: the animal is not ours to watch any more
+    if (p.a == "world" && is_struct(rc.world_known)) rc.world_known[$ p.w] = p.v;       // answered: not a difference to report again
     if (result[$ "ok"] != true) {
         // Refused: put back what the game already took, or take back what it already gave.
         if (p.a == "sell") ARI.modify_gold(-p.g);
@@ -900,6 +920,7 @@ function mistrimulti_ranch_reply(zero, result, ctx) {
 
 function __mistrimulti_ranch_reply_effects(rc, p, result) {
     if (result[$ "xp"] == true) ARI.gain_xp(Skill.Ranching, ANIMAL_XP.feed);
+    if (p.a == "treat") __mistrimulti_ranch_say("The animal took the treat.");
     if (p.a == "adopt") {
         ARI.animal_variant_unlocks[p.kind].insert(p.variant);
         var cosmetic = ANIMAL_PROTOTYPES[p.kind].variants.get(p.variant).default_cosmetic;
@@ -999,11 +1020,16 @@ function __mistrimulti_ranch_pool_add(rc, bid, item_id, count) {
     if (array_length(list) < 16) array_push(list, { i: item_id, n: count });
 }
 
+// The host sends everything again after its own day change. A guest runs the same day change on its copy
+// and asks for the host's version of the result.
 function mistrimulti_ranch_new_day(ctx) {
-    if (!__mistrimulti_ranch_on("host")) return;
     var rc = __mistrimulti_ranch();
-    rc.sent = {};
-    rc.wsent = "";
+    if (__mistrimulti_ranch_on("host")) {
+        rc.sent = {};
+        rc.wsent = "";
+    } else if (__mistrimulti_ranch_on("join")) {
+        mistrimulti_event_emit("ranch_resync", {}, 0);
+    }
 }
 
 // Guests act through the host. The press is dropped here; the item stays in hand until the host agrees.
@@ -1012,7 +1038,11 @@ function mistrimulti_ranch_take_press(ctx) {
     var key = ctx.local_key;
     if (key != "misc_local/feed" && key != "misc_local/place_animal_feed" && key != "misc_local/give_item") return undefined;
     var rc = __mistrimulti_ranch();
-    if (rc.applying > 0 || !rc.synced) return undefined;
+    if (rc.applying > 0) return undefined;
+    if (!rc.synced) {
+        __mistrimulti_ranch_say("Waiting for the host.");
+        return false;
+    }
     try {
         if (key == "misc_local/feed") return __mistrimulti_ranch_press_feed(rc, ctx.subject);
         if (key == "misc_local/place_animal_feed") return __mistrimulti_ranch_press_manger(rc, ctx.subject);
@@ -1139,7 +1169,10 @@ function __mistrimulti_ranch_cell() {
 
 // Guest: blueprints and floor/wallpaper items are placed by the host.
 function __mistrimulti_ranch_use_remote(rc, item, use) {
-    if (!rc.synced) return undefined;
+    if (!rc.synced) {
+        __mistrimulti_ranch_say("Waiting for the host.");
+        return false;
+    }
     var data = undefined;
     if (use == ItemUse.Blueprint) {
         if (CURRENT_LOCATION_ID != LocationId.Farm) return undefined;
@@ -1168,7 +1201,7 @@ function mistrimulti_ranch_place_guard(ctx) {
         if (r.mode == "join") {
             var grid = ctx.grid;
             if (!rc.synced || GRIDS[grid.location_id] != grid) {
-                __mistrimulti_ranch_say("Furniture can only be placed in the farm and the house in multiplayer.");
+                __mistrimulti_ranch_say(rc.synced ? "Furniture can only be placed in the farm and the house in multiplayer." : "Waiting for the host.");
                 return false;
             }
             var inf = try_infusion_to_string(use.item.infusion) ?? "";
@@ -1315,6 +1348,7 @@ function __mistrimulti_ranch_place_local(rec) {
             var node = grid.write_node(rec.x, rec.y, rec.o, rec.r);
             if (node != undefined) {
                 node.infusion = rec.inf == "" ? undefined : rec.inf;
+                array_push(rc.applied, { rec: rec, node: node, grid: grid });
                 ok = true;
             } else {
                 // Already there (a snapshot after a placement we saw) counts as placed.
@@ -1322,8 +1356,11 @@ function __mistrimulti_ranch_place_local(rec) {
                 ok = ni != undefined && grid.node_object_id[ni] == rec.o;
             }
         } else {
-            ok = __mistrimulti_ranch_find_site(grid, rec.x, rec.y, rec.bp) != undefined
-                || write_blueprint_to_location(grid, rec.x, rec.y, rec.bp, item_id_to_string(rec.it));
+            ok = __mistrimulti_ranch_find_site(grid, rec.x, rec.y, rec.bp) != undefined;
+            if (!ok && write_blueprint_to_location(grid, rec.x, rec.y, rec.bp, item_id_to_string(rec.it))) {
+                array_push(rc.applied, { rec: rec, node: __mistrimulti_ranch_find_site(grid, rec.x, rec.y, rec.bp), grid: grid });
+                ok = true;
+            }
         }
     } catch (e) {
         __mistrimulti_ranch_warn("A shared placement failed: " + string(e));
@@ -1331,6 +1368,24 @@ function __mistrimulti_ranch_place_local(rec) {
     }
     rc.applying--;
     return ok;
+}
+
+// The host restarted from its save: what it placed in the previous session is not in the new one. The
+// placements this guest applied for it are taken back (the new host sends the ones that survived, if any).
+function __mistrimulti_ranch_revert_applied(rc) {
+    rc.applying++;
+    try {
+        for (var i = array_length(rc.applied) - 1; i >= 0; i--) {
+            var e = rc.applied[i];
+            if (e.node == undefined || !__mistrimulti_ranch_node_alive(e)) continue;
+            if (e.rec.k == "f") erase_object_node(e.grid, e.grid.try_node_index_for_cell(e.node.top_left_x, e.node.top_left_y));
+            else remove_blueprint_from_location(e.grid, e.rec.x, e.rec.y, e.rec.bp);
+        }
+    } catch (err) {
+        __mistrimulti_ranch_warn("Shared placements could not be taken back: " + string(err));
+    }
+    rc.applying--;
+    rc.applied = [];
 }
 
 function __mistrimulti_ranch_remove_local(rec) {
@@ -1437,9 +1492,10 @@ function __mistrimulti_ranch_retry_tick(rc) {
 }
 
 // Host: place what a guest asked for, if the game accepts it exactly as it would from the host's own hand.
-function __mistrimulti_ranch_do_place(rc, d) {
+function __mistrimulti_ranch_do_place(rc, d, from) {
     var t = d[$ "t"];
     if (!__mistrimulti_ranch_int(d[$ "l"], 0, LocationId.LEN - 1) || GRIDS[d.l] == undefined || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
+    if (!__mistrimulti_ranch_here(from, d.l, undefined)) return __mistrimulti_ranch_no("not_here");
     var grid = GRIDS[d.l];
     var proto = ITEM_PROTOTYPES[d.it];
     if (t == "f") {
@@ -1525,8 +1581,9 @@ function __mistrimulti_ranch_do_decor(rc, d, t, proto) {
 
 // ---- machines (apiary, terrarium) -----------------------------------------------------------------------------
 
-function __mistrimulti_ranch_do_factory(rc, d) {
+function __mistrimulti_ranch_do_factory(rc, d, from) {
     if (!__mistrimulti_ranch_int(d[$ "l"], 0, LocationId.LEN - 1) || GRIDS[d.l] == undefined || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
+    if (!__mistrimulti_ranch_here(from, d.l, undefined)) return __mistrimulti_ranch_no("not_here");
     var grid = GRIDS[d.l];
     if (!__mistrimulti_ranch_int(d[$ "x"], 0, grid.dims.x - 1) || !__mistrimulti_ranch_int(d[$ "y"], 0, grid.dims.y - 1)) return __mistrimulti_ranch_no("bad_request");
     var ni = grid.try_node_index_for_cell(d.x, d.y);
@@ -1632,7 +1689,8 @@ function __mistrimulti_ranch_apply_world(rc, rec) {
             PET.has_been_pat = rec.pet.p;
         }
         rc.pet_known = rec.pet.u == true && rec.pet.p;
-        rc.world_known = { fx: FARM_EXPANDED == true, hu: DECOR.size_upgrade, uf: DECOR.upper_floor == true, hv: DECOR.variant };
+        // What the host has, not what this game has: a purchase made here since is then still a difference.
+        rc.world_known = { fx: rec.fx, hu: rec.hu, uf: rec.uf, hv: rec.hv };
     } catch (e) {
         __mistrimulti_ranch_warn("The shared farm and house could not be updated: " + string(e));
     }
@@ -1646,6 +1704,7 @@ function __mistrimulti_ranch_world_message(rc, rec) {
         __mistrimulti_ranch_warn("A shared farm update was rejected.");
         return;
     }
+    __mistrimulti_ranch_watch_world(rc);
     __mistrimulti_ranch_apply_world(rc, rec);
     if (rec[$ "fin"] == true && is_real(rec[$ "sid"]) && is_real(rec[$ "sn"])) {
         rc.fin = { sid: rec.sid, sn: rec.sn };
@@ -1698,7 +1757,7 @@ function __mistrimulti_ranch_watch_world(rc) {
         var f = fields[i];
         if (now[$ f] == known[$ f]) continue;
         var give = __mistrimulti_ranch_world_cost(f, now[$ f]);
-        __mistrimulti_ranch_ask(rc, "world:" + f, { a: "world", w: f, v: now[$ f] }, { give: give });
+        __mistrimulti_ranch_ask(rc, "world:" + f, { a: "world", w: f, v: now[$ f] }, { give: give, w: f, v: now[$ f] });
     }
 }
 

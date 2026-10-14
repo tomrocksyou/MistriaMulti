@@ -28,8 +28,8 @@ class G(gml.GStruct):
 
 # ---- enumerations (values are arbitrary but distinct) ---------------------------------------------------
 
-FARM, HOME, TOWN = 0, 1, 2
-LOCATION_NAMES = {FARM: "farm", HOME: "home", TOWN: "town"}
+FARM, HOME, TOWN, BARN = 0, 1, 2, 3
+LOCATION_NAMES = {FARM: "farm", HOME: "home", TOWN: "town", BARN: "barn"}
 O_BARN, O_TABLE, O_CHAIR, O_LAMP, O_APIARY = 1, 2, 3, 4, 5
 FILLER, O_SITE_BOX = 9, 10
 ITEM_HAY, ITEM_TREAT, ITEM_APPLE, ITEM_EGG, ITEM_CHAIR, ITEM_LAMP, ITEM_BP, ITEM_FLOOR_A, ITEM_FLOOR_B, \
@@ -40,7 +40,7 @@ SMALL, LARGE = 0, 1
 CHICKEN, COW = 0, 1
 
 ENUMS = {
-    "LocationId": G(Farm=FARM, PlayerHome=HOME, Town=TOWN, LEN=3),
+    "LocationId": G(Farm=FARM, PlayerHome=HOME, Town=TOWN, Barn=BARN, LEN=4),
     "ObjectId": G(LEN=16, StableCraftingTable=O_TABLE, Apiary=O_APIARY),
     "ObjectCategory": G(Furniture=0, Building=1),
     "ItemId": G(LEN=ITEM_COUNT, Honeycomb=ITEM_HONEY),
@@ -130,7 +130,7 @@ class Fake:
         self.pet_state = G(name="Mochi", heart_points=0, has_eaten=False, has_been_pat=False, is_pet=True, idx=-1)
         self.pet_state.update(unlocked=lambda: True, pet_kind=lambda: 0)
         self.factories = make_list()
-        self.grids = A([self.make_grid(FARM, 60, 40), self.make_grid(HOME, 30, 30), self.make_grid(TOWN, 10, 10)])
+        self.grids = A([self.make_grid(FARM, 60, 40), self.make_grid(HOME, 30, 30), self.make_grid(TOWN, 10, 10), self.make_grid(BARN, 10, 10)])
         self.decor = self.make_decor()
         self.stats = G(furniture_placed=G())
         for spec in plan.get("buildings", []):
@@ -200,7 +200,7 @@ class Fake:
     def add_building(self, x, y, dyn, size, capacity, double=False):
         stable = G(stalls=make_list([None] * capacity), incubating_fetuses=make_list())
         building = G(top_left_x=x, top_left_y=y, dyn_index=dyn, object_id=O_BARN, variant=0, name=f"Barn{dyn}", stable=stable,
-                     prototype=G(player_building_kind=0, max_occupants=capacity, double_manger=double, manger_size=4,
+                     prototype=G(player_building_kind=0, max_occupants=capacity, double_manger=double, manger_size=4, location_id=BARN,
                                  permitted_animal_size=size, incubators=1))
         stable.building = building
         if double:
