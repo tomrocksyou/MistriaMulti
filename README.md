@@ -5,11 +5,15 @@ The Windows helper calls Win32/Winsock; the Linux helper, launcher and manager u
 them needs Python, .NET, Rust, a paid server, or a third-party multiplayer relay at runtime.
 GML and MOMI/MMAPI provide the supported connection to the game.
 
-## Current version: 0.1.0 experimental
+## Current version: 0.2.0 experimental
 
-The Windows game bridge has been tested with a simulated remote player.
+0.2.0 replaces the one-at-a-time event queue with the event layer (`docs/EVENT-LAYER.md`). Every player
+must run the same version; 0.1.0 and 0.2.0 games do not see each other's updates.
+
+With 0.1.0, the Windows game bridge was tested with a simulated remote player.
 The live test covers movement, drawing, room changes,
 farm requests, conflict/authority checks, save guards and disconnect expiry.
+The 0.2.0 event layer is tested against the real helpers and file bridge, but not yet in the game.
 See `docs/TESTING.md` for what these checks prove and what remains untested.
 
 Implemented:
@@ -19,7 +23,9 @@ Implemented:
   base animations, action animations, and tool attachments.
 - Host-authoritative farm soil and watering updates, conflict correction, and bounded
   terrain snapshots for joining players, room transitions, and host day changes.
-- Stop-and-wait acknowledged game events, retried by the helper, including appearance updates.
+- An event layer for synced features: batched, ordered, acknowledged events per player, blobs up to
+  256 KB delivered whole, and host-authoritative requests applied exactly once (`docs/EVENT-LAYER.md`,
+  which includes the guide for adding a synced feature). Appearance, farm terrain and player records use it.
 - Atomic game/helper file publication; bounded fragmentation and reassembly; replay rejection;
   one-second idle heartbeats; automatic helper shutdown from the Windows launcher.
 - Guest character creation uses the game's customization menu and saves an independent profile.
@@ -159,6 +165,8 @@ sh scripts/build-linux.sh
 python3 tests/test_launcher_linux.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux build/mistrimulti-manager
 python3 tests/test_world_linux.py build/mistrimulti-manager
 ```
+The event layer has its own tests (`tests/test_event_layer.py`, `tests/test_event_features.py`,
+`tests/test_event_bridge.py <helper>`); see `docs/TESTING.md`.
 Python is only used for developer tests. Both release binaries are native NASM code.
 Open `build/mistrimulti-helper.exe` in x64dbg; break on `mistria_main`, `read_local_frame`,
 `receive_fragment`, or `send_record`. Start with `docs/ASM-TOUR.md`.

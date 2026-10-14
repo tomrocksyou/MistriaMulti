@@ -10,8 +10,6 @@ function mistrimulti_player_data_initialize() {
     r.player_last_checkpoint = 0;
     r.player_request = "";
     r.player_host_epoch = "";
-    r.player_incoming = undefined;
-    r.player_outgoing = [];
     r.player_sessions = array_create(8, undefined);
     r.player_error = "";
 }

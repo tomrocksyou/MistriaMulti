@@ -38,9 +38,11 @@ function mistrimulti_watch_changes() {
         var watch = r.watches[i];
         var after = mistrimulti_terrain_tile(GRID, watch.x, watch.y);
         if (after != undefined && (after.g != watch.before.g || after.w != watch.before.w)) {
-            var kind = r.mode == "host" ? "terrain_commit" : "terrain_request";
+            // The host's own change is authoritative; a guest's is a request the host validates.
             var data = { tiles: [after], before: watch.before };
-            if (mistrimulti_emit(kind, data)) {
+            var sent = r.mode == "host" ? mistrimulti_event_emit("terrain_commit", data)
+                : mistrimulti_event_request("terrain", data) != undefined;
+            if (sent) {
                 if (r.mode == "join") r.dirty_world = true;
                 array_delete(r.watches, i, 1);
             }
@@ -83,24 +85,49 @@ function mistrimulti_apply_terrain(tile) {
     return true;
 }
 
-function mistrimulti_accept_terrain(player, data) {
+// Event kinds: "terrain" (guest request, host result), "terrain_commit" (host change), "terrain_snapshot".
+function mistrimulti_terrain_register_events() {
+    mistrimulti_event_register("terrain", { on_request: mistrimulti_terrain_request, on_result: mistrimulti_terrain_event });
+    mistrimulti_event_register("terrain_commit", { on_event: mistrimulti_terrain_event, on_peer: mistrimulti_terrain_peer });
+    mistrimulti_event_register("terrain_snapshot", { on_event: mistrimulti_terrain_event });
+}
+
+// Host only, once per request id. The result (the tile as the host now has it) goes to every guest.
+function mistrimulti_terrain_request(player, data, ctx) {
     var r = __mistrimulti_runtime();
-    if (!is_array(data[$ "tiles"]) || array_length(data.tiles) != 1 || GRIDS == undefined) return true;
+    var none = { tiles: [] };
+    var peer = r.peers[player];
+    if (player == r.id || !is_struct(peer) || peer[$ "active"] != true || !is_struct(data)) return none;
+    if (!is_array(data[$ "tiles"]) || array_length(data.tiles) != 1 || GRIDS == undefined) return none;
     var farm = GRIDS[LocationId.Farm];
-    if (farm == undefined) return true;
+    if (farm == undefined) return none;
     var tile = data.tiles[0];
     var before = data[$ "before"];
-    if (!mistrimulti_valid_tile(tile, farm) || !mistrimulti_valid_tile(before, farm)) return true;
-    var peer = r.peers[player];
-    if (peer.room != location_id_to_string(LocationId.Farm) + ":" + string(undefined)) return true;
-    if (point_distance(peer.x, peer.y, tile.x*8, tile.y*8) > 256) return true;
+    if (!mistrimulti_valid_tile(tile, farm) || !mistrimulti_valid_tile(before, farm)) return none;
+    if (peer.room != location_id_to_string(LocationId.Farm) + ":" + string(undefined)) return none;
+    if (point_distance(peer.x, peer.y, tile.x*8, tile.y*8) > 256) return none;
     var current = mistrimulti_terrain_tile(farm, tile.x, tile.y);
-    if (current == undefined) return true;
-    if (array_length(r.queue) >= 256) return false; // do not ACK an unqueued commit
+    if (current == undefined) return none;
     // Conflicting predictions are corrected to the existing host state.
     if (current.g == before.g && current.w == before.w) mistrimulti_apply_terrain(tile);
     var committed = mistrimulti_terrain_tile(farm, tile.x, tile.y);
-    return mistrimulti_emit("terrain_commit", { tiles: [committed] });
+    return committed == undefined ? none : { tiles: [committed] };
+}
+
+// Guests apply the host's commits, snapshots and request results.
+function mistrimulti_terrain_event(player, data, ctx) {
+    var r = __mistrimulti_runtime();
+    var host = r.peers[0];
+    if (player != 0 || r.mode != "join" || !is_struct(host) || host[$ "active"] != true || !is_struct(data)) return true;
+    if (!is_array(data[$ "tiles"]) || array_length(data.tiles) > 64) return true;
+    for (var i = 0; i < array_length(data.tiles); i++) mistrimulti_apply_terrain(data.tiles[i]);
+    return true;
+}
+
+// A game that just joined (or re-entered the world) gets the farm's current soil and water.
+function mistrimulti_terrain_peer(slot, joined, stream) {
+    var r = __mistrimulti_runtime();
+    if (joined && r.mode == "host") r.snapshot_pending = true;
 }
 
 function mistrimulti_stream_terrain() {
@@ -109,7 +136,7 @@ function mistrimulti_stream_terrain() {
     var farm = GRIDS[LocationId.Farm];
     if (farm == undefined) return;
     if (r.snapshot_pending && r.terrain_cursor < 0) { r.terrain_cursor = 0; r.snapshot_pending = false; }
-    if (r.terrain_cursor < 0 || array_length(r.queue) >= 4) return;
+    if (r.terrain_cursor < 0 || mistrimulti_event_backlog() >= 16 || !mistrimulti_event_can_emit(1)) return;
     var tiles = [];
     // Scan at most 128 snapshot candidates per bridge tick.
     var width = farm.dims.x div 2;
@@ -123,6 +150,6 @@ function mistrimulti_stream_terrain() {
         r.terrain_cursor++;
         visited++;
     }
-    if (array_length(tiles) > 0) mistrimulti_emit("terrain_snapshot", { tiles: tiles });
+    if (array_length(tiles) > 0) mistrimulti_event_emit("terrain_snapshot", { tiles: tiles });
     if (r.terrain_cursor >= count) r.terrain_cursor = -1;
 }

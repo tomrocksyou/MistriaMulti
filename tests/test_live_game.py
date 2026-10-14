@@ -16,6 +16,8 @@ import threading
 import time
 import uuid
 
+from event_model import EventLayer, Runtime, Struct
+
 
 def read(path):
     return json.loads(path.read_text(encoding='utf-8'))
@@ -67,14 +69,26 @@ class Game:
 
 
 class Peer:
+    """A simulated guest game: a real ASM helper plus the event-layer reference model as its game side."""
+
+    KINDS = ('look', 'terrain_snapshot', 'terrain_commit', 'profile_start', 'profile_error', 'profile_saved')
+
     def __init__(self, helper, root, code, port, frame, player_id=1):
         self.root, self.frame = root, frame
         self.player_id = player_id
-        self.frame.update(v=1, id=player_id, epoch=uuid.uuid4().hex, active=True, a=[0]*8)
-        self.ack = 0
-        self.next_event = 1
-        self.pending = None
-        self.events = {}
+        self.frame.update(v=2, id=player_id, epoch=uuid.uuid4().hex, active=True)
+        self.runtime = Runtime(player_id, self.frame['epoch'])
+        started = time.monotonic()
+        self.layer = EventLayer(self.runtime, timer=lambda: int((time.monotonic() - started) * 1e6) + 1)
+        self.layer.mistrimulti_events_initialize()
+        self.events = []          # (kind, data) from the host, in delivery order
+        self.blobs = []           # (kind, text, meta)
+        self.replies = {}         # request id -> result
+        for kind in self.KINDS:
+            self.layer.mistrimulti_event_register(kind, Struct(on_event=self.on_event))
+        self.layer.mistrimulti_event_register('terrain', Struct(on_result=self.on_event_result, on_reply=self.on_reply))
+        self.layer.mistrimulti_event_register('profile_record', Struct(on_blob=self.on_blob))
+        self.heartbeat, self.heartbeat_at = None, 0
         self.lock = threading.Lock()
         self.done = threading.Event()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -86,40 +100,93 @@ class Peer:
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
+    def on_event(self, sender, data, ctx):
+        self.events.append((ctx['kind'], data))
+
+    def on_event_result(self, sender, result, ctx):
+        self.events.append(('terrain_result', result))
+
+    def on_reply(self, sender, result, ctx):
+        self.replies[ctx['id']] = result
+
+    def on_blob(self, sender, text, meta):
+        self.blobs.append(('profile_record', text, meta))
+
+    def received(self, kind):
+        with self.lock:
+            return [data for k, data in self.events if k == kind]
+
     def run(self):
+        """What MistriMultiBoot.gml does at 20 Hz: status once a second, rx files, events, tx.frame."""
+        last = None
         while not self.done.wait(.05):
             with self.lock:
+                r = self.runtime
+                r.ticks += 3
                 try:
-                    host = read(self.root / 'rx_0.json')
-                    event = host.get('q')
-                    if event:
-                        self.frame['a'][0] = max(self.frame['a'][0], event['s'])
-                        self.events[event['s']] = event
-                    self.ack = host.get('a', [0]*8)[self.player_id]
-                    if self.pending and self.ack >= self.pending['s']:
-                        self.pending = None
+                    if r.ticks % 60 == 3:
+                        status = read(self.root / 'status.json')
+                        if status.get('heartbeat') != self.heartbeat:
+                            self.heartbeat, self.heartbeat_at = status.get('heartbeat'), time.monotonic()
+                        r.mask = status.get('mask', 0) if time.monotonic() - self.heartbeat_at < 3 else 0
+                    for i in range(8):
+                        if i != self.player_id and r.mask & (1 << i) and (self.root / f'rx_{i}.json').exists():
+                            peer = read(self.root / f'rx_{i}.json')
+                            if peer.get('v') == 2:
+                                r.peers[i] = peer
+                                self.layer.mistrimulti_events_receive(i, peer)
                 except (OSError, ValueError):
                     pass
-                frame = dict(self.frame)
-                if self.pending:
-                    frame['q'] = self.pending
-                temp = self.root / 'peer.tmp'
-                temp.write_bytes(('1\n' if self.pending else '0\n').encode() +
-                                 json.dumps(frame, separators=(',', ':')).encode())
-                os.replace(temp, self.root / 'tx.frame')
+                self.layer.mistrimulti_events_tick()
+                text = self.layer.mistrimulti_events_encode(dict(self.frame))
+                framed = ('1\n' if self.layer.mistrimulti_events_reliable() else '0\n') + text
+                if framed != last:
+                    temp = self.root / 'peer.tmp'
+                    temp.write_bytes(framed.encode())
+                    os.replace(temp, self.root / 'tx.frame')
+                    last = framed
 
     def move(self, **fields):
         with self.lock:
             self.frame.update(fields)
 
-    def event(self, kind, data):
+    def settled(self):
         with self.lock:
-            assert self.pending is None
-            seq = self.next_event
-            self.next_event += 1
-            self.pending = {'s': seq, 'k': kind, 'd': data}
-        wait(lambda: self.ack >= seq)
-        wait(lambda: self.pending is None)
+            return self.layer.mistrimulti_event_backlog() == 0 and self.layer.mistrimulti_event_blobs_pending() == 0
+
+    def emit(self, kind, data, target=-1):
+        """A plain event, waiting until the host has acknowledged it."""
+        with self.lock:
+            assert self.layer.mistrimulti_event_emit(kind, data, target)
+        wait(self.settled)
+
+    def request(self, kind, data):
+        """A host-authoritative request; returns the host's result."""
+        with self.lock:
+            rid = self.layer.mistrimulti_event_request(kind, data)
+        assert rid is not None
+        wait(lambda: rid in self.replies)
+        return self.replies[rid]
+
+    def blob(self, kind, text, target, meta):
+        with self.lock:
+            assert self.layer.mistrimulti_event_send_blob(kind, text, target, meta)
+        wait(self.settled, 30)
+
+    def partial_blob(self, kind, text, target, meta, size=1000):
+        """Every chunk of a blob except the last: an upload interrupted by a disconnect."""
+        with self.lock:
+            ev = self.runtime.ev
+            blob = ev.next_blob
+            ev.next_blob += 1
+            parts = [text[i:i + size] for i in range(0, len(text), size)]
+            for n, part in enumerate(parts[:-1]):
+                d = {'k': kind, 'i': blob, 'n': n, 'x': part}
+                if n == 0:
+                    d.update(l=len(text.encode()), m=meta)
+                assert self.layer._ev_push('~b', d, target, self.layer._ev_stream_of(target))
+        wait(self.settled)
+        return len(parts)
 
     def close(self):
         self.done.set()
@@ -172,10 +239,9 @@ def main():
         peer.move(room=host['room'], ba=0)
         wait(lambda: bool(game.call('inspect')['ghosts']))
         results.append('Room exit cleanup and room re-entry')
-        wait(lambda: any(e['k']=='terrain_snapshot' for e in peer.events.values()))
+        wait(lambda: bool(peer.received('terrain_snapshot')))
         # Find an empty host soil/dirt tile from the acknowledged baseline.
-        candidates = {(t['x'],t['y']) for e in list(peer.events.values())
-                      if e['k']=='terrain_snapshot' for t in e['d']['tiles']}
+        candidates = {(t['x'],t['y']) for d in peer.received('terrain_snapshot') for t in d['tiles']}
         for x, y in sorted(candidates, key=lambda p:(p[0]*8-host['x'])**2+(p[1]*8-host['y'])**2):
             tile = game.call('tile', x, y)
             if tile['tile'] and not tile['occupied']:
@@ -186,21 +252,24 @@ def main():
         peer.move(room='farm:undefined', x=x*8, y=y*8)
         soil = dict(original, g=initial['soil'], w=False)
         wet = dict(soil, w=True)
-        peer.event('terrain_request', {'before':original,'tiles':[soil]})
-        wait(lambda: game.call('tile', x, y)['tile']==soil)
-        peer.event('terrain_request', {'before':soil,'tiles':[wet]})
-        wait(lambda: game.call('tile', x, y)['tile']==wet)
-        results.append('Host soil and watering requests with acknowledgements')
-        peer.event('terrain_request', {'before':dict(wet,g=initial['dirt'],w=False),'tiles':[original]})
+        assert peer.request('terrain', {'before':original,'tiles':[soil]}) == {'tiles': [soil]}
+        assert game.call('tile', x, y)['tile']==soil
+        assert peer.request('terrain', {'before':soil,'tiles':[wet]}) == {'tiles': [wet]}
         assert game.call('tile', x, y)['tile']==wet
-        peer.event('terrain_commit', {'tiles':[original]})
+        results.append('Host soil and watering requests answered with the committed tile')
+        # A stale prediction is answered with the host's tile, which the guest then applies.
+        assert peer.request('terrain', {'before':dict(wet,g=initial['dirt'],w=False),'tiles':[original]}) == {'tiles': [wet]}
+        assert game.call('tile', x, y)['tile']==wet
+        peer.emit('terrain_commit', {'tiles':[original]})
         assert game.call('tile', x, y)['tile']==wet
         peer.move(x=-10000,y=-10000)
-        peer.event('terrain_request', {'before':wet,'tiles':[original]})
+        time.sleep(.3)  # the host validates reach against the position in the newest frame
+        assert peer.request('terrain', {'before':wet,'tiles':[original]}) == {'tiles': []}
         assert game.call('tile', x, y)['tile']==wet
         results.append('Conflict correction, host-only commit and reach checks')
         peer.move(x=x*8,y=y*8)
-        peer.event('terrain_request', {'before':wet,'tiles':[original]})
+        time.sleep(.3)
+        assert peer.request('terrain', {'before':wet,'tiles':[original]}) == {'tiles': [original]}
         wait(lambda: game.call('tile', x, y)['tile']==original)
         guarded = game.batch([
             {'op':'set','path':'global.__mistrimulti.mode','value':'join'},

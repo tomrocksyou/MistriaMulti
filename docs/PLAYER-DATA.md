@@ -45,9 +45,9 @@ and a guest cannot claim the host's identity.
 
 Checkpoints run about every five seconds while the character is ready. The first
 checkpoint also runs after character creation. Only changed records are sent.
-Transfers contain at most 128 parts of 1,536 characters and 128 KiB of encoded
-record data. They use the existing reliable events through the native assembly
-helper, so partial uploads never replace the last saved record.
+A record holds at most 128 KiB of encoded data and travels as one event-layer blob
+(`docs/EVENT-LAYER.md`): it is delivered whole, with a length and hash check, or not at
+all, so partial uploads never replace the last saved record.
 
 The host validates a complete upload, preserves the last valid backup, writes a
 temporary file and renames it into place. It then confirms the saved revision to
@@ -65,5 +65,6 @@ record is also mirrored alongside the guest records.
 
 `MistriMultiPlayerData.gml` captures, validates, restores and writes engine data.
 `MistriMultiPlayerSync.gml` handles the world handshake, record transfer and save
-confirmation. The assembly networking helper handles transport, fragmentation,
+confirmation. `MistriMultiEvents.gml` orders, acknowledges and reassembles the
+transfers; the assembly networking helper handles transport, fragmentation,
 checksums and retries. No additional player runtime is required.

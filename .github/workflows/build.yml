@@ -13,6 +13,9 @@ jobs:
       - name: Launcher and manager, natively on Linux with a fake game
         run: python3 tests/test_launcher_linux.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux build/mistrimulti-manager
       - run: python3 tests/test_world_linux.py build/mistrimulti-manager
+      - run: python3 tests/test_event_layer.py
+      - run: python3 tests/test_event_features.py
+      - run: python3 tests/test_event_bridge.py build/mistrimulti-helper-linux
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-linux-x64
@@ -71,6 +74,7 @@ jobs:
       - run: sh scripts/build-updater.sh
       - run: sh scripts/build-helper.sh
       - run: python3 tests/test_launcher.py build/MistriMultiLauncher.exe build/mistrimulti-helper.exe build/fakegame.exe build/MistriMulti.exe
+      - run: python3 tests/test_event_bridge.py build/mistrimulti-helper.exe
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-launcher
