@@ -50,7 +50,7 @@ if ($Target -in @('Windows','Both')) {
     $taskUpdaterExe = Join-Path $taskBuildRoot 'MistriMulti.exe'
     $taskUpdaterArgs = @('/nologo','/machine:x64','/subsystem:windows','/entry:start','/nodefaultlib','/incremental:no',
         "/out:$taskUpdaterExe", $taskUpdaterObject, "/libpath:$taskLibraries",
-        'kernel32.lib','user32.lib','shell32.lib','gdi32.lib','ole32.lib','winhttp.lib','bcrypt.lib','ws2_32.lib','iphlpapi.lib')
+        'kernel32.lib','user32.lib','shell32.lib','gdi32.lib','ole32.lib','winhttp.lib','bcrypt.lib','ws2_32.lib','iphlpapi.lib','comdlg32.lib')
     if (-not $Release) { $taskUpdaterArgs += '/debug' }
     & $taskLinker @taskUpdaterArgs
     if ($LASTEXITCODE -ne 0) { throw 'Updater linking failed.' }

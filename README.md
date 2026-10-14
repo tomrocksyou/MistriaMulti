@@ -48,8 +48,11 @@ are blocked during multiplayer. The host can save its farm normally. See
 1. Install the supported game version and MOMI **0.16.5** (validated against game **1.0.6**).
 2. Keep this project outside the game folder. `Build.bat` builds the ASM helper; a built
    Windows executable is also included under `build/` in the supplied project.
-3. Run `Install-Mod.bat`. It copies **only this project's own mod** into your game's `mods/` folder.
-4. Open MOMI, select **MistriMulti**, and click **Install**. Close the game during installation.
+3. Get the mod into the game's `mods/` folder with the manager (`MistriMulti.exe`: **Check for updates**, then **Update**), or, when
+   building from source, with `Install-Mod.bat`. Both copy **only this project's own mod**.
+4. Open MOMI, select **MistriMulti**, and click **Install** (the manager's **Open MOMI** button opens MOMI and lists these
+   steps; it asks you once where MOMI is). Close the game during installation. MistriMulti cannot press MOMI's Install for
+   you: see `docs/RELEASES.md` for why.
 5. Everyone opens `MistriMulti.exe` (the manager window) once:
    - **Host a game**: one click. It shows the addresses to give your friends (your Tailscale IP, which starts with `100.`,
      and your local-network IP).
@@ -73,6 +76,15 @@ are blocked during multiplayer. The host can save its farm normally. See
 9. In the game choose **New Game** or **Load Game**, then **Singleplayer** or **Multiplayer**. Saves are labelled
    `[Single]` or `[Multi]` and are kept in separate folders. After a game update, add the new version to
    `mistrimulti_supported_versions()` in `MistriMultiStatus.gml` once you have tested the mod with it.
+
+**Updates.** The manager's **Check for updates** / **Update** buttons update everything: the mod files under the game's
+`mods/mistrimulti/` and the programs that sit next to `MistriMulti.exe` (`MistriMulti.exe` itself, `MistriMultiLauncher.exe`,
+`mistrimulti-helper.exe`, `mistrimulti-steam-id.exe`). Only files that differ are downloaded. Every file is checked against
+the SHA-256 in the release list before anything is installed; nothing is installed unless all of them pass, and a failed
+replacement puts every file back. The manager replaces itself by renaming the running copy to `MistriMulti.exe.old` (removed
+at the next start): close it and open it again afterwards. A newer installed version than the published one is never
+"updated". After a mod update, open MOMI and click Install. The first copy of a manager older than this feature cannot update
+itself: download `MistriMulti.exe` from the latest release once. How releases are published: `docs/RELEASES.md`.
 
 `MistriMultiLauncher.exe` and the helper must sit in the same folder. The mod installer (`Install-Mod.bat`) searches
 Steam libraries for the game; pass `-GameDirectory` to `scripts\Install-Mod.ps1` to choose an installation explicitly.
