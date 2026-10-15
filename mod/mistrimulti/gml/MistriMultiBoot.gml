@@ -94,6 +94,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.guestsave", mistrimulti_guestsave_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.import_character", mistrimulti_guestsave_import, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.wallet", mistrimulti_wallet_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.renown", mistrimulti_renown_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.dungeon", mistrimulti_dungeon_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
@@ -117,6 +118,7 @@ function mistrimulti_register_events() {
     mistrimulti_dungeon_register_events();
     mistrimulti_progress_register_events();
     mistrimulti_wallet_register_events();
+    mistrimulti_renown_register_events();
     mistrimulti_story_register_events();
 }
 
@@ -210,6 +212,7 @@ function mistrimulti_tick() {
         mistrimulti_dungeon_tick();
         mistrimulti_farm_tick();
         mistrimulti_wallet_tick();
+        mistrimulti_renown_tick();
         mistrimulti_hearts_tick();
         mistrimulti_story_tick();
     } else {
@@ -446,6 +449,9 @@ function mistrimulti_register() {
     mmapi_on("save.game_saving", mistrimulti_wallet_game_saving);
     mmapi_on("save.game_loaded", mistrimulti_wallet_game_loaded);
     mmapi_filter("player.gold_delta", mistrimulti_wallet_gold_delta);
+    mmapi_on("save.game_saving", mistrimulti_renown_game_saving);
+    mmapi_on("save.game_loaded", mistrimulti_renown_game_loaded);
+    mmapi_filter("player.renown_delta", mistrimulti_renown_delta);
     mmapi_filter("npc.heart_points", mistrimulti_hearts_filter);
     mmapi_guard("dialogue.romance_prompt_guard", mistrimulti_romance_prompt_guard);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
