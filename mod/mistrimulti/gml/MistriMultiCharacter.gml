@@ -50,6 +50,21 @@ function mistrimulti_character_tick() {
         r.character_menu = undefined;
     }
     if (!r.character_pending) return;
+    // A guest who is never offered the character editor must be able to say why: log what is holding it back, rarely.
+    var hold = "";
+    try {
+        if (MIST.is_running()) hold = "a cutscene is running";
+        else if (ARI.end_of_day_status != undefined) hold = "the end of day is running";
+        else if (ANCHOR.get_menu(Menu.Customization) != undefined && r.character_menu == undefined) hold = "a customization menu is already open";
+        else if (ANCHOR.popup_is_open()) hold = "a popup is open";
+        else {
+            for (var h = 0; h < ANCHOR.open_menus.count(); h++) {
+                if (ANCHOR.open_menus.get(h).data.pause != PauseStatus.EMPTY) { hold = "a paused menu is open (menu type " + string(ANCHOR.open_menus.get(h).type) + ")"; break; }
+            }
+        }
+        r.character_hold_ticks = hold == "" ? 0 : (r[$ "character_hold_ticks"] ?? 0) + 1;
+        if (hold != "" && r.character_hold_ticks mod 1200 == 600) mmapi_log_warn("mistrimulti", "The character editor is waiting: " + hold + ".");
+    } catch (e) {}
     if (r.character_menu != undefined) {
         // A world/menu shutdown must not leave a guest permanently hidden.
         if (ANCHOR.get_menu(Menu.Customization) != r.character_menu) {
@@ -78,6 +93,7 @@ function mistrimulti_character_tick() {
         r.character_loaded = true;
     }
     r.character_preset = preset;
+    mmapi_log_warn("mistrimulti", "Opening the character editor for this guest.");
     var menu = start_character_creation(preset, mistrimulti_character_complete, true);
     r.character_menu = menu;
     menu.listen_for_exit_flag = false;
