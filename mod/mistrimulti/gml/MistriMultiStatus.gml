@@ -4,8 +4,8 @@
 //   Idle    = the launcher runs, nothing is hosted or joined: pick Multiplayer in New Game / Load Game.
 //   Online  = a host or join session runs and the network helper's heartbeat is moving.
 // The launcher's menu/status.json (MistriMultiMenu.gml) is the source for the first two; the helper's own status.json (found
-// through control.json, written by the launcher for the session) decides Online. The badge draws on the title screen and in
-// multiplayer worlds, and it logs every change of its text with the reason, so a missing or wrong badge can be diagnosed
+// through control.json, written by the launcher for the session) decides Online. The badge shows on the title screen and in
+// multiplayer worlds (as an ANCHOR text node, see MistriMultiHudText.gml), and it logs every change of its text with the reason, so a missing or wrong badge can be diagnosed
 // from the game's log (mod_data/mistrimulti log) instead of guessed.
 // Add a version here only after testing the mod against it.
 function mistrimulti_supported_versions() { return ["1.0.6", "1.0.8"]; }
@@ -84,18 +84,25 @@ function mistrimulti_badge_watchdog() {
     }
 }
 
+// Called from the ui.draw_gui hook: it only proves the hook fires (the watchdog above). The text itself is an ANCHOR node,
+// updated from the tick by mistrimulti_badge_tick.
 function mistrimulti_draw_status(resize) {
+    __mistrimulti_netstatus().draws++;
+}
+
+// Called every tick (60 Hz): re-reads the status about once a second and puts the badge text on screen, bottom right, in the
+// level's colour (an ANCHOR text node, see MistriMultiHudText.gml). It shows on the title screen and in multiplayer worlds.
+function mistrimulti_badge_tick() {
     var n = __mistrimulti_netstatus();
     n.frames++;
-    n.draws++;
     var on_title = true;
-    try { on_title = instance_exists(Setup); } catch (e) {}    // if even this fails, draw rather than hide
+    try { on_title = instance_exists(Setup); } catch (e) {}    // if even this fails, show rather than hide
     var in_world = false;
     try { in_world = __mistrimulti_savespace().active; } catch (e) {}
-    if (!on_title && !in_world) return;
+    if (!on_title && !in_world) { mistrimulti_hudtext_set("badge", "", 0, "hud", "right", "bottom", 0, 0); return; }
     var status;
     try {
-        if (n.frames mod 60 == 1) mistrimulti_netstatus_refresh();
+        if (n.frames mod 60 == 1 || n.last_text == "") mistrimulti_netstatus_refresh();
         status = mistrimulti_status_text();
     } catch (e) {
         status = { online: false, level: "offline", text: "Multiplayer: Offline - status unavailable" };
@@ -106,23 +113,10 @@ function mistrimulti_draw_status(resize) {
         mmapi_log_info("mistrimulti", "Badge: " + status.text + " [" + n.why + " | " + __mistrimulti_menu().why + "]");
         mmapi_log_flush("mistrimulti");
     }
-    try {
-        var scale = is_real(resize) ? resize : 1;
-        var gui_w = 480;
-        var gui_h = 270;
-        try { gui_w = NORMAL_MINSPEC_WIDTH; gui_h = NORMAL_MINSPEC_HEIGHT; } catch (e) {}
-        try { draw_set_font(ANCHOR.get_text_font()); } catch (e) {}
-        var x = gui_w * scale - string_width(status.text) * scale - 8 * scale;
-        var y = gui_h * scale - string_height(status.text) * scale - 6 * scale;
-        try { draw_set_color(c_white); } catch (e) {}    // missing in the game's mod runtime: plain text then
-        for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
-            if (dx != 0 || dy != 0) draw_text_transformed(x + dx * scale, y + dy * scale, status.text, scale, scale, 0);
-        }
-        try { draw_set_color(mistrimulti_status_color(status.level)); } catch (e) {}    // missing in the game's mod runtime: plain text then
-        draw_text_transformed(x, y, status.text, scale, scale, 0);
-        try { draw_set_color(c_white); } catch (e) {}    // missing in the game's mod runtime: plain text then
-        if (!n.drawn) { n.drawn = true; mmapi_log_info("mistrimulti", "Status badge: drawn for the first time at " + string(x) + "," + string(y) + " scale " + string(scale)); mmapi_log_flush("mistrimulti"); }
-    } catch (e) {
-        if (!n.warned) { n.warned = true; mmapi_log_error("mistrimulti", "Status badge failed: " + string(e)); }
+    var ok = mistrimulti_hudtext_set("badge", status.text, mistrimulti_status_color(status.level), "hud", "right", "bottom", -6, -4);
+    if (ok && !n.drawn) {
+        n.drawn = true;
+        mmapi_log_info("mistrimulti", "Status badge: on screen for the first time (ANCHOR text node)");
+        mmapi_log_flush("mistrimulti");
     }
 }

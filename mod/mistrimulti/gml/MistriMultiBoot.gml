@@ -131,7 +131,7 @@ function mistrimulti_tick() {
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
     // The Host / Join menu and the badge's watchdog work on the title screen too, before any multiplayer world exists.
-    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); mistrimulti_savespace_tick(); }
+    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); mistrimulti_badge_tick(); mistrimulti_savespace_tick(); }
     catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
     // Multiplayer starts only after the player picked the multiplayer save space.
     if (!r.initialized && !__mistrimulti_savespace().active) return;

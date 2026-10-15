@@ -15,6 +15,7 @@ import json
 
 from event_sim import GmlNode, World
 import gml_subset as gml
+from hud_fake import FakeAnchor, ALIGN, LAYERS
 
 DIRT, SOIL, GROUND = 1, 2, 1
 SIZE = 40
@@ -258,7 +259,7 @@ class ClockNode(GmlNode):
     `next_day_delay` ms -> menu.end_sequence() -> new_day() (calendar +1, a new Clock at 6 am, the host saves)
     -> wake up 300 ms later.
     """
-    extra_files = ("MistriMultiClock.gml",)
+    extra_files = ("MistriMultiClock.gml", "MistriMultiHudText.gml")
 
     def builtins(self):
         self.minutes = 5                     # real minutes per game day (the game's default is 15)
@@ -267,6 +268,8 @@ class ClockNode(GmlNode):
         self.popups, self.actions, self.new_days, self.notes, self.scenes, self.jumps = [], [], [], [], [], []
         self.saves, self.passouts, self.now, self.next_day_delay = 0, 0, 0, 400
         self.eod, self.ending, self.mist = None, False, False
+        self.hud = FakeAnchor(extras=dict(popup_is_open=lambda: bool(self.popups),
+                                          get_menu=lambda kind: self.eod if kind == EOD_MENU else None))
         self.history = []                    # (day, time) after every frame
         self.ari = gml.GStruct(name="test", end_of_day_status=None, end_of_day_sequence=False,
                                used_object_today=gml.GArray([False] * 8), last_bed_used=None)
@@ -282,8 +285,7 @@ class ClockNode(GmlNode):
             "par_NPC": "par_NPC", "instance_number": lambda o: 0, "instance_find": no, "npc_id_to_string": str,
             "MIST": gml.GStruct(is_running=lambda: self.mist, request_scene=self.request_scene,
                                 blackboard=gml.GStruct(insert=no)),
-            "ANCHOR": gml.GStruct(popup_is_open=lambda: bool(self.popups),
-                                  get_menu=lambda kind: self.eod if kind == EOD_MENU else None),
+            "ANCHOR": self.hud.struct, "Align": ALIGN, "AnchorLayer": LAYERS,
             "Menu": gml.GStruct(Eod=EOD_MENU), "EndOfDayStatus": gml.GStruct(Normal=0, Fainted=1),
             "popup_creator": lambda title, body: Popup(self, title).struct,
             "end_day": lambda *a: self.end_day(), "create_notification": self.notes.append,
@@ -296,6 +298,7 @@ class ClockNode(GmlNode):
 
     def setup(self):
         self.rt.update(enabled=True, clock=None, snapshot_pending=False)
+        self.hud.interp = self.interp
 
     # -- the game ------------------------------------------------------------------------------------------
     def gspf(self):
@@ -392,6 +395,7 @@ class ClockNode(GmlNode):
                 and not clock["time_stopped"] and not self.ending:
             self.pass_out()                   # obj_ari.should_faint
         self.history.append((self.day, clock["time"]))
+        self.call("mistrimulti_clock_draw", 1)      # the ui.draw_gui hook
 
     # -- test helpers --------------------------------------------------------------------------------------
     def popup(self, title):
@@ -409,6 +413,11 @@ class ClockNode(GmlNode):
 
     def lines(self):
         return list(self.interp.call("mistrimulti_clock_lines"))
+
+    def overlay(self):
+        """What the player sees of the sleep overlay: the visible coloured text nodes (outline copies left out)."""
+        return [(n["text"], n["layer"]) for n in self.hud.nodes
+                if not n["freed"] and not n["stale"] and n["alpha"] == 1 and n["z"] == 900]
 
 
 class ClockDriver:
@@ -556,10 +565,14 @@ def test_sleep_vote():
     world.run(1500)
     assert guest.state() == "bed" and guest.popup("mistrimulti/sleep_wait_title") is not None
     assert "1/3 sleeping" in host.lines() and "1/3 sleeping" in other.lines(), (host.lines(), other.lines())
+    # ... and on screen as ANCHOR text nodes (HUD layer, under the clock); the sleeper's own black wait screen line is above the fader
+    assert ("1/3 sleeping", LAYERS["Hud"]) in host.overlay() and ("1/3 sleeping", LAYERS["Hud"]) in other.overlay(), host.overlay()
+    assert ("Waiting for the other players to sleep", LAYERS["AboveFader"]) not in host.overlay()
     # Cancel: out of bed, not counted any more.
     guest.get_up()
     world.run(1500)
     assert guest.state() == "awake" and host.lines() == [], host.lines()
+    assert host.overlay() == [] and other.overlay() == [], (host.overlay(), other.overlay())
     # Everyone in bed: each game runs the game's own sleep, end of day and new_day exactly once.
     host.go_to_bed()
     guest.go_to_bed()
@@ -567,6 +580,15 @@ def test_sleep_vote():
     assert "2/3 sleeping" in other.lines() and host.new_days == []
     other.go_to_bed()
     run_until(world, lambda: all(n.new_days == [2] and n.eod is None for n in nodes(world)), 20000, "all slept")
+    assert all(n.overlay() == [] for n in nodes(world)), "the overlay is gone once the day has ended"
+    # a player held on the black end-of-day screen sees the waiting line above the fader, until released
+    wait = ("Waiting for the other players to sleep", LAYERS["AboveFader"])
+    host.rt["clock"]["holding"] = True
+    host.call("mistrimulti_clock_draw", 1)
+    assert wait in host.overlay() and wait not in guest.overlay(), host.overlay()
+    host.rt["clock"]["holding"] = False
+    host.call("mistrimulti_clock_draw", 1)
+    assert host.overlay() == []
     assert all(n.scenes == ["sleep"] for n in nodes(world)), [n.scenes for n in nodes(world)]
     # The next day runs on the host's clock again, and nobody is counted as sleeping.
     world.run(4000)

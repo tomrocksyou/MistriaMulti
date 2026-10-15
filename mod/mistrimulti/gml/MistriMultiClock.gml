@@ -579,37 +579,27 @@ function mistrimulti_clock_lines() {
     return lines;
 }
 
-// "1/2 sleeping" under the HUD clock (top right), and a waiting line on the black end-of-day screen.
+// "1/2 sleeping" under the HUD clock (top right), and a waiting line on the black end-of-day screen. Both are ANCHOR text
+// nodes (MistriMultiHudText.gml: the mod runtime has no draw_* functions); a slot with an empty text is hidden.
+#macro MISTRIMULTI_CLOCK_LINE_SLOTS 2
 function mistrimulti_clock_draw(resize) {
     var r = __mistrimulti_runtime();
-    if (!r.enabled || ARI == undefined || !is_struct(r.clock) || r.clock.owner != ARI) return;
-    var c = r.clock;
-    var lines = mistrimulti_clock_lines();
-    if (array_length(lines) == 0 && !c.holding) return;
+    var lines = [];
+    var holding = false;
     try {
-        var scale = is_real(resize) ? resize : 1;
-        draw_set_font(ANCHOR.get_text_font());
-        for (var i = 0; i < array_length(lines); i++) {
-            var xx = NORMAL_MINSPEC_WIDTH * scale - string_width(lines[i]) * scale - 8 * scale;
-            mistrimulti_clock_text(xx, (62 + 12 * i) * scale, lines[i], scale);
-        }
-        if (c.holding) {
-            var text = "Waiting for the other players to sleep";
-            var cx = (NORMAL_MINSPEC_WIDTH - string_width(text)) * scale / 2;
-            mistrimulti_clock_text(cx, NORMAL_MINSPEC_HEIGHT * scale / 2, text, scale);
+        if (r.enabled && ARI != undefined && is_struct(r.clock) && r.clock.owner == ARI) {
+            lines = mistrimulti_clock_lines();
+            holding = r.clock.holding == true;
         }
     } catch (e) {
         mmapi_warn_rate_limited("mistrimulti_clock_draw", "mistrimulti", "Sleep counter failed: " + string(e));
     }
-}
-
-function mistrimulti_clock_text(xx, yy, text, scale) {
-    draw_set_color(c_black);
-    for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
-        if (dx != 0 || dy != 0) draw_text_transformed(xx + dx * scale, yy + dy * scale, text, scale, scale, 0);
+    for (var i = 0; i < MISTRIMULTI_CLOCK_LINE_SLOTS; i++) {
+        var text = i < array_length(lines) ? lines[i] : "";
+        mistrimulti_hudtext_set("clock" + string(i), text, 16777215, "hud", "right", "top", -8, 62 + 12 * i);
     }
-    draw_set_color(c_white);
-    draw_text_transformed(xx, yy, text, scale, scale, 0);
+    var wait = holding ? "Waiting for the other players to sleep" : "";
+    mistrimulti_hudtext_set("clock_wait", wait, 16777215, "above_fader", "center", "middle", 0, 0);
 }
 
 function mistrimulti_clock_local_missing(value, ctx) {

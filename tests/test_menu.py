@@ -20,11 +20,13 @@ import sys
 import time
 
 import gml_subset as gml
+from hud_fake import FakeAnchor, ALIGN, LAYERS
+from hud_fake import FakeAnchor, ALIGN, LAYERS
 from gml_subset import GStruct, GArray
 
 ROOT = Path(__file__).resolve().parent.parent
 GML_DIR = ROOT / "mod/mistrimulti/gml"
-FILES = ("MistriMultiSaveSpace.gml", "MistriMultiStatus.gml", "MistriMultiMenu.gml")
+FILES = ("MistriMultiSaveSpace.gml", "MistriMultiStatus.gml", "MistriMultiMenu.gml", "MistriMultiHudText.gml")
 MOD = "mod"                       # stands for mmapi_mod_data_dir("mistrimulti")
 FRAME_US = 16667
 
@@ -81,25 +83,27 @@ class Env:
             "file_exists": self.file_exists, "try_read_json_file": self.read_json, "save_text_file": self.save,
             "file_rename": self.rename, "MultipleChoicePopup": self.mcp, "popup_creator": self.popup_creator,
             "text_input_popup": self.text_input, "create_notification": self.notes.append,
-            "ANCHOR": GStruct(wrap_for_local=lambda t: t, get_text_font=lambda: 0),
+            "Align": ALIGN, "AnchorLayer": LAYERS, "obj_ari": "obj_ari",
             "mmapi_log_info": lambda mod, text: self.logs.append(("info", text)),
             "mmapi_log_error": lambda mod, text: self.logs.append(("error", text)),
             "mmapi_log_flush": lambda mod: None, "mmapi_warn_rate_limited": lambda k, m, t: self.logs.append(("warn", t)),
             "string_lower": str.lower, "string_pos": lambda needle, hay: hay.find(needle) + 1,
             "version_to_string": lambda v: v, "GAME_VERSION": "1.0.6", "instance_exists": lambda o: True, "Setup": GStruct(),
             "Menu": GStruct(Load=3), "string_width": lambda t: len(t) * 6, "string_height": lambda t: 12,
-            "draw_set_font": lambda f: None, "draw_set_color": lambda c: self.draws.append(("color", c)),
-            "draw_text_transformed": lambda x, y, t, sx, sy, a: self.draws.append(("text", t)), "c_white": 16777215,
             "NORMAL_MINSPEC_WIDTH": 480, "NORMAL_MINSPEC_HEIGHT": 270,
             "mistrimulti_savespace_enter": lambda kind, arg: self.entered.append((kind, arg)),
         }
-        self.draws = []
         self.interp = gml.Interpreter(b)
+        self.anchor = FakeAnchor(self.interp)       # the game's ANCHOR: text nodes the badge lives in
         for name in FILES:
             self.interp.load((GML_DIR / name).read_text(encoding="utf-8"), name)
         # Engine parts of MistriMultiSaveSpace.gml are replaced by recorders; the menu only needs these three.
         self.interp.functions["mistrimulti_savespace_enter"] = lambda kind, arg: self.entered.append((kind, arg))
         self.interp.functions["mistrimulti_savespace_popup"] = self.savespace_popup
+        # Boot parts the on-screen text uses: the runtime struct (room_settled) and the trace log
+        self.rt = GStruct(room_settled=True)
+        self.interp.functions["__mistrimulti_runtime"] = lambda: self.rt
+        self.interp.functions["mistrimulti_trace"] = lambda key, text, limit=30: self.logs.append(("trace", text))
 
     # -- engine
     def path(self, path):
@@ -193,6 +197,7 @@ class Env:
             if self.launcher is not None:
                 self.launcher.frame(self)
             self.interp.call("mistrimulti_menu_tick")
+            self.interp.call("mistrimulti_badge_tick")
             if self.errors:
                 raise AssertionError(self.errors)
 
@@ -624,7 +629,7 @@ def test_title_entered_stops_sessions():
     env.frames(5)
     assert env.launcher.session == "host"
     n = len(env.launcher.cmds)
-    env.frames(70)
+    env.interp.call("mistrimulti_badge_tick")
     env.interp.call("mistrimulti_menu_title_entered")        # the player quit to the title screen
     env.frames(5)
     assert env.launcher.cmds[n]["cmd"] == "stop" and env.launcher.session == "none"
@@ -675,18 +680,32 @@ def badge(env):
     return env.interp.call("mistrimulti_status_text")
 
 
+def shown(env):
+    """The badge as the player sees it: (text, colour) of the visible coloured node, or None."""
+    nodes = [n for n in env.anchor.nodes if not n["freed"] and not n["stale"] and n["alpha"] == 1 and n["z"] == 900 and n["layer"] == LAYERS["Hud"]]
+    assert len(nodes) <= 1, nodes
+    return (nodes[0]["text"], nodes[0]["color"]) if nodes else None
+
+
+GREEN, AMBER, RED = 40 + 200 * 256 + 70 * 65536, 20 + 170 * 256 + 230 * 65536, 50 + 60 * 256 + 220 * 65536
+
+
 def test_badge():
     env = make()
     env.frames(5)
     b = badge(env)
     assert b["text"].startswith("Multiplayer: Idle") and b["level"] == "idle", b
+    t, c = shown(env)
+    assert t.startswith("Multiplayer: Idle") and c == AMBER, (t, c)
     # no launcher at all: Offline with the reason, and a first log line says why
     env.files.pop(f"{MOD}/menu/status.json")
     b = badge(env)
     assert b["text"].startswith("Multiplayer: Offline - launcher not running") and b["level"] == "offline", b
-    env.interp.call("mistrimulti_draw_status", 1)
+    env.interp.call("mistrimulti_badge_tick")                # shows what the refresh just read
+    t, c = shown(env)
+    assert t.startswith("Multiplayer: Offline - launcher not running") and c == RED, (t, c)
     assert any("Badge: Multiplayer: Offline - launcher not running" in t and "does not exist" in t for k, t in env.logs), env.logs
-    assert env.draws and env.draws[-1] == ("color", 50 + 60 * 256 + 220 * 65536) or True
+    assert any("on screen for the first time" in t for k, t in env.logs)
     # launcher present
     env.launcher.publish()
     assert badge(env)["level"] == "idle"
@@ -704,6 +723,8 @@ def test_badge():
         env.frames(1)
         b = badge(env)
     assert b["text"] == "Multiplayer: Online (hosting)" and b["online"] and b["level"] == "online", b
+    env.interp.call("mistrimulti_badge_tick")
+    assert shown(env) == ("Multiplayer: Online (hosting)", GREEN), shown(env)
     env.us += 4_000_000                                      # the helper's heartbeat stops
     env.launcher.publish()
     b = badge(env)
@@ -720,38 +741,89 @@ def test_badge():
     # an old game version
     env.interp.builtins["GAME_VERSION"] = "9.9.9"
     assert "game updated" in badge(env)["text"]
-    print("PASS: menu: the badge says Offline (with the reason), Idle or Online, and logs every change of its text with the reason")
+    print("PASS: menu: the badge says Offline (with the reason), Idle or Online in red / amber / green, and logs every change of its text with the reason")
 
 
-def test_badge_drawing_is_robust():
+def test_badge_on_screen_is_robust():
     env = make()
     env.frames(5)
-    env.interp.call("mistrimulti_draw_status", 1)
-    assert env.draws and any(d[0] == "text" for d in env.draws)
-    assert any("drawn for the first time" in t for k, t in env.logs)
-    # fonts or macros missing: still drawn; an exception inside drawing is logged once and does not escape
-    env.draws.clear()
-    del env.interp.builtins["NORMAL_MINSPEC_WIDTH"]
+    assert shown(env) is not None
+    # the nodes: one coloured text and a black copy behind it, bottom right on the HUD layer, in the same text
+    mains = [n for n in env.anchor.nodes if n["z"] == 900]
+    backs = [n for n in env.anchor.nodes if n["z"] == 901]
+    assert len(mains) == len(backs) == 1 and backs[0]["text"] == mains[0]["text"] and backs[0]["color"] == 0
+    assert mains[0]["align"] == (ALIGN["RightIn"], ALIGN["BottomIn"]) and mains[0]["pos"][0] < 0 and mains[0]["pos"][1] < 0
+    # ticks do not make new nodes
+    before = len(env.anchor.nodes)
+    env.frames(300)
+    assert len(env.anchor.nodes) == before
+    # ANCHOR rebuilt by the game (nodes freed, or only replaced): the badge builds itself again
+    for free in (True, False):
+        env.anchor.rebuild(free=free)
+        env.frames(2)
+        t = shown(env)
+        assert t is not None and t[0].startswith("Multiplayer: Idle"), (free, t)
+    # nothing is created while a room change is not settled (in a world), but the title screen is never held back
+    env.anchor.rebuild()
+    env.rt["room_settled"] = False
+    env.frames(5)
+    assert shown(env) is None
+    env.interp.builtins["instance_exists"] = lambda o: o != "obj_ari"
+    env.frames(2)
+    assert shown(env) is not None
+    env.interp.builtins["instance_exists"] = lambda o: True
+    env.anchor.rebuild()
+    env.frames(2)
+    assert shown(env) is None
+    env.rt["room_settled"] = True
+    env.frames(2)
+    assert shown(env) is not None
+    # neither title screen nor multiplayer world (e.g. a singleplayer world): the badge hides, and comes back
+    env.interp.builtins["instance_exists"] = lambda o: False
+    env.frames(2)
+    assert shown(env) is None
+    env.interp.builtins["instance_exists"] = lambda o: True
+    env.frames(2)
+    assert shown(env) is not None
+    # ANCHOR throwing: nothing reaches the game, the failure is logged, and it recovers
+    env = make()
+    env.anchor.broken = True
+    env.frames(5)
+    assert shown(env) is None and not env.errors
+    assert any(k == "warn" and "On-screen text 'badge' failed" in t for k, t in env.logs), env.logs
+    env.anchor.broken = False
+    env.frames(2)
+    assert shown(env) is not None
+    # ANCHOR without a screen canvas yet, or an enum missing: no node, no exception
+    env = make()
     env.interp.builtins["ANCHOR"] = GStruct()
-    env.interp.call("mistrimulti_draw_status", 1)
-    assert any(d[0] == "text" for d in env.draws), "badge must fall back to a default size and font"
-    def boom(*a):
-        raise gml.GmlError("no text")
-    env.interp.builtins["draw_text_transformed"] = boom
-    env.interp.call("mistrimulti_draw_status", 1)
-    env.interp.call("mistrimulti_draw_status", 1)
-    assert sum(1 for k, t in env.logs if k == "error" and "badge failed" in t) == 1
+    env.frames(5)
+    assert shown(env) is None
+    env.interp.builtins["ANCHOR"] = env.anchor.struct
+    del env.interp.builtins["AnchorLayer"]
+    env.frames(5)
+    assert shown(env) is None
     # a throwing status read degrades to a visible Offline text instead of nothing
     env = make()
+
+    def boom(*a):
+        raise gml.GmlError("no text")
     env.interp.builtins["try_read_json_file"] = boom
-    env.interp.call("mistrimulti_draw_status", 1)
-    assert any(d == ("text", "Multiplayer: Offline - status unavailable") for d in env.draws), env.draws
-    # the draw hook never firing is reported by the watchdog
+    env.interp.call("mistrimulti_badge_tick")                # (the menu's own tick is guarded by Boot, not called here)
+    t = shown(env)
+    assert t is not None and t[0] == "Multiplayer: Offline - status unavailable", t
+    # the draw hook never firing is reported by the watchdog; firing silences it
     env = make()
     for _ in range(901):
         env.interp.call("mistrimulti_badge_watchdog")
     assert any("ui.draw_gui hook has not fired" in t for k, t in env.logs)
-    print("PASS: menu: the badge falls back to default size and font, degrades to Offline on errors, and the watchdog reports a silent draw hook")
+    env = make()
+    env.interp.call("mistrimulti_draw_status", 1)
+    for _ in range(901):
+        env.interp.call("mistrimulti_badge_watchdog")
+    assert not any("ui.draw_gui hook has not fired" in t for k, t in env.logs)
+    print("PASS: menu: the badge is a coloured ANCHOR text node with an outline copy; rebuilt after ANCHOR is rebuilt, held during room "
+          "changes, hidden outside title / multiplayer worlds, never throws, and the watchdog reports a silent draw hook")
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -864,7 +936,7 @@ def e2e(launcher, helper, fake):
 ALL = [test_unavailable_launcher, test_host_flow, test_host_password_and_cancel, test_join_flow, test_join_password_and_room,
        test_typed_address_and_errors, test_cancel_and_timeouts, test_commands_are_queued_in_order, test_refresh_and_scan_failure, test_hostile_status_file,
        test_title_entered_stops_sessions, test_texts_and_keys, test_failure_never_reaches_the_game, test_badge,
-       test_badge_drawing_is_robust]
+       test_badge_on_screen_is_robust]
 
 if __name__ == "__main__":
     only = [n for n in os.environ.get("ONLY", "").split(",") if n]

@@ -93,8 +93,12 @@ cleared before it runs), the forced `end_day()` happens at most once per day and
 already in bed or ending the day, and a state for a past day is ignored by the host. `new_day()` therefore runs
 once per game per day, and only the host's save is allowed.
 
-The counter `n/m sleeping` is drawn under the HUD clock (top right) on every game while at least one player is
-asleep; a player held in `end_sequence` sees "Waiting for the other players to sleep" on the black screen.
+The counter `n/m sleeping` is shown under the HUD clock (top right) on every game while at least one player is
+asleep; a player held in `end_sequence` sees "Waiting for the other players to sleep" on the black screen. They are ANCHOR
+text nodes (`MistriMultiHudText.gml`, white with a black outline copy; the mod runtime has no `draw_*` functions): up to two
+counter lines on the `Hud` layer, `RightIn` / `TopIn` at y = 62, 74, and the waiting line centred on the `AboveFader` layer
+(above the end-of-day fader). `mistrimulti_clock_draw` (still the `ui.draw_gui` hook) only sets the nodes' text; an empty text
+hides a node. The nodes are rebuilt if the game rebuilt ANCHOR.
 
 ### Cases
 
@@ -154,7 +158,7 @@ These come from the game's scripts and the MMAPI documentation and could not be 
    menu calls `self.end_sequence()` through the struct member, so the replacement is what runs; calling the stored
    original later runs it on the menu (a bound method).
 8. Holding `end_sequence` on the black screen is harmless (the calendar has faded out, the fader stays out) and
-   `ui.draw_gui` text is visible over it.
+   an ANCHOR text node on the `AboveFader` layer is visible over it (the end-of-day menu itself uses that layer).
 9. Calling `end_day()` from the clock-tick hook for an awake, free player gives a normal end of day (the game
    itself calls it from the pass-out and from cutscenes); `ARI.end_of_day_status` is set to `Normal` first, as
    `Mist.gml` does.
@@ -163,7 +167,8 @@ These come from the game's scripts and the MMAPI documentation and could not be 
 11. Assigning `WEATHER.forecast` and calling `WEATHER.set_weather` on a guest is enough to change its weather
     (rain also waters the farm, as in the game).
 12. `json_parse` gives Booleans for `true`/`false` (the terrain code relies on the same).
-13. The drawing calls are those of the status badge (`draw_set_color`, `draw_text_transformed`, `string_width`).
+13. The text is shown the same way as the status badge (`docs/SYNC-MENU.md`, "The badge": ANCHOR text nodes; unverified
+    assumptions listed there).
     The counter sits at y = 62 GUI pixels, below the HUD's clock and date boxes (y = 6, 23, 41 in `InfoHudMenu`).
 
 ## Known limitations
@@ -193,12 +198,13 @@ Use a disposable multiplayer world, the default day speed, one host and one or t
 4. Rain: on a day the host's forecast says rain, the guest sees rain too; the guest's calendar/forecast
    (weathervane, end-of-day calendar) matches the host's.
 5. Guest uses its bed: the popup says the day ends when everyone is asleep. "Sleep" → "Sleeping / Get up"
-   popup; the host's HUD shows `1/2 sleeping` under the clock. Press "Get up": the counter disappears.
+   popup; the host's HUD shows `1/2 sleeping` under the clock (white text with a dark outline, not overlapping the clock or
+   date boxes, not cut off at the right edge). Press "Get up": the counter disappears.
 6. Host goes to bed, then the guest: both play the sleep scene, see their own summary (own gold and renown) and
    press Next Day at their own pace; neither waits on a black screen, because everyone was already asleep. Both
    wake on the next day, same date, same weather. The host has one new autosave; the guest wrote no save.
 7. Held end of day: the host opens a menu at 1:55 am and keeps it open; the guest passes out at 2 am, presses
-   Next Day and then sees "Waiting for the other players to sleep" on the black screen. The host closes the menu
+   Next Day and then sees "Waiting for the other players to sleep" on the black screen (readable, centred, over the black). The host closes the menu
    within the minute: it passes out too, and both continue to the next day once.
 8. Stay awake past 2 am on both: both pass out, the summary shows, the day advances once.
 9. One player in bed, the other's game closed (helper stopped): after about 10 s the sleeper's day ends.
@@ -207,7 +213,7 @@ Use a disposable multiplayer world, the default day speed, one host and one or t
 11. Host quits to the title and reloads while a guest is in bed: the guest stays in bed, its clock does not run
     backwards (it waits), and after the host sleeps both reach the next day once.
 12. Read `mod_data/mistrimulti/logs/mistrimulti.log` on every game: no "Clock sync failed", "End-of-day wrap
-    failed" or "Sleep counter failed".
+    failed", "Sleep counter failed" or "On-screen text ... failed".
 
 ## Tests
 

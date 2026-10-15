@@ -174,21 +174,28 @@ That is why `status.json` shows `scanning` / `downloading` first, and why the mo
 
 ## The badge ("Multiplayer: Offline / Idle / Online")
 
-Why the Debian run showed no badge could not be determined from here (the old code drew it only on the title screen or in a
-multiplayer world, from `ui.draw_gui`, and any exception inside the drawing was caught and logged once, so a failing
-`ANCHOR.get_text_font()` or macro would have hidden it silently without a trace in the user's report). What changed, so the next
-run says why:
+The real-game test showed no badge at all: the mod runtime has no `draw_*` functions (`draw_set_color`, `draw_text_transformed`
+...: "no such field"), so the old drawing code threw on every frame. The badge is now made of the game's own UI system instead
+(`MistriMultiHudText.gml`, shared with the sleep counter of `docs/SYNC-CLOCK.md`):
 
-- It no longer depends on the helper's status file. Texts: `Multiplayer: Idle - choose Multiplayer in New Game` (launcher
-  answers, no session), `Multiplayer: Online (hosting|joined)` (the session's helper heartbeat moves), and `Offline - ...` with
-  the reason in words: game updated, launcher not running (start the game from Steam), launcher stopped, helper program
-  missing, helper not running. Colours: red, amber, green.
-- It draws with fallbacks: if `NORMAL_MINSPEC_WIDTH/HEIGHT` or the text font are unavailable it uses 480x270 and the default
-  font; an error while reading the status shows `Offline - status unavailable` instead of nothing; a drawing error is logged once.
+- **How it is shown.** Two ANCHOR text nodes on `ANCHOR.screen_canvas`, layer `Hud`, aligned `RightIn` / `BottomIn` with a
+  small inward offset: the text in the level's colour (`node.set_color`, red / amber / green) and a black copy one pixel to the
+  lower right, behind it (lower `z` is nearer in ANCHOR), as an outline. The text is `Multiplayer: Offline - <reason>`,
+  `Multiplayer: Idle - choose Multiplayer in New Game` or `Multiplayer: Online (hosting|joined)`. `node.set_text` only changes
+  the node when the text differs, so a steady badge costs nothing.
+- **When it updates.** `mistrimulti_badge_tick` runs in the mod tick (60 Hz, `MistriMultiBoot.gml`): it re-reads the launcher /
+  helper status about once a second and sets the node. The `ui.draw_gui` hook now only counts draws for the watchdog.
+- **Title screen, worlds, menus, room changes.** It shows on the title screen and in multiplayer worlds (the old rule) and is
+  hidden (alpha 0) elsewhere, e.g. in a singleplayer world. The game shuts ANCHOR down and builds a new one at some state
+  changes, which frees every node: each tick the slot checks that its ANCHOR is still the live one and its nodes are not
+  freed, and builds new nodes if not. Nodes are not created while a world's room change is unsettled (`room_settled`, Boot).
+  Menus and popups draw above the `Hud` layer, so they cover the badge while open.
+- **Never throws.** Every ANCHOR call is inside try/catch; a failure is logged (rate limited) and the slot is dropped and
+  rebuilt on the next tick. No `ANCHOR` / screen canvas yet (very early frames): nothing happens, the next tick retries.
 - It logs every change of its text with the reason ("Badge: Multiplayer: Offline - launcher not running ... [the launcher's
-  status file does not exist (<path>) ...]") and logs the first successful draw with its position. If the `ui.draw_gui` hook
-  never fires, `mistrimulti_badge_watchdog` logs that after 900 frames. **F8** now also works outside a session: it shows the badge
-  text and the reason as a notification.
+  status file does not exist (<path>) ...]") and logs once when the node is first built (`trace hudtext: created the 'badge'
+  text node`) and once when it is first on screen. If the `ui.draw_gui` hook never fires, `mistrimulti_badge_watchdog` logs that
+  after 900 frames. **F8** is unchanged: it shows the badge text and the reason as a notification (it works outside a session).
 
 ## Security notes
 
@@ -225,14 +232,23 @@ Sandbox note: tests that open ports run in a private network namespace (`unshare
 5. That a MultipleChoicePopup with up to seven options fits the screen (the host list is capped at four hosts).
 6. That `save_text_file` + `file_rename` over an existing file replaces it on Windows and Linux (the `tx.frame` code relies on it).
 7. That `text_input_popup` works on the Steam Deck (it has its own Steam keyboard branch in the game's code).
-8. That the badge hook (`ui.draw_gui`) fires on the title screen on Linux/Proton; the log says if it does not.
+8. That the badge hook (`ui.draw_gui`) fires on the title screen on Linux/Proton; the log says if it does not. And, new, the
+   ANCHOR assumptions of the badge (the stand-in only fakes ANCHOR): `ANCHOR.text(parent, z, layer)`, `set_align`, `set_xy`,
+   `set_color`, `set_text`, `set_alpha` are callable on the mod runtime (the chain returns the node, as in `InfoHudMenu.gml`);
+   the enums `Align` and `AnchorLayer` and `ANCHOR.screen_canvas` are visible to the mod; a text node's `color` tints the whole
+   text (the game's `draw_text_with_color`); a node created in the mod tick renders from the next frame; `node.freed` becomes
+   true when the game frees it, and `ANCHOR` is a new struct after the game rebuilds it; the `Hud` layer is shown on the title
+   screen; the 480x270-based offsets land the text in the corner without clipping; long reasons fit the screen width.
 9. Proton: the launcher writes the bridge path the way the Windows game sees it (existing behaviour, `docs/STEAM-DECK.md`).
 10. Windows: not run on a real Windows machine; Wine only.
 
 ## In-game checklist (please walk through it once and report)
 
 1. Start the game from Steam with **no** `launcher.cfg`. The badge (bottom right, title screen) says `Multiplayer: Idle ...`
-   in amber. If it is missing or red, press **F8** and send `launcher.log`, `menu/status.json` and the game's MMAPI log.
+   in amber, with a dark outline, readable, not cut off at the screen edge. If it is missing or red, press **F8** and send
+   `launcher.log`, `menu/status.json` and the game's MMAPI log (look for `trace hudtext` and `On-screen text 'badge' failed`).
+   Also check: it stays when you open Settings or a popup closes, it is still there after you load a world and after you
+   return to the title screen, and it turns green `Online (hosting)` while hosting and red with a reason if you close the helper.
 2. New Game -> **Multiplayer** -> the popup "Multiplayer" with Host a game / Join a game / Cancel. Cancel closes it cleanly.
 3. **Host a game** -> Set a password (type one, confirm) -> Start hosting -> "Starting your game for friends..." ->
    "You are hosting" with your Tailscale / network addresses (check the line breaks) -> Start playing -> your world opens, the
