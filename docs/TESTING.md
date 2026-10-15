@@ -240,12 +240,23 @@ written by a real Steam, the real mods folder, and the real process check for St
 
 ## World transfer checks
 
-`tests/test_world.py` runs the download client (`MistriMulti.exe --fetch <ip> <folder> <result file>`) against a fake host:
-an intact 300 KB transfer, a wrong checksum (nothing replaced, no partial file), unsafe file names, "no world", truncated,
-oversized, empty and junk replies, an absent host and a host that stalls. `tests/test_launcher.py` additionally checks the
-real host: it sends the newest valid save with a correct checksum, ignores look-alike files, drops malformed requests and
-answers "no world" when there is nothing; and a joining launcher downloads the world as the game starts without being
-delayed by an unreachable host.
+The world download needs the join session's key (`docs/PROTOCOL.md`, `docs/SECURITY.md`). `tests/test_world.py` (Wine) and
+`tests/test_world_linux.py` (native) run the download client (`MistriMulti.exe` / `mistrimulti-manager --fetch <ip> <folder>
+<result file> [<bridge folder> <slot>]`) against a fake host that plays the server side with the reference code in
+`tests/mmauth.py` (shared cases: `tests/worldclient_cases.py`): an intact 300 KB transfer after the proof, a fresh proof for every
+connection, no key / zero key / short key file (code 7 without connecting), a wrong key (the host refuses, nothing is written),
+an impostor host (random, missing, replayed or wrong-slot reply tag, an edited status) never believed, old hosts and junk
+(code 7, no hang), a wrong checksum (nothing replaced, no partial file), unsafe file names, "no world", truncated, oversized
+and empty replies, an absent host and a host that stalls. `tests/test_launcher.py` and `tests/test_launcher_linux.py` check the
+real host (shared cases: `tests/worldserver_cases.py`, three hosting sessions because the cases that wait for timeouts are
+slow): the newest valid save goes only to a client with a live session key (two players, two keys), wrong, foreign, missing,
+zero, short and malformed credentials and slots 0 / 8 / 255 get one refusal and no world, a recorded request and proof is useless
+on a new connection, only the challenge is sent before the proof, an old version-1 request is refused at once, junk and truncated
+requests get nothing, a rotated or wiped key stops working immediately, "no world" is signed too; and a joining launcher (a
+scripted host in front of the real guest helper, `JoinedHost`) downloads the world as the game starts without being delayed by
+an unreachable or silent host. `tests/test_trust.py` (`test_world_key`, `test_world_key_wiped`, `test_guest_world_key`) checks
+that both helpers publish `world_<slot>.key` = HMAC(session key, "MMWORLD1"), only for authenticated sessions, and wipe it when
+the session ends; `tests/test_menu.py` shows the whole chain with the real launcher and helper on both sides.
 
 ## Container and item checks
 

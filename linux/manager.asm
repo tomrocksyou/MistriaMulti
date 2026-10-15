@@ -5,7 +5,7 @@
 ;   mistrimulti-manager scan                 only list the hosts that can be found
 ;   mistrimulti-manager steam-setup          print the Steam launch option for the launcher
 ;   mistrimulti-manager save-solo            copy the solo saves to ~/Documents/MistriMulti Backups
-; Test hooks (like the Windows manager): --scan <file>, --fetch <ip> <folder> <result file>, --targets <file>, --stamp <seconds>.
+; Test hooks (like the Windows manager): --scan <file>, --fetch <ip> <folder> <result file> [<bridge folder> <slot>], --targets <file>, --stamp <seconds>.
 ; NASM x86-64 ELF, raw system calls, no C runtime. Shares linux/*.inc with the launcher.
 bits 64
 default rel
@@ -80,9 +80,7 @@ t_badpick db 'That is not one of the listed hosts.',10,0
 t_cancel db 'Nothing selected.',10,0
 t_joined db 'Saved. Now start Fields of Mistria from Steam and choose Multiplayer on New Game or Load Game.',10,10,'Joining: ',0
 t_player_is db 'Your player number is ',0
-t_world_dl db 'Downloading the host',39,'s world...',10,0
-t_world_ok db 'The host',39,'s world was downloaded. Choose Multiplayer on New Game to enter it.',10,0
-t_world_no db 'The host',39,'s world could not be downloaded yet (is the host playing, and has it saved?). Run join again later, or just start the game: it tries again when it starts.',10,0
+t_world_later db 'The host',39,'s world is downloaded when the game starts, after the host has accepted you (it needs the host',39,'s password if there is one). Start the game from Steam and choose Multiplayer on New Game.',10,0
 t_steam1 db 'One time only: in Steam, right-click Fields of Mistria > Properties > Launch Options, paste this line, and close the window:',10,10,0
 t_steam2 db 10,10,'Steam then starts multiplayer automatically every time you press Play.',10,0
 t_steam_missing db 'Warning: mistrimulti-launcher was not found next to the manager. Keep both programs in one folder.',10,0
@@ -674,20 +672,6 @@ FN finish_join
     call cfg_save
     test eax, eax
     jz .nosave
-    lea rcx, [t_world_dl]
-    call say
-    lea rcx, [join_ip]
-    call ip_parse
-    mov r12d, eax
-    lea rcx, [p1]
-    lea rdx, [data_dir]
-    lea r8, [s_mp_saves]
-    call path2
-    mov dword [wf_connect_ms], 3000
-    mov ecx, r12d
-    lea rdx, [p1]
-    call world_fetch
-    mov r13d, eax
     lea rcx, [t_joined]
     call say
     lea rcx, [join_ip]
@@ -702,11 +686,7 @@ FN finish_join
     call say
     lea rcx, [t_nl]
     call say
-    lea rcx, [t_world_ok]
-    test r13d, r13d
-    jz .msg
-    lea rcx, [t_world_no]
-.msg:
+    lea rcx, [t_world_later]
     call say
     xor eax, eax
     jmp .d
@@ -1192,7 +1172,7 @@ FN hook_stamp
 .e:
 END_FN
 
-; --fetch <ip> <folder> <result file>: world download; the result code is written to the file
+; --fetch <ip> <folder> <result file> [<bridge folder> <slot>]: world download; the result code is written to the file
 FN hook_fetch
     mov ecx, 2
     call arg_n
@@ -1215,7 +1195,23 @@ FN hook_fetch
     jz .bad
     mov rcx, r12
     call ip_parse
-    mov ecx, eax
+    mov r12d, eax
+    mov qword [wf_keypath], 0
+    mov ecx, 5
+    call arg_n                          ; optional: <bridge folder> <slot 1-7>, the join session to prove
+    test rax, rax
+    jz .nosession
+    mov rbx, rax
+    mov ecx, 6
+    call arg_n
+    test rax, rax
+    jz .nosession
+    movzx edx, byte [rax]
+    sub edx, '0'
+    mov rcx, rbx
+    call world_use_session
+.nosession:
+    mov ecx, r12d
     mov rdx, r13
     call world_fetch
     mov r15d, eax

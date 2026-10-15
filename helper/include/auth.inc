@@ -28,10 +28,12 @@ lbl_reg db 'MMREG1',0
 lbl_proof db 'MMPROOF1',0
 lbl_sk db 'MMSK1',0
 lbl_welcome db 'MMWELCOME1',0
+lbl_world db 'MMWORLD1',0
 lbl_ck db 'MMCK1',0
 hex_digits db '0123456789abcdef'
 auth_cfg_suffix db '/auth.cfg',0
 auth_json_suffix db '/auth_0.json',0
+world_key_suffix db '/world_0.key',0
 pfx_key db 'key=',0
 pfx_keys db 'keys=',0
 pfx_deny db 'deny=',0
@@ -118,6 +120,8 @@ denied_joins resq 1
 unknown_sources resq 1
 auth_json resb 160
 auth_path resb 2112
+world_key resb 32
+world_path resb 2112
 
 section .text
 ; ---------------------------------------------------------------------------------------------------------
@@ -1893,10 +1897,62 @@ FN peer_drop
 .done:
 END_FN
 
+; Writes <bridge>/world_<slot>.key for ECX = slot (a guest: its own slot): WK = HMAC(SK, "MMWORLD1") while that session is
+; established, 32 zero bytes otherwise. The launcher of the same computer reads it to run the world download's challenge and
+; response (docs/PROTOCOL.md): only a party that completed this join handshake can answer it. The file is created 0600 on Linux.
+FN publish_world_key
+    mov ebx, ecx
+    cmp dword [mode_host], 0
+    je .guest
+    mov r13d, ebx
+    mov ecx, ebx
+    call auth_pointer
+    cmp dword [rax+A_STATE], 1
+    jne .none
+    lea r12, [rax+A_SK]
+    jmp .have
+.guest:
+    mov r13d, [local_id]
+    cmp dword [g_state], 2
+    jne .none
+    lea r12, [g_sk]
+.have:
+    mov dword [mb_len], 0
+    lea rcx, [lbl_world]
+    call mb_str
+    mov rcx, r12
+    lea rdx, [world_key]
+    call mb_hmac
+    jmp .write
+.none:
+    lea rdi, [world_key]
+    xor eax, eax
+    mov ecx, 32
+    cld
+    rep stosb
+.write:
+    lea rcx, [world_path]
+    lea rdx, [world_key_suffix]
+    call make_path
+    lea rcx, [base_dir]
+    call text_length
+    lea rdx, [world_path]
+    mov ecx, r13d
+    and cl, 7
+    add cl, '0'
+    mov [rdx+rax+7], cl
+    lea rcx, [world_path]
+    lea rdx, [world_key]
+    mov r8d, 32
+    call pl_atomic
+END_FN
+
 ; Writes <bridge>/auth_<slot>.json: {"fp":"..","gen":N,"state":S,"reject":R}. Hosts publish the verified
 ; fingerprint of each guest; a guest publishes the host's fingerprint (slot 0) and why a join was rejected.
 FN publish_auth
     mov ebx, ecx
+    call publish_world_key              ; first: whoever sees the new state can already use the key
+    mov ecx, ebx
     lea rcx, [auth_path]
     lea rdx, [auth_json_suffix]
     call make_path

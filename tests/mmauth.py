@@ -186,3 +186,118 @@ class Host:
         self.sessions[addr] = (slot, sk)
         wtag = hm(ak, b"MMWELCOME1", cnonce, cookie, struct.pack("<I", slot))[:16]
         return (header(4) + struct.pack("<II", self.code, slot) + wtag + struct.pack("<I", int(new))).ljust(48, b"\0"), slot
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# World transfer (TCP 7775), docs/PROTOCOL.md. WK = HMAC(SK, "MMWORLD1") is derived from the join session's key, so only a
+# party that completed the join handshake can run the challenge and response that releases the world.
+
+WORLD_REQUEST, WORLD_CHALLENGE, WORLD_PROOF, WORLD_HEADER = 64, 32, 48, 144
+
+
+def world_key(sk):
+    return hm(sk, b"MMWORLD1")
+
+
+def world_proof_tag(wk, slot, cnonce, hnonce):
+    return hm(wk, b"MMWORLDQ1", bytes([slot]), cnonce, hnonce)
+
+
+def world_reply_tag(wk, slot, cnonce, hnonce, header112):
+    return hm(wk, b"MMWORLDR1", bytes([slot]), cnonce, hnonce, header112)
+
+
+def world_request(slot, cnonce, version=2):
+    return (b"MSWQ" + bytes([version, slot])).ljust(16, b"\0") + cnonce + bytes(32)
+
+
+def world_challenge(hnonce):
+    return (b"MSWC\x02\x00").ljust(16, b"\0") + hnonce
+
+
+def world_proof(wk, slot, cnonce, hnonce):
+    return (b"MSWP\x02").ljust(16, b"\0") + world_proof_tag(wk, slot, cnonce, hnonce)
+
+
+def world_header(status, data=b"", name=b"game-123-autosave.sav", digest=None, length=None, version=2):
+    h = bytearray(112)
+    h[0:4] = b"MSWR"
+    h[4] = version
+    h[5] = status
+    h[8:12] = (len(data) if length is None else length).to_bytes(4, "little")
+    h[12:44] = digest if digest is not None else hashlib.sha256(data).digest()
+    h[48:48 + len(name)] = name
+    return bytes(h)
+
+
+def world_sign(header112, wk, slot, cnonce, hnonce):
+    return header112 + world_reply_tag(wk, slot, cnonce, hnonce, header112)
+
+
+def recv_exact(sock, n):
+    got = b""
+    while len(got) < n:
+        chunk = sock.recv(n - len(got))
+        if not chunk:
+            return got
+        got += chunk
+    return got
+
+
+class WorldHost:
+    """A host answering one connection: runs the challenge and response the way the launcher does."""
+
+    def __init__(self, conn, wk, slots=range(1, 8)):
+        """`wk` is the key, or a function slot -> key (None: that slot has no session)."""
+        self.conn, self.wk, self.slots = conn, wk, slots
+        self.key_for = wk if callable(wk) else None
+        self.request = self.proof = None
+        self.slot = self.cnonce = self.hnonce = None
+
+    def handshake(self):
+        """True if the client proved the key. Reads nothing beyond the proof; sends the challenge."""
+        self.request = recv_exact(self.conn, 16)
+        if len(self.request) != 16 or self.request[:4] != b"MSWQ" or self.request[4] != 2:
+            return False
+        self.request += recv_exact(self.conn, 48)
+        if len(self.request) != WORLD_REQUEST:
+            return False
+        self.slot, self.cnonce, self.hnonce = self.request[5], self.request[16:32], os.urandom(16)
+        if self.key_for is not None:
+            self.wk = self.key_for(self.slot) or os.urandom(32)
+        self.conn.sendall(world_challenge(self.hnonce))
+        self.proof = recv_exact(self.conn, WORLD_PROOF)
+        if len(self.proof) != WORLD_PROOF or self.proof[:5] != b"MSWP\x02":
+            return False
+        return self.slot in self.slots and hmac.compare_digest(
+            self.proof[16:48], world_proof_tag(self.wk, self.slot, self.cnonce, self.hnonce))
+
+    def reply(self, header112):
+        self.conn.sendall(world_sign(header112, self.wk, self.slot, self.cnonce, self.hnonce))
+
+    def refuse(self):
+        self.conn.sendall(world_header(3) + bytes(32))
+
+
+def world_download(address, wk, slot, timeout=15):
+    """A reference client: returns (header112, body, host_tag_ok), or (None, ...) when the host refused or hung up."""
+    import socket
+    sock = socket.create_connection(address, timeout=timeout)
+    try:
+        cnonce = os.urandom(16)
+        sock.sendall(world_request(slot, cnonce))
+        challenge = recv_exact(sock, WORLD_CHALLENGE)
+        if len(challenge) != WORLD_CHALLENGE or challenge[:6] != b"MSWC\x02\x00":
+            return None, b"", False
+        hnonce = challenge[16:32]
+        sock.sendall(world_proof(wk, slot, cnonce, hnonce))
+        reply = recv_exact(sock, WORLD_HEADER)
+        if len(reply) != WORLD_HEADER:
+            return None, b"", False
+        ok = hmac.compare_digest(reply[112:], world_reply_tag(wk, slot, cnonce, hnonce, reply[:112]))
+        body = b""
+        if reply[5] == 0 and ok:
+            body = recv_exact(sock, int.from_bytes(reply[8:12], "little"))
+        return reply[:112], body, ok
+    finally:
+        sock.close()

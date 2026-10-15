@@ -132,7 +132,7 @@ Everything above is written and **passes the stand-in test matrix**, but **almos
    Debian is unexplained (new logging should say why); Windows leftover helper: a new session should stop an old helper first.
 4. Fix the red CI; then make the repo public-ready (releases flow in `docs/RELEASES.md` is untested because the repo is private).
 5. Known gaps: boss/seal mine floors, shared monster movement, dynamic locations (greenhouse, barn, coop), world download on
-   TCP 7775 is not password protected (a follow-up was queued), story rewards for players who did not do the step.
+   TCP 7775 now needs the join session's key (`docs/PROTOCOL.md`, `docs/SECURITY.md`; not encrypted), story rewards for players who did not do the step.
 
 ## 8. Working style with helpers
 

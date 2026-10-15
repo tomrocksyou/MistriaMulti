@@ -70,7 +70,7 @@ The helper publishes `rx_<slot>.json` and a one-second `status.json` in the brid
 (`{"fp":"<32 hex>","gen":N,"state":S,"reject":R}`) whenever a slot's authentication changes: on a host the verified install
 fingerprint of a guest (`state` 1) or `""` when it left; on a guest, slot 0 is the host (`state` 2 once the host proved itself,
 `fp` its fingerprint) and `reject` says why a join was refused. `status.json` adds `auth`, `reject`, `limited`, `authfail`,
-`denied` and `unknown` counters. The launcher writes `auth.cfg` (`key=`, `keys=`, `deny=`, `pass=` lines) into the bridge
+`denied` and `unknown` counters. Next to them the helper writes `world_<slot>.key` (the world download's key, see below). The launcher writes `auth.cfg` (`key=`, `keys=`, `deny=`, `pass=` lines) into the bridge
 folder before it starts the helper; without it the helper keeps its keys in memory and uses no password.
 It atomically replaces output files and leaves the last good output on a failed write.
 `status.json.heartbeat` contains the helper's monotonic millisecond clock. The
@@ -114,12 +114,54 @@ is the kernel's node name (`uname`), and a scan never lists the computer's own n
 While a host plays, the launcher also listens on TCP port 7775 and gives a joining player the host's newest multiplayer save
 (`%LOCALAPPDATA%\FieldsOfMistria\multiplayer\saves\game-<digits>-(autosave|<digits>).sav` on Windows,
 `<game folder>/multiplayer/saves/` on Linux, see `README.md` for how the folder is found; other names, such as `.old.sav`,
-are never sent; "newest" is the latest modification time). The client sends 16 bytes: `MSWQ`, version `1`, 11 zero bytes. The host replies with a 112-byte header and
-then the file: `MSWR`, version `1`, status (0 = ok, 1 = no world yet, 2 = cannot send), file length (u32 little-endian,
-at most 200 MB) at offset 8, SHA-256 of the file at offset 12, and the file name at offset 48 (64 bytes, NUL padded).
-The client rejects any name that does not match the pattern above, checks the length and the SHA-256, writes
-`<name>.part` and only then renames it over the old copy. The client never names a file; the host never reads a path
-from the client. Every wait is bounded (3 s request, 5 s header, 15 s data) and one connection is served at a time. The Linux host sends with
-`MSG_NOSIGNAL`, so a client that hangs up cannot kill the launcher. The Linux client computes the SHA-256 with its own assembly
-implementation (`linux/sha256.inc`); Windows uses bcrypt.
-Anyone who can reach the host's port can download the world, so use a private network (Tailscale, LAN): the room password does not cover this port.
+are never sent; "newest" is the latest modification time).
+
+**The world is released only to a player whose join the host's helper has authenticated** (version 2 of this protocol; the
+unauthenticated version 1 is refused). The proof is a challenge and response under a key derived from the join session, so it
+needs the room password (when there is one) and the guest's install key, exactly like the UDP join; nothing about the world
+(not even whether one exists) is sent before it is checked.
+
+**The key.** When the helper finishes a join handshake it has the session key `SK` (see the join handshake above). It also
+writes `WK = HMAC(SK, "MMWORLD1")` (32 raw bytes) to `<bridge>/world_<slot>.key`: on the host one file per authenticated
+guest slot (1-7), on a guest the one for its own slot. The file is written before the new state is published in
+`auth_<slot>.json`, created `0600` on Linux, replaced by a new `WK` when the same slot joins again, and overwritten with
+32 zero bytes when the session ends (kick, expiry, silent host). The launcher of the same computer reads it; an absent,
+short, long or all-zero file means "no session". The launcher deletes all `world_*.key` files when it prepares a bridge.
+
+**The exchange** (all lengths are exact; `nonce` = 16 random bytes; integers are little endian):
+
+| Step | From | Bytes | Layout |
+| --- | --- | --- | --- |
+| 1 REQUEST | guest | 64 | `MSWQ`, version `2`, slot (1-7) at offset 5, zero to 16, guest nonce `cn` @16, 32 zero bytes |
+| 2 CHALLENGE | host | 32 | `MSWC`, version `2`, status `0`, zero to 16, host nonce `hn` @16 (fresh for every connection) |
+| 3 PROOF | guest | 48 | `MSWP`, version `2`, zero to 16, tag @16 = `HMAC(WK, "MMWORLDQ1" \| slot byte \| cn \| hn)` (32 bytes, not truncated) |
+| 4 HEADER | host | 144 | `MSWR`, version `2`, status (0 ok, 1 no world yet, 2 cannot send, 3 refused) at offset 5, file length (u32, at most 200 MB) @8, SHA-256 of the file @12, file name @48 (64 bytes, NUL padded), tag @112 = `HMAC(WK, "MMWORLDR1" \| slot byte \| cn \| hn \| header bytes 0..111)` |
+| 5 DATA | host | length | the file, only after status 0 |
+
+- The host answers a REQUEST with a CHALLENGE for any slot number, even one without a session, and decides only after the PROOF
+  (so the answer does not tell a stranger which slots are in use). It then checks slot 1-7, loads that slot's `WK`, recomputes
+  the tag and compares it without early exit. Any failure gets exactly one 144-byte header with status 3 and no tag; the file
+  is not read from disk before the proof is accepted.
+- **Replay.** `hn` is fresh for every connection and covered by both tags, so a recorded request and proof, or a recorded
+  reply, is worthless on another connection. A key from an earlier session fails as soon as the helper rotates the file.
+- **The client believes the host only if the reply tag is valid**, so a fake host without `WK` cannot hand over a world (the
+  client then reports code 7). The client then applies the same checks as before: length, name pattern, SHA-256, `<name>.part`
+  written first and renamed over the old copy. The client never names a file; the host never reads a path from the client.
+- **Old clients.** A version-1 request (16 bytes: `MSWQ`, version `1`, 11 zero bytes) is answered at once with a 112-byte
+  version-1 header, status 3, the text "Update MistriaMulti: the world download now needs a login" in the name field, and no
+  data: the old client reports "invalid reply" (menu code 43) instead of hanging. A new client that talks to an old host
+  gets its connection closed after the REQUEST and reports code 7. Both sides need the same release.
+- Every wait is bounded (3 s per request or proof read, 5 s for the client's challenge and header waits, 15 s for data) and one
+  connection is served at a time. The Linux host sends with `MSG_NOSIGNAL`, so a client that hangs up cannot kill the launcher.
+  The HMAC is built on each program's own SHA-256 (`common/hmac.inc`: bcrypt on Windows, `linux/sha256.inc` on Linux).
+- Client result codes: 0 ok, 1 cannot connect, 2 the host has no world yet, 3 invalid reply, 4 checksum mismatch, 5 cannot
+  write, 6 out of memory, 7 refused (no joined session, wrong proof, unsigned or edited reply, or a host that does not speak
+  this protocol; the menu shows code 47).
+- **When the clients ask.** The in-game menu downloads right after the helper reports the host's WELCOME. A launcher started
+  with a `launcher.cfg` join waits up to 5 s for the helper's key file and then refreshes the world as the game starts. The
+  managers' *join* only saves `launcher.cfg` (they have no helper session to prove), and say so. The test hook
+  `--fetch <ip> <folder> <result file> [<bridge folder> <slot>]` of both managers proves the key in that bridge folder.
+
+Anyone who can reach the host's port still learns that a Mistria host is there and can make it spend up to a few seconds per
+connection; they get no world. The world itself is not encrypted on the wire (only authenticated), like all other traffic: use a
+private network if that matters.

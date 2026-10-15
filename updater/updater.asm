@@ -1212,7 +1212,7 @@ start:
     mov r14d, 30
     mov r15d, 8
     call make_child
-    ; test hook:  --fetch <ip> <destination folder> <result file>   (downloads the host's world, writes the result code)
+    ; test hook:  --fetch <ip> <destination folder> <result file> [<bridge folder> <slot>]   (downloads the host's world, writes the result code)
     cmp dword [argc], 5
     jb .nofetch
     mov rax, [argv]
@@ -1236,6 +1236,20 @@ start:
     mov rax, [argv]
     mov rdx, [rax+24]
     mov dword [wf_connect_ms], 1500
+    mov r12d, ecx
+    mov r13, rdx
+    mov qword [wf_keypath], 0
+    cmp dword [argc], 7
+    jb .fetch_nosession
+    mov rax, [argv]                    ; optional: <bridge folder> <slot 1-7>, the join session to prove
+    mov rcx, [rax+40]
+    mov rax, [rax+48]
+    movzx edx, word [rax]
+    sub edx, '0'
+    call world_use_session
+.fetch_nosession:
+    mov ecx, r12d
+    mov rdx, r13
     call world_fetch
     add al, '0'
     mov [mp_ascii+32], al

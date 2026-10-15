@@ -18,7 +18,10 @@ protection on, and how it was tested. Wire formats are in `docs/PROTOCOL.md`; th
 - **Every game datagram carries a 16-byte HMAC tag** under a per-session key. Without the handshake a packet is dropped.
 - **Limits**: a guest cannot make the host do unbounded work. Packets, snapshots, events, requests, blob bytes, new event
   streams, handshakes and replies are all rate-limited; sizes are bounded; hostile input is rejected, never fatal.
-- **Not protected**: confidentiality (packets are signed, not encrypted), a malicious host, the world download on TCP 7775,
+- **The world download (TCP 7775) needs the same login as joining**: the host releases the saved world only to a player whose
+  join its helper authenticated, after a challenge and response under a key derived from that session. See
+  [World download](#world-download-tcp-7775).
+- **Not protected**: confidentiality (packets are signed, not encrypted), a malicious host,
   and anything a modified game client can legitimately ask for. See [What is not protected](#what-is-not-protected).
 
 ## Threat model
@@ -81,6 +84,40 @@ guest                                              host
 
 Reasons in REJECT: 1 wrong or missing password, 2 banned, 3 slot (or install) already in use, 4 key store full,
 6 password needed but this install has none (set locally by the guest helper, never sent).
+
+### World download (TCP 7775)
+
+The saved world is as sensitive as the room, so the download is gated by the same credentials as the join. It uses no new
+cryptography: it reuses the join session.
+
+```text
+join handshake (UDP) gives both helpers the session key SK = HMAC(AK, "MMSK1" | nonces)
+each helper writes WK = HMAC(SK, "MMWORLD1")  to  <bridge>/world_<slot>.key   (0600; zeros when the session ends)
+
+guest launcher                                     host launcher
+  REQUEST (64 B: slot, client nonce cn) ->
+                  <- CHALLENGE (32 B: fresh host nonce hn)
+  PROOF (48 B: HMAC(WK, "MMWORLDQ1" | slot | cn | hn)) ->
+                  <- HEADER (144 B: status, length, SHA-256, name, HMAC(WK, "MMWORLDR1" | slot | cn | hn | header))
+                  <- the file (only after status 0)
+```
+
+- **Who can download.** Only a client holding `WK` of a live session: it needs the room password (when there is one: `AK`
+  is `HMAC(PWK, K)`), the guest's install key (`K`) or, for a first join without a password, whatever that join accepted. A
+  wrong, missing, someone else's, recorded or expired key gets one 144-byte refusal (status 3) and not a byte of the world
+  or even whether a world exists. Slot 0 and slots outside 1-7 are always refused.
+- **Bound to the session the helper authenticated.** `WK` exists only while the helper holds the session, is replaced when the
+  guest rejoins, and is wiped on kick, expiry or a silent host, so a download cannot outlive the join. A guest's helper
+  publishes its key only after the host proved itself with a valid WELCOME.
+- **No replay.** The host nonce is fresh for every connection and covered by both tags.
+- **The guest checks the host too.** The header carries a tag; without it (impostor, edited status or length, a tag from
+  another connection or slot) the client reports code 7 and writes nothing. The name pattern, length limit, SHA-256 and
+  `.part`-then-rename checks are unchanged.
+- **Old clients and hosts** are refused at once with a clear status (see `docs/PROTOCOL.md`), not left hanging.
+- **Residual risks.** No secrecy (the world travels in the clear, like the game traffic); the key file is as exposed as
+  `install.key` and `auth.cfg` (same folder rules, `0600` on Linux; any program running as the same user can read it, and
+  so could already read the world); a host without a password lets any stranger join and therefore download, as before.
+  The single-connection server can be occupied for up to 3 s per bogus connection.
 
 ### Identity binding (the game layer)
 
@@ -151,7 +188,8 @@ in user space can.
 | A Windows argument that cannot be converted (more than 4096 bytes) became a null pointer: the helper died with a page fault instead of printing the usage. Local only (the launcher builds the command line), but it is the one real memory-safety bug found. Reproduced on the original build. | `parse_arguments` used `pl_arg` unchecked | Every argument is checked | `test_config` (lengths 2001 to 20 000) |
 | The receive buffer had no room for the tag; the status buffer was 256 bytes against about 170 used | `packet_in`, `status_buffer` | Sized for the new maximum | covered by every test (a truncated datagram fails its tag) |
 | Reassembly arithmetic (fragment count, index, offset, bitmap, `bts`) | `receive_fragment` | Reviewed line by line: every index is checked against the declared length before a byte is copied; the 15-fragment bitmap fits a dword. No out-of-bounds access found. | `test_fuzz`: 3 700 random and correctly tagged malformed datagrams (every length 0..140 and 1150..1260, every handshake type at every length, impossible counts, indexes, lengths, slots, sequences and epochs) |
-| The TCP world server and the discovery responder read fixed-size requests only | `linux/launcher.asm`, `launcher/launcher.asm` | Existing tests (`fuzz`, `world server`, `discovery`) cover malformed requests. **Not changed:** the world server serves one connection at a time, so a client that connects and stalls can delay discovery and downloads (never game traffic) | existing launcher tests |
+| The TCP world server and the discovery responder read fixed-size requests only | `linux/launcher.asm`, `launcher/launcher.asm` | Existing tests (`fuzz`, `world server`, `discovery`) cover malformed requests. **Not changed:** the world server serves one connection at a time, so a client that connects and stalls can delay discovery and downloads (never game traffic) for the read timeout (3 s per read) | existing launcher tests |
+| **The world download (TCP 7775) sent the saved world to anyone who connected**, whatever the room password | `world_serve` in both launchers | The server runs a challenge and response first and sends nothing, not even "no world yet", to a client that cannot prove a join session's key (below). Old unauthenticated requests are refused at once | `tests/worldserver_cases.py` via `test_world_server` (both launchers), `test_world` / `test_world_linux` (both clients), `test_trust` `test_world_key*` (helpers), `test_menu` (end to end) |
 
 ## Setting the password
 
@@ -159,7 +197,7 @@ Pick 1 to 64 letters, digits and punctuation, **without spaces or accents**. Tel
 
 | Where | How |
 | --- | --- |
-| **In the game** (normal way) | Multiplayer -> **Host a game** -> **Set a password (optional)**. Friends type it when they pick the host (the list shows `[password]`). The launcher keeps it only in the helper's `auth.cfg`; the command file that carries it is deleted as soon as it is read (`docs/SYNC-MENU.md`). The password is checked by the join handshake **before** the world is downloaded. |
+| **In the game** (normal way) | Multiplayer -> **Host a game** -> **Set a password (optional)**. Friends type it when they pick the host (the list shows `[password]`). The launcher keeps it only in the helper's `auth.cfg`; the command file that carries it is deleted as soon as it is read (`docs/SYNC-MENU.md`). The password is checked by the join handshake **before** the world is downloaded, and the download itself proves the session that handshake created. |
 | `launcher.cfg` (any system) | add a line `password=your-secret-here` (the file is in `mod_data/mistrimulti/`). Remove the line to switch it off. |
 | Linux / Steam Deck manager | `mistrimulti-manager host --password SECRET`. Friends: `mistrimulti-manager join IP --password SECRET`, or just `join` and type it when the list shows `[needs a password]`. Running `host` or `join` rewrites `launcher.cfg`: give the password again. |
 | Windows manager | Join window: **Room password** field (masked). Hosts: add the `password=` line by hand once; **Host a game** keeps it. |
@@ -191,6 +229,7 @@ it does not delete the stored guest keys.
 | `deny.txt` | you, host game | bans | no |
 | `known_hosts.json` | guest game | world to host fingerprint | no |
 | `bridge_N/auth_<slot>.json` | helper | verified fingerprint, session counter, state | no |
+| `bridge_N/world_<slot>.key` | helper | `HMAC(session key, "MMWORLD1")`, the world download's key; 32 zero bytes when the session ended | yes (0600) |
 
 ## What is not protected
 
@@ -204,8 +243,9 @@ it does not delete the stored guest keys.
   host's identity matched the pin. A malicious host can still send harmful events within the event layer's validation.
 - **A modified client** can ask the host for anything the protocol allows (the host validates every request, see the
   `SYNC-*` pages); this page adds identity and rate limits, not game rules.
-- **The world download** (TCP 7775) is not authenticated: anyone who can connect gets the host's newest save. A password
-  does not cover it yet.
+- **The world download** (TCP 7775) is authenticated (below) but not encrypted: someone on the path can read the world while
+  an authorised guest downloads it, exactly as they can read the game traffic. The host can only be asked for the world once per
+  authenticated session at a time; a stranger can still occupy the single-connection server for a few seconds.
 - **Denial of service** by saturating the link, or of *new joins* by flooding handshake packets (30 per second per kind
   are accepted from strangers; established sessions are not affected). Spoofed-source floods cannot be told apart from
   real ones by an unconnected UDP service.
