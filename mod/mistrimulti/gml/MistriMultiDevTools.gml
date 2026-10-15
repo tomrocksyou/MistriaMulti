@@ -91,9 +91,12 @@ function mistrimulti_devtools_unlock_mines() {
         if (array_length(plan.skipped) > 0) mmapi_log_info("mistrimulti", "devtools: not handled: " + json_stringify(plan.skipped));
     } catch (e) {
         out.ok = false;
-        out.text = "Unlocking the mines failed.";
+        var why = string(e);
+        if (string_length(why) > 160) why = string_copy(why, 1, 160);
+        out.text = "Unlocking the mines failed: " + why;
         __mistrimulti_dev_say(out.text);
-        mmapi_warn_rate_limited("mistrimulti_devtools", "mistrimulti", "Unlock mines failed: " + string(e));
+        mmapi_log_warn("mistrimulti", "Unlock mines failed: " + string(e));
+        mmapi_log_flush("mistrimulti");
     }
     return out;
 }
