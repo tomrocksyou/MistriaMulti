@@ -15,7 +15,7 @@
 #macro MISTRIMULTI_PROGRESS_RETRY 2000000
 
 function mistrimulti_progress_sections() {
-    return ["recipes", "almanac", "seen", "cosmetics", "romance", "inbox", "quests", "counters", "misc", "daily"];
+    return ["recipes", "almanac", "seen", "cosmetics", "romance", "inbox", "quests", "counters", "misc", "daily", "story_rewards"];
 }
 
 function mistrimulti_progress_known(name) {
@@ -29,7 +29,9 @@ function mistrimulti_progress_initialize() {
     r.progress_members = {};
     r.progress_load_key = r[$ "progress_load_key"] ?? "";
     r.romance = {};
+    r.romance_spouse = {};
     r.romance_view = {};
+    r.romance_spouse_view = {};
     r.romance_dirty = false;
     r.romance_scanned = 0;
     mistrimulti_progress_reset_session();
@@ -49,6 +51,7 @@ function mistrimulti_progress_reset_session() {
     r.progress_checkpointed = 0;
     r.progress_sessions = array_create(8, undefined);
     r.romance_view = {};
+    r.romance_spouse_view = {};
 }
 
 // The core record was applied (PlayerData restore or fresh start). A guest is ready once its progress is applied as well.
@@ -196,6 +199,7 @@ function mistrimulti_progress_capture_section(name) {
         case "counters": return mistrimulti_progress_capture_counters();
         case "misc": return mistrimulti_progress_capture_misc();
         case "daily": return mistrimulti_progress_capture_daily();
+        case "story_rewards": return mistrimulti_progress_capture_story_rewards();
     }
     return undefined;
 }
@@ -213,6 +217,7 @@ function mistrimulti_progress_section_valid(name, value) {
         case "counters": return mistrimulti_progress_valid_counters(value);
         case "misc": return mistrimulti_progress_valid_misc(value);
         case "daily": return mistrimulti_progress_valid_daily(value);
+        case "story_rewards": return mistrimulti_progress_valid_story_rewards(value);
     }
     return false;
 }
@@ -229,6 +234,7 @@ function mistrimulti_progress_restore_section(name, value) {
         case "counters": mistrimulti_progress_restore_counters(value); break;
         case "misc": mistrimulti_progress_restore_misc(value); break;
         case "daily": mistrimulti_progress_restore_daily(value); break;
+        case "story_rewards": mistrimulti_progress_restore_story_rewards(value); break;
     }
 }
 
@@ -248,6 +254,7 @@ function mistrimulti_progress_defaults_section(name) {
         case "misc": return { crown_cooldown: undefined, artifacts: {}, pinned: undefined, perks_off: [], renown: [],
             renown_rewards: Inventory(8).serialize(), mount: undefined, mines_level: 0 };
         case "daily": return mistrimulti_progress_defaults_daily();
+        case "story_rewards": return { init: false, paid: {} };
     }
     return undefined;
 }
@@ -770,6 +777,50 @@ function mistrimulti_progress_restore_daily(v) {
     ARI.ate_perpetual_soup_today = v.soup;
     ARI.used_object_today = mistrimulti_progress_flags(v.objects, ObjectId.LEN, object_id_to_string);
     MIST.scenes_played_today = HashSetFromArray(v.scenes);
+}
+
+// ---- story rewards already received (MistriMultiStory.gml pays the rewards of story steps the player did not do) ----------------
+// Per story quest, the level whose rewards this player has been given: by doing the step, or by the story sync. The ledger is kept
+// as world facts ("mm_paid_<quest>", "mm_paid_init"), so on the host it is saved with the host's world, next to its inventory, and
+// on a guest it travels in this section, next to the guest's record. `init` is false until the story sync has seeded the ledger
+// (a new character, or a record from before this section): nothing is paid for steps that were already over by then.
+
+function mistrimulti_progress_story_quests() {
+    var out = [];
+    var keys = QUESTS.keys();
+    for (var i = 0; i < array_length(keys); i++) {
+        var quest = QUESTS.get(keys[i]);
+        if (quest != undefined && quest.category == QuestCategory.Story) array_push(out, keys[i]);
+    }
+    return out;
+}
+
+function mistrimulti_progress_capture_story_rewards() {
+    var paid = {};
+    var quests = mistrimulti_progress_story_quests();
+    for (var i = 0; i < array_length(quests); i++) {
+        var level = T2R.read("mm_paid_" + quests[i]);
+        if (is_real(level) && level > 0) paid[$ quests[i]] = level;
+    }
+    return { init: T2R.read("mm_paid_init") == true, paid: paid };
+}
+
+function mistrimulti_progress_valid_story_rewards(v) {
+    if (!mistrimulti_progress_bool_valid(v[$ "init"]) || !is_struct(v[$ "paid"])) return false;
+    var keys = struct_get_names(v.paid);
+    if (array_length(keys) > 2048) return false;
+    for (var i = 0; i < array_length(keys); i++) {
+        var level = v.paid[$ keys[i]];
+        if (!mistrimulti_progress_text_valid(keys[i], 96) || !is_real(level) || level != floor(level) || level < 1 || level > 1000000) return false;
+    }
+    return true;
+}
+
+// Replaces the ledger of the game it is restored into: a guest starts from a copy of the host's world, which holds the host's ledger.
+function mistrimulti_progress_restore_story_rewards(v) {
+    var quests = mistrimulti_progress_story_quests();
+    for (var i = 0; i < array_length(quests); i++) T2R.write("mm_paid_" + quests[i], v.paid[$ quests[i]]);
+    T2R.write("mm_paid_init", v.init ? true : undefined);
 }
 
 // ---- records ------------------------------------------------------------------------------------------------------------------
@@ -1326,6 +1377,7 @@ function mistrimulti_progress_host_session() {
         }
     }
     r.romance = {};
+    r.romance_spouse = {};
     r.romance_dirty = true;
     mistrimulti_romance_scan_host();
     var uids = struct_get_names(r.progress_members);
@@ -1343,6 +1395,14 @@ function mistrimulti_romance_romantic(status) {
     return status == "dating" || status == "fiance" || status == "spouse";
 }
 
+// A player has one spouse (the game's ARI.spouse() is one villager): the first one a record names keeps it.
+function mistrimulti_romance_spouse_free(uid, name) {
+    var r = __mistrimulti_runtime();
+    var names = struct_get_names(r.romance_spouse);
+    for (var i = 0; i < array_length(names); i++) if (r.romance_spouse[$ names[i]] == uid && names[i] != name) return false;
+    return true;
+}
+
 // Registers the claims in a player's relations and returns the NPC indexes whose claim belongs to another player.
 function mistrimulti_romance_apply(uid, relations) {
     var r = __mistrimulti_runtime();
@@ -1358,6 +1418,10 @@ function mistrimulti_romance_apply(uid, relations) {
             struct_remove(r.romance, name);
             r.romance_dirty = true;
         }
+        // A married player's spouse lives at the farm in every game (MistriMultiStory.gml), even while that player is away.
+        var married = relations[i].status == "spouse" && r.romance[$ name] == uid && mistrimulti_romance_spouse_free(uid, name);
+        if (married && r.romance_spouse[$ name] != uid) { r.romance_spouse[$ name] = uid; r.romance_dirty = true; }
+        else if (!married && r.romance_spouse[$ name] == uid) { struct_remove(r.romance_spouse, name); r.romance_dirty = true; }
     }
     return lost;
 }
@@ -1398,13 +1462,13 @@ function mistrimulti_romance_revoke(names) {
 function mistrimulti_romance_publish() {
     var r = __mistrimulti_runtime();
     if (!r.romance_dirty || !mistrimulti_event_can_emit(1)) return;
-    if (mistrimulti_event_emit("romance_claims", { claims: r.romance })) r.romance_dirty = false;
+    if (mistrimulti_event_emit("romance_claims", { claims: r.romance, spouses: r.romance_spouse })) r.romance_dirty = false;
 }
 
 // Host: a game just joined; it missed the earlier claim events.
 function mistrimulti_romance_peer(slot, joined, stream) {
     var r = __mistrimulti_runtime();
-    if (joined && r.mode == "host" && r.player_ready) mistrimulti_event_emit("romance_claims", { claims: r.romance }, slot);
+    if (joined && r.mode == "host" && r.player_ready) mistrimulti_event_emit("romance_claims", { claims: r.romance, spouses: r.romance_spouse }, slot);
 }
 
 function mistrimulti_romance_event(player, data, ctx) {
@@ -1421,6 +1485,7 @@ function mistrimulti_romance_event(player, data, ctx) {
                 if (mistrimulti_progress_text_valid(names[i], 96) && mistrimulti_valid_uid(claims[$ names[i]])) view[$ names[i]] = claims[$ names[i]];
             }
             r.romance_view = view;
+            r.romance_spouse_view = mistrimulti_romance_spouse_view(data[$ "spouses"], view);
         } else if (ctx.kind == "romance_revoke" && data[$ "peer_epoch"] == r.epoch && mistrimulti_progress_names_valid(data[$ "npcs"], 64)) {
             mistrimulti_romance_revoke(data.npcs);
         }
@@ -1429,6 +1494,20 @@ function mistrimulti_romance_event(player, data, ctx) {
         mmapi_warn_rate_limited("mistrimulti_romance", "mistrimulti", "A relationship update could not be applied: " + string(e));
         return false;
     }
+}
+
+// The married players' spouses as a guest accepts them from the host: only an NPC that the same player also holds in the claims.
+function mistrimulti_romance_spouse_view(spouses, claims) {
+    var view = {};
+    if (!is_struct(spouses)) return view;
+    var names = struct_get_names(spouses);
+    if (array_length(names) > 256) return view;
+    for (var i = 0; i < array_length(names); i++) {
+        if (mistrimulti_progress_text_valid(names[i], 96) && claims[$ names[i]] != undefined && claims[$ names[i]] == spouses[$ names[i]]) {
+            view[$ names[i]] = spouses[$ names[i]];
+        }
+    }
+    return view;
 }
 
 // dialogue.romance_prompt_guard: grey out the romance prompts of an NPC another player is with.
@@ -1447,5 +1526,6 @@ function mistrimulti_debug_progress() {
     var names = mistrimulti_progress_sections();
     for (var i = 0; i < array_length(names); i++) sizes[$ names[i]] = string_byte_length(json_stringify(mistrimulti_progress_capture_section(names[i])));
     return { loaded: r.progress_loaded, revision: r.progress_revision, saved_revision: r.progress_saved_revision,
-        locked: struct_get_names(r.progress_locked), sizes: sizes, romance: r.romance, members: struct_get_names(r.progress_members) };
+        locked: struct_get_names(r.progress_locked), sizes: sizes, romance: r.romance, members: struct_get_names(r.progress_members),
+        spouses: r.mode == "host" ? r.romance_spouse : r.romance_spouse_view };
 }

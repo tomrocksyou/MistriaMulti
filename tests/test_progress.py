@@ -173,6 +173,7 @@ class Engine:
         e.facts["cutscene_seen_host_scene"] = 1.0
         e.facts["quest_fetch_a_complete"] = True
         e.facts["alice_has_met"] = True
+        e.facts.update({"mm_paid_init": True, "mm_paid_story_intro": 1})      # the host's ledger of story rewards: not the guest's
         e.stats["enemies_killed"] = 99
         e.ari["has_gossiped_today"] = True
 
@@ -296,6 +297,7 @@ class Engine:
         e.stats["npcs_spoken_to"]["bob"] = 4
         e.interp.builtins["MAXIMUM_REACHED_DUNGEON_LEVEL"] = 12
         e.facts.update({"alice_has_met": True, "cara_is_ex": True, "cutscene_seen_first_kiss": 1.0})
+        e.facts.update({"mm_paid_init": True, "mm_paid_story_intro": 1000000})
         for name in ("alice", "bob"):
             e.facts[name + "_status"] = "best_friend"
         e.facts["bob_status"] = "dating"
@@ -517,7 +519,8 @@ def test_sections_round_trip():
     node.rt["world_key"] = WORLD
     record = json.loads(gml.to_json(node.call("mistrimulti_progress_capture")))
     assert set(record["sections"]) == {"recipes", "almanac", "seen", "cosmetics", "romance", "inbox", "quests", "counters", "misc",
-                                       "daily"}
+                                       "daily", "story_rewards"}
+    assert record["sections"]["story_rewards"] == {"init": True, "paid": {"story_intro": 1000000}}
     assert node.call("mistrimulti_progress_valid", node.data(record), ALICE, WORLD) is True
     # The story quest stays with the world: only the personal quests are in the record.
     assert record["sections"]["quests"]["done"] == ["crown_a"] and [q["name"] for q in record["sections"]["quests"]["active"]] == ["fetch_b"]
@@ -541,13 +544,19 @@ def test_sections_round_trip():
     assert other.engine.calls.count("update_daily") == 1 and "children_facts" in other.engine.calls
     assert other.interp.builtins["MAXIMUM_REACHED_DUNGEON_LEVEL"] == 12
     assert other.engine.quest_log["completed"]["contains"]("story_intro"), "the world's story must not be touched"
+    assert f["mm_paid_story_intro"] == 1000000 and f["mm_paid_init"] is True, "the host's ledger is replaced by the player's"
+    blank = json.loads(json.dumps(record))
+    blank["sections"]["story_rewards"] = {"init": False, "paid": {}}
+    other.interp.call("mistrimulti_progress_restore", other.data(blank))
+    assert "mm_paid_story_intro" not in f and "mm_paid_init" not in f, "a new character's ledger is empty (the story sync seeds it)"
+    other.interp.call("mistrimulti_progress_restore", other.data(record))
     # Daily flags from another day are not restored.
     stale = json.loads(json.dumps(record))
     stale["sections"]["daily"].update(day="99", treasure=True, gossiped=True, objects=["well"])
     other.interp.call("mistrimulti_progress_restore", other.data(stale))
     assert other.engine.ari["has_seen_treasure_level_today"] is False and other.engine.ari["has_gossiped_today"] is False
     assert list(other.engine.ari["used_object_today"]) == [False] * 4
-    print("PASS: sections: capture -> validate -> restore -> capture is exact for all 10 sections; the host's personal data is "
+    print("PASS: sections: capture -> validate -> restore -> capture is exact for all 11 sections; the host's personal data is "
           "replaced, story quests and world facts stay consistent")
 
 
@@ -566,6 +575,8 @@ def test_fresh_and_defaults():
     assert [m["path"] for m in state["inbox"]["letters"]] == ["welcome"], "first letters are delivered like in a new game"
     assert state["counters"]["stats"]["enemies_killed"] == 0 and state["misc"]["mines_level"] == 0
     assert len(node.rt["progress_sigs"]) == 0, "the host has nothing yet: everything must be uploaded"
+    assert state["story_rewards"] == {"init": False, "paid": {}} and "mm_paid_init" not in node.engine.facts, \
+        "a new character has an empty ledger (the story sync seeds it), not the host's"
     print("PASS: fresh start: a new character gets the game's new-game defaults, none of the host's progress")
 
 
@@ -608,6 +619,11 @@ def test_validation():
                  dict(sections["misc"], artifacts=[]), dict(sections["misc"], mount={"kind": 1}),
                  dict(sections["misc"], renown=[{"gold": 3}]), dict(sections["misc"], crown_cooldown="3")],
         "daily": [dict(sections["daily"], treasure=1), dict(sections["daily"], day=""), dict(sections["daily"], objects=[5])],
+        "story_rewards": [{"init": 1, "paid": {}}, {"init": True, "paid": []}, {"init": True}, {"paid": {}},
+                          {"init": True, "paid": {"q": 0}}, {"init": True, "paid": {"q": -2}}, {"init": True, "paid": {"q": 1.5}},
+                          {"init": True, "paid": {"q": "3"}}, {"init": True, "paid": {"q": 1000001}},
+                          {"init": True, "paid": {"": 1}}, {"init": True, "paid": {"x" * 97: 1}},
+                          {"init": True, "paid": {"q%d" % i: 1 for i in range(2049)}}],
     }
     count = 0
     for name, variants in bad.items():
@@ -1127,6 +1143,77 @@ def test_one_partner_per_npc():
           "break-ups free the NPC, the host's partner is protected, the registry survives restarts")
 
 
+def spouses(node):
+    return json.loads(gml.to_json(node.rt["romance_spouse"] if node.rt["mode"] == "host" else node.rt["romance_spouse_view"]))
+
+
+def test_spouse_registry():
+    """Who is married to whom is derived from the stored records, kept by the host and told to every game (the story sync moves
+    those spouses into the farm house in every game, MistriMultiStory.gml)."""
+    world = make_world(24, guests=2)
+    host, alice, bob = nodes(world)
+    world.run(4000)
+    wait_ready(world, alice)
+    wait_ready(world, bob)
+    world.run(6000)
+    assert spouses(host) == {} and spouses(alice) == {}
+    # Dating or engaged is not married.
+    alice.engine.facts["cara_status"] = "dating"
+    world.run(9000)
+    assert claims(host) == {"cara": ALICE} and spouses(host) == {}
+    alice.engine.facts["cara_status"] = "fiance"
+    world.run(9000)
+    assert spouses(host) == {}
+    alice.engine.facts["cara_status"] = "spouse"
+    world.run(9000)
+    assert spouses(host) == {"cara": ALICE}, spouses(host)
+    assert spouses(alice) == {"cara": ALICE} and spouses(bob) == {"cara": ALICE}, "every game is told, the player's own too"
+    # One partner per villager: bob cannot marry cara (his record is downgraded first), so she stays alice's.
+    bob.engine.facts["cara_status"] = "spouse"
+    world.run(9000)
+    assert spouses(host) == {"cara": ALICE} and spouses(bob) == {"cara": ALICE}
+    assert core_file(host, BOB)["data"]["relations"][2]["status"] == "best_friend"
+    # One spouse per player: a second "spouse" in a record is not registered (the game has only one spouse).
+    alice.engine.facts["dan_status"] = "spouse"
+    world.run(9000)
+    assert spouses(host) == {"cara": ALICE} and claims(host)["dan"] == ALICE
+    # The host's own spouse is registered too (its game moves her in by itself; the guests' games need to know).
+    host.engine.facts["bob_status"] = "spouse"
+    world.run(4000)
+    assert spouses(host) == {"cara": ALICE, "bob": HOST}, spouses(host)
+    assert spouses(alice) == spouses(host) and spouses(bob) == spouses(host)
+    # A marriage that ends frees the villager: the spouse entry goes (and the player's other claim becomes the spouse next time).
+    alice.engine.facts["cara_status"] = "best_friend"
+    world.run(9000)
+    assert spouses(host) == {"bob": HOST, "dan": ALICE}, spouses(host)
+    assert spouses(bob) == spouses(host)
+    # The registry survives a host restart, from the stored records, also for a player who is not connected.
+    alice.engine.facts["dan_status"] = "spouse"
+    world.run(6000)
+    host2 = restart(world, 0)
+    host2.engine.facts["bob_status"] = "spouse"
+    world.run(9000)
+    assert spouses(host2) == {"bob": HOST, "dan": ALICE}, spouses(host2)
+    world.games.pop(1)                          # alice's game is closed; her records stay on the host
+    host3 = restart(world, 0)
+    host3.engine.facts["bob_status"] = "spouse"
+    world.run(9000)
+    assert spouses(host3) == {"bob": HOST, "dan": ALICE}, "a player's marriage counts while they are away"
+    # A late joiner learns it from the host's first message.
+    carol, _ = rejoin(world, 2)
+    world.run(6000)
+    assert spouses(carol) == spouses(host3), (spouses(carol), spouses(host3))
+    # What a guest accepts from the host: only entries the same player also holds in the claims.
+    view = lambda spouses_, claims_: json.loads(gml.to_json(carol.call("mistrimulti_romance_spouse_view", carol.data(spouses_), carol.data(claims_))))
+    assert view({"cara": ALICE, "dan": BOB, "eve": ALICE}, {"cara": ALICE, "dan": ALICE}) == {"cara": ALICE}
+    assert view("x", {}) == {} and view({"cara": 5}, {"cara": 5}) == {"cara": 5}, "the uid is checked where the claims are"
+    assert view({("n%d" % i): ALICE for i in range(300)}, {("n%d" % i): ALICE for i in range(300)}) == {}, "an oversized list is dropped"
+    assert view({"x" * 97: ALICE}, {"x" * 97: ALICE}) == {}
+    no_errors(world)
+    print("PASS: spouse registry: only marriages count, one per player and per villager, told to every game, kept through "
+          "break-ups, restarts and absence, and validated on arrival")
+
+
 def test_big_record():
     """A record near the size limit crosses the network in blobs and comes back exactly."""
     world = make_world(23, guests=1)
@@ -1197,6 +1284,7 @@ def main():
     test_commit_and_rollback()
     test_commit_robustness()
     test_one_partner_per_npc()
+    test_spouse_registry()
     test_big_record()
     test_restore_failure_is_contained()
     print("ALL PASS")

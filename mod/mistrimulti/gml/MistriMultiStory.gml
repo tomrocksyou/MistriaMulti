@@ -17,6 +17,16 @@
 // A cutscene is a private viewing. It never pauses or moves anybody else. While one runs, this file does nothing at
 // all in that game; when it ends the next pass compares the finished state with the mirror like any other change.
 //
+// Two more things belong to the personal side of a shared story step and to the villagers' homes:
+//
+//   3. REWARDS FOR THE PLAYERS WHO DID NOT DO THE STEP. A story step gives its rewards (items, gold, recipe scrolls, a new personal
+//      quest, renown at the end of the quest) to whoever hands it in. A game that is brought up to the mirror by this file pays the
+//      rewards of the stages it skipped, once: a per-player ledger ("mm_paid_<quest>" world facts, carried by the progress section
+//      story_rewards) says up to which level a player has been paid, by the game or by this file.
+//   4. SPOUSES OF OTHER PLAYERS. The game moves a villager into the farm house only for the player whose spouse it is (the
+//      "roommate" schedule, a place in the bed). Every game moves in the spouses of all the players (the host keeps the registry,
+//      MistriMultiProgress.gml), also those whose player is away.
+//
 // Event kinds: story_claim (request guest -> host, result to everyone), story_delta (host changes), story_snapshot
 // (blob, host -> one game), story_sync (guest -> host: "send everything"; also carries on_peer and on_gap),
 // npc_plan (day plan) and npc_pos (sample), both host -> guests.
@@ -31,6 +41,8 @@
 #macro MISTRIMULTI_STORY_RETRY 200         // a guest asks again for the snapshot after 10 s
 #macro MISTRIMULTI_STORY_MISS 3            // passes a villager may be in the wrong room before it is re-aligned
 #macro MISTRIMULTI_STORY_ACTIVITIES true   // also steer what villagers do (not only where they are)
+#macro MISTRIMULTI_STORY_PAY_MAX 6         // quests paid in one pass
+#macro MISTRIMULTI_STORY_HOME_TRIES 3      // schedule swaps asked for one housemate in one day
 
 // ---- state ---------------------------------------------------------------------------------------------------
 
@@ -76,8 +88,13 @@ function __mistrimulti_story_reset(st) {
     st.pos_sig = "";          // host: last sample sent
     st.miss = {};             // guest: villager index -> passes in the wrong room / activity
     st.want_at = -1000000;
+    st.seen_ok = false;       // the first rewards pass of the session has run
+    st.seen = {};             // quest name -> level this game had after the last pass (a rise since then was the player's own step)
+    st.homes = {};            // villager index -> day on which this game moved them into the farm house
+    st.tries = {};            // villager index -> swaps asked for today
+    st.tries_day = -1;
     st.last_error = "";
-    st.stats = { claims: 0, applied: 0, scenes: 0, swaps: 0, steers: 0, refused: 0 };
+    st.stats = { claims: 0, applied: 0, scenes: 0, swaps: 0, steers: 0, refused: 0, paid: 0, homes: 0 };
 }
 
 function __mistrimulti_story_on(mode) {
@@ -123,7 +140,8 @@ function mistrimulti_story_debug() {
     return { ready: st.ready, levels: st.q, quests: array_length(struct_get_names(st.q)), scenes: array_length(struct_get_names(st.sc)),
         facts: array_length(struct_get_names(st.f)), counters: st.k, pending: array_length(struct_get_names(st.pend)),
         refused: struct_get_names(st.bad), stats: st.stats, plan_day: is_struct(st.plan) ? st.plan.d : -1,
-        error: st.last_error, gate_scenes: struct_get_names(st.gate_scenes), gate_facts: struct_get_names(st.gate_facts) };
+        error: st.last_error, gate_scenes: struct_get_names(st.gate_scenes), gate_facts: struct_get_names(st.gate_facts),
+        housed: struct_get_names(st.homes) };
 }
 
 // ---- registration ----------------------------------------------------------------------------------------------
@@ -406,7 +424,8 @@ function mistrimulti_story_apply_quest(name, level) {
 }
 
 // A cutscene of the world that this player did not watch: its lasting effects are applied the way the game applies them
-// when a scene ends (clean_up_scene), minus everything that is the viewer's own (items, hearts, the scene itself).
+// when a scene ends (clean_up_scene), minus what is the viewer's alone (hearts, the scene itself, status effects); the scene's
+// items and free baths are paid, as a step's rewards are.
 function mistrimulti_story_apply_scene(name) {
     if (!CUTSCENES.contains_key(name)) return false;
     var c = CUTSCENES.get(name);
@@ -427,6 +446,13 @@ function mistrimulti_story_apply_scene(name) {
     if (c.mana_to_set != undefined && ARI.mana_max < c.mana_to_set) {
         ARI.mana_max = c.mana_to_set;
         ARI.set_mana(c.mana_to_set);
+    }
+    // The scene is now in this player's history, so this runs once per player, here or when they watch it themselves.
+    try {
+        if (array_length(c.given_items) > 0) mist_give_items_after_scene(c.given_items, player_wake_position());
+        if (c.baths > 0) ARI.free_baths += c.baths;
+    } catch (e) {
+        __mistrimulti_story_warn("The items of scene " + name + " could not be given: " + string(e));
     }
     return true;
 }
@@ -668,8 +694,11 @@ function __mistrimulti_story_npc_guest(st) {
     for (var i = 0; i < NpcId.LEN; i++) {
         var want = plan.s[i];
         var npc = NPCS[i];
-        if (want == "" || npc.swap_schedule_request != undefined || !__mistrimulti_story_known_schedule(st, want)) continue;
         var key = string(i);
+        // A villager this game moved into the farm house today is the house pass's (until the host's plan says the same, it may
+        // still show the village schedule: that would only swap them back out).
+        if (st.homes[$ key] == plan.d) continue;
+        if (want == "" || npc.swap_schedule_request != undefined || !__mistrimulti_story_known_schedule(st, want)) continue;
         if (__mistrimulti_story_schedule_name(i) != want) {
             __mistrimulti_story_swap(st, npc, want);
             st.miss[$ key] = 0;
@@ -744,6 +773,7 @@ function mistrimulti_story_tick() {
         if (MIST.is_running() || ARI.end_of_day_status != undefined) return;
         if (r.mode == "host") __mistrimulti_story_host_pass(st);
         else __mistrimulti_story_guest_pass(st);
+        if (st.ticks mod MISTRIMULTI_STORY_NPC_PASS == 0) __mistrimulti_story_house_pass(st, false);
         if (st.ticks mod MISTRIMULTI_STORY_NPC_PASS == 0 && st.ready) {
             if (r.mode == "host" && r.mask != 0) __mistrimulti_story_npc_host(st);
             else if (r.mode == "join") __mistrimulti_story_npc_guest(st);
@@ -756,6 +786,7 @@ function mistrimulti_story_tick() {
 
 function __mistrimulti_story_host_pass(st) {
     var local = __mistrimulti_story_local(st);
+    __mistrimulti_story_own_steps(st, local);
     if (!st.ready) {
         // First pass of this session: the host's own game is the world as it was saved. Nobody needs a delta for it.
         mistrimulti_story_merge(st, __mistrimulti_story_up(st, local), false, MISTRIMULTI_STORY_LIST_MAX);
@@ -767,6 +798,7 @@ function __mistrimulti_story_host_pass(st) {
         if (!__mistrimulti_story_empty(accepted)) __mistrimulti_story_broadcast(accepted);
     }
     __mistrimulti_story_down(st, local);
+    __mistrimulti_story_rewards(st);
 }
 
 // A delta is cut into events that fit (a name has at most 96 characters, an event at most 8 KB).
@@ -800,6 +832,7 @@ function __mistrimulti_story_guest_pass(st) {
         return;
     }
     var local = __mistrimulti_story_local(st);
+    __mistrimulti_story_own_steps(st, local);
     var up = __mistrimulti_story_up(st, local);
     var claim = { q: [], sc: [], f: [], k: up.k };
     // Entries already claimed at this level are in flight: do not repeat them.
@@ -831,4 +864,241 @@ function __mistrimulti_story_guest_pass(st) {
         }
     }
     __mistrimulti_story_down(st, local);
+    __mistrimulti_story_rewards(st);
+}
+
+// ---- rewards of story steps the player did not do ------------------------------------------------------------------------
+// Ledger: how far this player has been paid for each story quest (see the header). A quest at level L has had the rewards of its
+// tasks 0..L-1 given; level DONE adds the quest's own rewards (items, and the renown entry the game files on completion).
+
+function __mistrimulti_story_paid(name) {
+    var level = T2R.read("mm_paid_" + name);
+    return is_real(level) ? level : 0;
+}
+
+// Before a pass changes anything: a level that rose since the end of the last pass (a quest that was not there counts as rising
+// from nothing) was this player's own step, which the game has paid, so the ledger moves up with it. (A level this file raised is
+// recorded in `seen` at the end of its pass. In the first pass of a session nothing counts: the game was just loaded.)
+function __mistrimulti_story_own_steps(st, local) {
+    if (!st.seen_ok || T2R.read("mm_paid_init") != true) return;
+    var names = struct_get_names(local.q);
+    for (var i = 0; i < array_length(names); i++) {
+        var seen = st.seen[$ names[i]] ?? -1;
+        if (local.q[$ names[i]] > seen && local.q[$ names[i]] > __mistrimulti_story_paid(names[i])) {
+            T2R.write("mm_paid_" + names[i], local.q[$ names[i]]);
+        }
+    }
+}
+
+// A reward that starts a quest: a story quest is the mirror's business, any other is this player's own.
+function __mistrimulti_story_reward_quest(name) {
+    var quest = QUESTS.get(name);
+    if (quest == undefined || quest.category == QuestCategory.Story) return;
+    if (QUEST_LOG.active.contains_key(name) || QUEST_LOG.completed.contains(name)) return;
+    QUEST_LOG.start(name);
+}
+
+function __mistrimulti_story_grant(rewards) {
+    var out = List();
+    for (var i = 0; i < rewards.count(); i++) {
+        var reward = rewards.get(i);
+        if (reward.type == QuestRewardType.Quest) __mistrimulti_story_reward_quest(reward.quest_name);
+        else out.push(reward);
+    }
+    grant_quest_rewards(out);
+}
+
+// The rewards of the levels from..to-1 of a quest, as the game gives them when the player hands the stages in.
+function __mistrimulti_story_pay(name, from, to) {
+    var quest = QUESTS.get(name);
+    if (quest == undefined) return;
+    for (var t = from; t < min(to, quest.tasks.count()); t++) __mistrimulti_story_grant(quest.tasks.get(t).reward_list);
+    if (to < MISTRIMULTI_STORY_DONE) return;
+    __mistrimulti_story_grant(quest.reward_list);
+    for (var j = 0; j < quest.reward_list.count(); j++) {
+        if (quest.reward_list.get(j).type == QuestRewardType.Renown) {
+            ARI.pending_renown_entries.push(RenownEntry.Quest(name));
+            break;
+        }
+    }
+}
+
+// After the pass brought this game up to the mirror. First time in this player's ledger: everything that exists now counts as
+// paid (a new character, or a record from before the ledger: the story so far is not owed). Afterwards: whatever this game has
+// passed that the mirror also holds, and the player has not been paid for, is paid now, once. The ledger moves first, so a
+// reward that fails is lost rather than given twice.
+function __mistrimulti_story_rewards(st) {
+    if (!st.data_ok) return;
+    var local = __mistrimulti_story_local(st);
+    var names = struct_get_names(local.q);
+    var more = struct_get_names(st.q);
+    for (var i = 0; i < array_length(more); i++) if (local.q[$ more[i]] == undefined) array_push(names, more[i]);
+    var left = MISTRIMULTI_STORY_PAY_MAX;
+    var paid_any = false;
+    var first = T2R.read("mm_paid_init") != true;
+    for (var i = 0; i < array_length(names); i++) {
+        var have = local.q[$ names[i]] ?? -1;
+        var level = max(have, st.q[$ names[i]] ?? -1);
+        var paid = __mistrimulti_story_paid(names[i]);
+        if (first) {
+            if (level > 0) T2R.write("mm_paid_" + names[i], level);
+            continue;
+        }
+        var target = min(have, st.q[$ names[i]] ?? -1);
+        if (target <= paid || left <= 0) continue;
+        left--;
+        T2R.write("mm_paid_" + names[i], target);
+        try {
+            __mistrimulti_story_pay(names[i], paid, target);
+            st.stats.paid++;
+            paid_any = true;
+        } catch (e) {
+            st.last_error = "pay " + names[i] + ": " + string(e);
+            __mistrimulti_story_warn("The rewards of story quest " + names[i] + " could not be given: " + string(e));
+        }
+    }
+    if (first) T2R.write("mm_paid_init", true);
+    // The levels this pass ends with: a rise before the next pass is the player's.
+    st.seen = local.q;
+    st.seen_ok = true;
+    if (paid_any) {
+        try { create_notification(ANCHOR.wrap_for_local("Story reward: you received the rewards of a story step another player completed.")); }
+        catch (e) {}
+    }
+}
+
+// ---- spouses of other players live at the farm -------------------------------------------------------------------------------
+// In the game a villager lives in the farm house (the "roommate" schedule, a place next to the player's bed, a routine at home)
+// when the villager is the spouse of the player of that game; that is a fact of the game's own relationship status, which is
+// the player's own. So a game moves in the spouses of the other players itself, the way the game does it for its own, using the
+// game's own functions. The host's registry (MistriMultiProgress.gml) says who is married to whom, for players who are away too.
+
+// Juniper and Hayden bring their pet when they are the spouse (Npc.is_roommate in the game).
+function __mistrimulti_story_pet_of(name) {
+    if (name == "juniper") return "dozy";
+    if (name == "hayden") return "henrietta";
+    return "";
+}
+
+// The villagers who live at the farm in this game because of another player, in villager order: { i, pet }. A villager who
+// is a roommate here already (this player's own spouse and pet) is the game's.
+function __mistrimulti_story_housemates() {
+    var r = __mistrimulti_runtime();
+    var map = r.mode == "host" ? r[$ "romance_spouse"] : r[$ "romance_spouse_view"];
+    var out = [];
+    if (!is_struct(map)) return out;
+    for (var i = 0; i < NpcId.LEN; i++) {
+        var name = npc_id_to_string(i);
+        var owner = map[$ name];
+        if (!is_string(owner) || owner == r.uid || NPCS[i].is_roommate()) continue;
+        // Only a villager the player can marry (a stored record can say anything; the registry itself keeps one spouse a player).
+        var kind = NPCS[i].prototype;
+        if (is_struct(kind) && kind[$ "dateable"] == false) continue;
+        array_push(out, { i: i, pet: false });
+        var pet = try_string_to_npc_id(__mistrimulti_story_pet_of(name));
+        if (pet != undefined && !NPCS[pet].is_roommate()) array_push(out, { i: pet, pet: true });
+    }
+    return out;
+}
+
+// The schedule the game gives its roommates today (NpcDatabase.npcs_on_new_day).
+function __mistrimulti_story_roommate_schedule() {
+    if (CALENDAR.day_type() == Day.Friday) return "Schedules/roommate_schedule_friday";
+    if (todays_festival() != undefined) return "Schedules/roommate_schedule_festival";
+    return "Schedules/roommate_schedule";
+}
+
+// Wakes up at home: next to the player's bed, or on the floor of the house when the bed is taken. The game's own function
+// puts a spouse in the bed: it asks the villager's relationship status, so the status reads "spouse" for that one call.
+function __mistrimulti_story_to_bed(npc, mate, bed_taken) {
+    if (mate.pet) {
+        roommate_to_sleep(npc);
+    } else if (bed_taken) {
+        npc.location_position = roommate_home_position(npc);
+        npc.talk_flag = false;
+    } else {
+        var key = npc_id_to_string(mate.i) + "_status";
+        var old = T2R.read(key);
+        T2R.write(key, "spouse");
+        var failure = undefined;
+        try { roommate_to_sleep(npc); }
+        catch (e) { failure = e; }
+        T2R.write(key, old);
+        if (failure != undefined) throw failure;
+    }
+    npc.brain_dead = false;
+}
+
+// Moves one villager in. True when they live at home today. At the start of a day (the player has just woken) out of sight, the
+// game's own swap is made now and the villager starts the day asleep; in the middle of a day, or in the room the player is in,
+// the game's deferred swap does it as soon as the villager is out of sight (as for every schedule this file steers).
+function __mistrimulti_story_move_in(st, mate, morning, bed_taken) {
+    var key = string(mate.i);
+    var want = __mistrimulti_story_roommate_schedule();
+    if (!__mistrimulti_story_known_schedule(st, want)) return false;
+    if (__mistrimulti_story_schedule_name(mate.i) == want) return true;
+    var npc = NPCS[mate.i];
+    var here = npc.location_position != undefined && npc.location_position.location_id == CURRENT_LOCATION_ID;
+    if (morning && !here) {
+        perform_schedule_swap(mate.i, want, false, CALENDAR.unified_time());
+        __mistrimulti_story_to_bed(npc, mate, bed_taken);
+        st.stats.swaps++;
+        return true;
+    }
+    if (npc.swap_schedule_request == undefined && (st.tries[$ key] ?? 0) < MISTRIMULTI_STORY_HOME_TRIES) {
+        st.tries[$ key] = (st.tries[$ key] ?? 0) + 1;
+        __mistrimulti_story_swap(st, npc, want);
+    }
+    return false;
+}
+
+// A villager the registry no longer lists (the marriage ended) goes back to the schedule the game would give them.
+function __mistrimulti_story_move_out(st, index) {
+    var npc = NPCS[index];
+    if (string_pos("roommate", __mistrimulti_story_schedule_name(index)) > 0 && npc.swap_schedule_request == undefined) {
+        __mistrimulti_story_swap(st, npc, T2R.request_schedule(index));
+    }
+}
+
+// `morning`: the game has just started a new day (the hook) and moved every villager to the start of their schedule.
+function __mistrimulti_story_house_pass(st, morning) {
+    var day = total_days();
+    if (st.tries_day != day) {
+        st.tries_day = day;
+        st.tries = {};
+    }
+    var mates = __mistrimulti_story_housemates();
+    var listed = {};
+    var bed_taken = ARI.spouse() != undefined;
+    for (var m = 0; m < array_length(mates); m++) {
+        var key = string(mates[m].i);
+        listed[$ key] = true;
+        if (st.homes[$ key] == day) continue;
+        try {
+            if (__mistrimulti_story_move_in(st, mates[m], morning, bed_taken)) {
+                st.homes[$ key] = day;
+                st.stats.homes++;
+                if (!mates[m].pet) bed_taken = true;
+            }
+        } catch (e) {
+            st.homes[$ key] = day;
+            st.last_error = "home " + key + ": " + string(e);
+            __mistrimulti_story_warn("A villager could not be moved into the farm house: " + string(e));
+        }
+    }
+    var homes = struct_get_names(st.homes);
+    for (var m = 0; m < array_length(homes); m++) {
+        if (listed[$ homes[m]] == true) continue;
+        struct_remove(st.homes, homes[m]);
+        try { __mistrimulti_story_move_out(st, real(homes[m])); }
+        catch (e) { __mistrimulti_story_warn("A villager could not leave the farm house: " + string(e)); }
+    }
+}
+
+// game.new_day: every villager has just been put at the start of today's schedule by the game.
+function mistrimulti_story_new_day(ctx) {
+    var r = __mistrimulti_runtime();
+    if (!r.enabled || ARI == undefined) return;
+    try { __mistrimulti_story_house_pass(__mistrimulti_story(), true); }
+    catch (e) { __mistrimulti_story_warn("Housing the villagers failed: " + string(e)); }
 }

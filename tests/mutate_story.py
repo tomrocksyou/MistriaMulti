@@ -1,10 +1,11 @@
-"""Mutation check for MistriMultiStory.gml: each mutation must make at least one story test fail.
+"""Mutation check for MistriMultiStory.gml (and the spouse registry and rewards ledger of MistriMultiProgress.gml): each mutation
+must make at least one test fail.
 
     python3 tests/mutate_story.py
 
 Breaks one rule of the GML at a time (accepting personal quests, lowering the world story, skipping the boxes of a finished
-stage, acting during a cutscene, moving a villager in sight, ...), runs the tests that should notice, and restores the file.
-Exit status 1 if a mutation goes unnoticed.
+stage, acting during a cutscene, moving a villager in sight, paying a step twice, housing a player's own spouse, ...), runs the
+tests that should notice, and restores the file. Exit status 1 if a mutation goes unnoticed.
 """
 import pathlib
 import subprocess
@@ -71,25 +72,95 @@ MUTATIONS = [
     ("a game that is ahead of the host cannot tell it",
      [("    var up = __mistrimulti_story_up(st, local);\n    var claim", "    var up = { q: [], sc: [], f: [], k: {} };\n    var claim")],
      ["test_guest_progress", "test_guest_restart", "test_host_restart"]),
+    # -- rewards for the players who did not do the step
+    ("a player's own step is paid a second time",
+     [("    if (!st.seen_ok || T2R.read(\"mm_paid_init\") != true) return;\n", "    return;\n")],
+     ["test_same_step_race", "test_rewards_exactly_once_under_loss"]),
+    ("a reward that starts a story quest starts it in every game",
+     [("    if (quest == undefined || quest.category == QuestCategory.Story) return;", "    if (quest == undefined) return;")],
+     ["test_guest_progress"]),
+    ("the ledger is not moved when a step is paid",
+     [("        T2R.write(\"mm_paid_\" + names[i], target);\n        try {", "        try {")], ["test_guest_progress", "test_host_progress"]),
+    ("a new character is owed the story so far",
+     [("            if (level > 0) T2R.write(\"mm_paid_\" + names[i], level);\n            continue;", "            continue;")],
+     ["test_rewards_new_character_is_not_owed_the_past", "test_late_join"]),
+    ("the items of a world scene are not given",
+     [("        if (array_length(c.given_items) > 0) mist_give_items_after_scene(c.given_items, player_wake_position());\n", "")],
+     ["test_scene_items"]),
+    ("the free baths of a world scene are not given",
+     [("        if (c.baths > 0) ARI.free_baths += c.baths;\n", "")], ["test_scene_items"]),
+    ("the quest's own rewards are not given at its end",
+     [("    __mistrimulti_story_grant(quest.reward_list);\n", "")], ["test_host_progress"]),
+    ("renown is not filed at the end of a quest",
+     [("            ARI.pending_renown_entries.push(RenownEntry.Quest(name));\n", "")], ["test_host_progress"]),
+    ("a step is paid from the start of the quest every time",
+     [("        var paid = __mistrimulti_story_paid(names[i]);\n        if (first) {", "        var paid = 0;\n        if (first) {")],
+     ["test_rewards_offline_and_restart", "test_guest_progress"]),
+    # -- the spouses of other players live at the farm
+    ("a spouse is put to bed without being a spouse (no status for the game's function)",
+     [("        T2R.write(key, \"spouse\");\n", "")], ["test_guest_spouse_moves_in"]),
+    ("a player's own spouse is moved in by the mod as well",
+     [("        if (!is_string(owner) || owner == r.uid || NPCS[i].is_roommate()) continue;", "        if (!is_string(owner)) continue;")],
+     ["test_guest_spouse_moves_in"]),
+    ("every spouse gets the bed",
+     [("    var bed_taken = ARI.spouse() != undefined;", "    var bed_taken = false;"),
+      ("                if (!mates[m].pet) bed_taken = true;\n", "")], ["test_two_spouses_at_the_farm"]),
+    ("a marriage that ends leaves the spouse at the farm",
+     [("        try { __mistrimulti_story_move_out(st, real(homes[m])); }", "        try { }")],
+     ["test_marriage_in_the_middle_of_a_day_and_divorce"]),
+    ("a villager in sight is moved in at once",
+     [("    if (morning && !here) {", "    if (morning) {")], ["test_move_in_waits_while_the_player_looks"]),
+    ("the day plan swaps a housed villager back out",
+     [("        if (st.homes[$ key] == plan.d) continue;\n", "")], ["test_marriage_in_the_middle_of_a_day_and_divorce"]),
+    ("the pet stays in the village",
+     [("        if (pet != undefined && !NPCS[pet].is_roommate()) array_push(out, { i: pet, pet: true });\n", "")],
+     ["test_guest_spouse_moves_in"]),
+    ("a villager nobody can marry is moved in",
+     [("        if (is_struct(kind) && kind[$ \"dateable\"] == false) continue;\n", "")], ["test_bad_registry_changes_nobody"]),
+    ("Fridays use the ordinary roommate schedule",
+     [("    if (CALENDAR.day_type() == Day.Friday) return \"Schedules/roommate_schedule_friday\";\n", "")],
+     ["test_move_in_waits_while_the_player_looks"]),
 ]
 
-original = GML.read_text()
+PROGRESS = ROOT / "mod/mistrimulti/gml/MistriMultiProgress.gml"
+PROGRESS_MUTATIONS = [
+    ("a dating player's partner counts as the spouse",
+     [("var married = relations[i].status == \"spouse\" &&", "var married = mistrimulti_romance_romantic(relations[i].status) &&")],
+     ["test_spouse_registry"]),
+    ("a player can have several spouses",
+     [(" && mistrimulti_romance_spouse_free(uid, name);", ";")], ["test_spouse_registry"]),
+    ("a guest accepts spouses the claims do not hold",
+     [("claims[$ names[i]] != undefined && claims[$ names[i]] == spouses[$ names[i]]", "true")], ["test_spouse_registry"]),
+    ("a marriage that ends stays in the registry",
+     [("        else if (!married && r.romance_spouse[$ name] == uid) { struct_remove(r.romance_spouse, name); r.romance_dirty = true; }\n", "")],
+     ["test_spouse_registry"]),
+    ("the host's ledger stays in a guest's game after its restore",
+     [("    for (var i = 0; i < array_length(quests); i++) T2R.write(\"mm_paid_\" + quests[i], v.paid[$ quests[i]]);\n", "")],
+     ["test_sections_round_trip"]),
+    ("a ledger with a level of zero is accepted",
+     [(" || level < 1 || level > 1000000) return false;", " || level > 1000000) return false;")], ["test_validation"]),
+]
+
+PROGRESS_RUNNER = "import sys, test_progress as t\nfor n in sys.argv[1:]: getattr(t, n)()"
 bad = 0
-try:
-    for name, edits, tests in MUTATIONS:
-        text = original
-        missing = [old for old, new in edits if old not in text]
-        if missing:
-            print("MISSING PATTERN:", name, "->", missing[0][:60])
-            bad += 1
-            continue
-        for old, new in edits:
-            text = text.replace(old, new, 1)
-        GML.write_text(text)
-        out = subprocess.run([sys.executable, "test_story.py"] + tests, cwd=ROOT / "tests", capture_output=True, text=True, timeout=900)
-        caught = out.returncode != 0
-        print(("caught " if caught else "NOT CAUGHT ") + name)
-        bad += 0 if caught else 1
-finally:
-    GML.write_text(original)
+for gml_file, table in ((GML, MUTATIONS), (PROGRESS, PROGRESS_MUTATIONS)):
+    original = gml_file.read_text()
+    try:
+        for name, edits, tests in table:
+            text = original
+            missing = [old for old, new in edits if old not in text]
+            if missing:
+                print("MISSING PATTERN:", name, "->", missing[0][:60])
+                bad += 1
+                continue
+            for old, new in edits:
+                text = text.replace(old, new, 1)
+            gml_file.write_text(text)
+            cmd = [sys.executable, "test_story.py"] + tests if gml_file == GML else [sys.executable, "-c", PROGRESS_RUNNER] + tests
+            out = subprocess.run(cmd, cwd=ROOT / "tests", capture_output=True, text=True, timeout=900)
+            caught = out.returncode != 0
+            print(("caught " if caught else "NOT CAUGHT ") + name)
+            bad += 0 if caught else 1
+    finally:
+        gml_file.write_text(original)
 sys.exit(1 if bad else 0)

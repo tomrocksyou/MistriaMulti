@@ -15,7 +15,7 @@ import sys
 from event_sim import GmlNode, World
 import gml_subset as gml
 from story_fake import (A, G, Npc, Fake, PRELUDE, default_save, WORLD_SCENES, FARM, HOME, TOWN, BEACH, NPC_COUNT,
-                        ACT_READ, ACT_EAT)
+                        ACT_READ, ACT_EAT, ROOMMATE)
 
 FIXED_FACTS = ["caldarus_seridia_town", "seridia_is_human", "caldarus_is_human", "caldarus_home"]
 WORLD_FACTS = FIXED_FACTS + ["bridge_fixed", "market_open"]
@@ -37,7 +37,7 @@ class StoryNode(GmlNode):
         return out
 
     def setup(self):
-        self.rt.update(enabled=True)
+        self.rt.update(enabled=True, uid="local:%032x" % self.slot, romance_spouse=gml.GStruct(), romance_spouse_view=gml.GStruct())
         g = self.interp.globals
         g["story_enabled"] = True
         g["cancel_festivals"] = False
@@ -176,7 +176,8 @@ def test_host_progress():
     for g in (g1, g2):
         assert stage_of(g, "arrival") == "done" and stage_of(g, "bridge") == 0
         assert (5, 5) in g.fake.boxes, "the turn-in box of the first task is placed in this game's copy of the world"
-        assert g.fake.gold == 100 and not g.fake.rewards, "mirrored progress gives no reward"
+        assert g.fake.gold == 120 and g.fake.rewards == {"arrival": 2}, (g.fake.gold, g.fake.rewards)
+        assert g.fake.items == {"trophy": 1} and g.fake.renown == ["arrival"], "the quest's own rewards and renown reach the others too"
     assert_converged(world, "host progress")
     # The festival's quest is run by every game itself and is never mirrored, even though the game files it under "story".
     host.fake.quest_start("spring_quest")
@@ -194,7 +195,7 @@ def test_guest_progress():
         g1.fake.hand_in("arrival")
         settle(world, 5000)
         assert stage_of(host, "arrival") == 2 and stage_of(g2, "arrival") == 2, (stage_of(host, "arrival"), stage_of(g2, "arrival"))
-        assert host.fake.gold == 100 and g2.fake.gold == 100 and g1.fake.gold == 110, "only the player who handed in is paid"
+        assert host.fake.gold == 110 and g2.fake.gold == 110 and g1.fake.gold == 110, "everybody is paid for the step, once"
         g1.fake.hand_in("arrival")
         g1.fake.quest_start("bridge")
         settle(world, 5000)
@@ -210,8 +211,18 @@ def test_guest_progress():
         settle(world, 5000)
         assert stage_of(host, "bridge") == "done" and stage_of(g2, "bridge") == "done"
         assert_converged(world, "guest progress")
+        for n in (host, g1, g2):
+            assert n.fake.gold == 140 and n.fake.items == {"trophy": 1} and n.fake.renown == ["arrival", "bridge"], \
+                (n.slot, n.fake.gold, n.fake.items, n.fake.renown)
+            assert all(v == 1 for v in n.fake.granted.values()), (n.slot, n.fake.granted)
+            assert stage_of(n, "juniper_heart") == 0, "a reward that starts a personal quest starts it for everybody, once"
+            assert stage_of(n, "dragon") == 0
+            assert stage_of(n, "spring_quest") == (0 if n is g1 else None), \
+                "the calendar's quest is the calendar's: a mirrored reward does not start it"
+        assert [x for x in host.fake.starts if x[0] in ("dragon", "juniper_heart")] == [("dragon", 0), ("juniper_heart", 0)] or \
+            [x for x in host.fake.starts if x[0] in ("dragon", "juniper_heart")] == [("juniper_heart", 0), ("dragon", 0)], host.fake.starts
         assert_clean(world)
-    print("PASS: guest progress: the host takes the story step once, every game mirrors it, only the player is paid")
+    print("PASS: guest progress: the host takes the story step once, every game mirrors it, everybody is paid its rewards once")
 
 
 def test_same_step_race():
@@ -398,7 +409,11 @@ def test_host_restart():
     assert stage_of(host, "arrival") == "done" and stage_of(host, "bridge") == 0 and "narrows_secret" in host.fake.history, \
         "the guests re-assert their progress to the restarted host"
     assert_converged(world, "host restart")
-    assert g1.fake.gold == 110 and not g1.fake.rewards.get("bridge")
+    assert g1.fake.gold == 120 and not g1.fake.rewards.get("bridge")
+    # The restarted host went back to a save from before the guests' steps: it is paid for them again, once (its inventory was
+    # rolled back with the save, and so was its ledger).
+    assert host.fake.gold == 120 and host.fake.items == {"trophy": 1}, (host.fake.gold, host.fake.items)
+    assert g1.fake.gold == 120 and g1.fake.items == {"trophy": 1}, "the guests are not paid again"
     # A claim that is in flight while the host restarts is neither lost nor applied twice.
     world.net.partition(0, 2)
     g2.fake.hand_in("bridge")                  # bridge task 0
@@ -486,7 +501,9 @@ def test_many_changes():
     settle(world, 30000)
     assert all(stage_of(g3, "chapter_%03d" % i) == "done" for i in range(100))
     assert_converged(world, "many changes")
-    assert not g1.fake.rewards and g1.fake.gold == 100
+    for g in (g1, g2):
+        assert g.fake.gold == 1100 and all(g.fake.rewards.get("chapter_%03d" % i) == 1 for i in range(100)), (g.slot, g.fake.gold)
+    assert g3.fake.gold == 100 and not g3.fake.rewards, "a game that joins after the steps is not paid for them"
     assert_clean(world)
     print("PASS: a hundred story steps at once, a full send queue and a late joiner: every game gets all of them, nothing is paid twice")
 
@@ -643,8 +660,11 @@ DAY_G2 = ["s/town_day"] * NPC_COUNT
 
 
 def new_day(world, schedules=(DAY_HOST, DAY_G1, DAY_G2)):
+    """The game starts a new day in every game (npcs_on_new_day), then the game.new_day hook runs."""
     for slot, schedule in zip(sorted(world.games), schedules):
-        world.games[slot].node.fake.new_day(schedule)
+        node = world.games[slot].node
+        node.fake.new_day(schedule)
+        node.call("mistrimulti_story_new_day", {})
 
 
 def sample(world):
@@ -794,6 +814,365 @@ def test_heart_event_is_private():
     assert sample(world)[0] == host_before and sample(world)[2] == host_before, "nothing the guest does moves anybody else's villagers"
     assert_clean(world)
     print("PASS: a heart event never moves villagers for the other players")
+
+
+# ---- rewards of story steps for the players who did not do the step -------------------------------------------------------------
+
+def paid_once(*games):
+    """Every reward every game has been given was given once."""
+    for n in games:
+        assert all(v == 1 for v in n.fake.granted.values()), (n.slot, n.fake.granted)
+
+
+def test_rewards_offline_and_restart():
+    saves = {}
+    world = make_world(40, saves=saves, loss=0.1, dup=0.1, jitter=40)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    # g1 is away for longer than the layer waits (it is expired) while the story moves twice.
+    world.net.partition(0, 1)
+    host.fake.hand_in("arrival")                       # task 1: 10 gold
+    settle(world, 3000)
+    host.fake.hand_in("arrival")                       # task 2: 10 gold, then the quest's trophy and renown
+    host.fake.quest_start("bridge")
+    settle(world, 14000)
+    assert stage_of(g2, "arrival") == "done" and g2.fake.gold == 120 and g2.fake.items == {"trophy": 1} and g2.fake.renown == ["arrival"]
+    assert stage_of(g1, "arrival") == 1 and g1.fake.gold == 100, "the guest that is away has been given nothing yet"
+    world.net.partition(0, 1, False)
+    settle(world, 14000)
+    assert stage_of(g1, "arrival") == "done"
+    assert g1.fake.gold == 120 and g1.fake.items == {"trophy": 1} and g1.fake.renown == ["arrival"], (g1.fake.gold, g1.fake.items)
+    paid_once(host, g1, g2)
+    # The guest's game is closed and started again from its old world copy, with the ledger of its record (it had been given
+    # everything up to the first task of arrival); the host has moved on since.
+    host.fake.hand_in("bridge")                        # 10 gold
+    settle(world, 5000)
+    saves[1] = {**default_save(), "ledger": {"init": 1, "arrival": 1}}
+    restart(world, 1)
+    settle(world, 14000)
+    g1 = world.games[1].node
+    assert stage_of(g1, "arrival") == "done" and stage_of(g1, "bridge") == 1
+    assert g1.fake.gold == 130 and g1.fake.items == {"trophy": 1} and g1.fake.renown == ["arrival"], \
+        (g1.fake.gold, g1.fake.items, g1.fake.renown)
+    paid_once(g1)
+    # Its record is saved with the ledger; the next restart, even from a world copy that is older again, is given nothing more.
+    saved = g1.fake.export()
+    assert saved["ledger"] == {"init": True, "arrival": 1000000, "bridge": 1}, saved["ledger"]
+    saves[1] = {**saved, "quests": {"arrival": 1}, "done": []}
+    restart(world, 1)
+    settle(world, 12000)
+    g1 = world.games[1].node
+    assert stage_of(g1, "arrival") == "done" and g1.fake.gold == 130 and g1.fake.items == {"trophy": 1}, (g1.fake.gold, g1.fake.items)
+    assert g1.fake.renown == ["arrival"]
+    assert_clean(world)
+    print("PASS: rewards: a guest that was away, or restarted from an older world, is paid once for what it missed")
+
+
+def test_rewards_new_character_is_not_owed_the_past():
+    saves = {0: {**default_save(), "quests": {"arrival": 2, "bridge": 1}, "done": ["dragon"]}}
+    world = make_world(41, saves=saves, loss=0.05, jitter=30)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    settle(world, 6000)
+    # The guests joined (as new characters) a story that was well on its way, and the host has no ledger yet: nothing of it is owed.
+    for n in (host, g1, g2):
+        assert n.fake.gold == 100 and not n.fake.items and not n.fake.renown and not n.fake.rewards, (n.slot, n.fake.gold, n.fake.items)
+        assert n.fake.facts.get("mm_paid_init") is True and n.fake.facts.get("mm_paid_arrival") == 2
+        assert n.fake.facts.get("mm_paid_dragon") == 1000000 and n.fake.facts.get("mm_paid_bridge") == 1
+    host.fake.hand_in("arrival")                       # the next step is owed to everybody
+    settle(world, 6000)
+    for n in (host, g1, g2):
+        assert n.fake.gold == 110 and n.fake.items == {"trophy": 1} and n.fake.renown == ["arrival"], (n.slot, n.fake.gold)
+    paid_once(host, g1, g2)
+    assert_clean(world)
+    print("PASS: rewards: a new character (or a game without a ledger) is not owed the story so far; the next step is")
+
+
+def test_rewards_exactly_once_under_loss():
+    for seed in range(3):
+        world = make_world(42 + seed, loss=0.15, dup=0.15, jitter=60)
+        wait_ready(world)
+        host, g1, g2 = nodes(world)
+        # Steps by all three players, one at the same moment by two of them, and the last by a guest.
+        host.fake.hand_in("arrival")
+        settle(world, 3000)
+        g1.fake.hand_in("arrival")
+        g2.fake.hand_in("arrival")                     # the same step as g1's, at the same moment (arrival is now done)
+        settle(world, 3000)
+        g2.fake.quest_start("bridge")
+        settle(world, 2000)
+        g2.fake.hand_in("bridge")
+        host.fake.hand_in("bridge")                    # again the same step twice
+        settle(world, 9000)
+        g1.fake.hand_in("bridge")
+        settle(world, 9000)
+        for n in (host, g1, g2):
+            assert stage_of(n, "arrival") == "done" and stage_of(n, "bridge") == "done"
+        # Every player was paid for each of the five steps once: a step two players took is each one's own.
+        for n in (host, g1, g2):
+            assert n.fake.items.get("trophy") == 1 and n.fake.renown.count("arrival") == 1 and n.fake.renown.count("bridge") == 1, \
+                (n.slot, n.fake.items, n.fake.renown)
+        assert_converged(world, "rewards under loss")
+        assert_clean(world)
+    print("PASS: rewards: under loss and duplication, two players taking one step, nobody is paid twice for anything")
+
+
+def test_scene_items():
+    for seed in range(2):
+        world = make_world(44 + seed, loss=0.1, dup=0.1, jitter=40)
+        wait_ready(world)
+        host, g1, g2 = nodes(world)
+        world.net.partition(0, 2)
+        play(world, 0, "fire_seal", 2)                 # items, free baths, advances the dragon quest, a spell
+        play(world, 1, "alt_scene", 1)                 # a scene that a world gate reads: its items go to everybody
+        play(world, 1, "juniper_two", 1)               # a heart event: its item is the watcher's alone
+        settle(world, 5000)
+        assert g1.fake.items == {"sword": 1, "lantern": 2, "rose": 1}, g1.fake.items
+        assert host.fake.items == {"sword": 1, "lantern": 2} and host.fake.ari["free_baths"] == 2, host.fake.items
+        assert g2.fake.items == {} and g2.fake.ari["free_baths"] == 0, "the guest that is away has not got them yet"
+        world.net.partition(0, 2, False)
+        settle(world, 14000)
+        assert g2.fake.items == {"sword": 1, "lantern": 2}, g2.fake.items
+        assert g2.fake.ari["free_baths"] == 2 and g1.fake.ari["free_baths"] == 2
+        # Two players watching the same scene at the same moment are each given its items once.
+        before = (host.fake.items, g1.fake.items)
+        play(world, 0, "quest_gate", 1)
+        settle(world, 6000)
+        assert (host.fake.items, g1.fake.items) == before
+        paid_once(host, g1, g2)
+        assert_clean(world)
+    # Both watch the same scene at once (in two games at the same time): once each, the third game gets it once.
+    world = make_world(48, loss=0.05, jitter=30)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    host.fake.scene_running = g1.fake.scene_running = True
+    world.run(2000)
+    host.fake.watch("alt_scene")
+    g1.fake.watch("alt_scene")
+    host.fake.scene_running = g1.fake.scene_running = False
+    settle(world, 8000)
+    for n in (host, g1, g2):
+        assert n.fake.items == {"lantern": 2}, (n.slot, n.fake.items)
+    print("PASS: rewards: a world cutscene's items and baths reach the players who did not watch it, once; heart events stay private")
+
+
+def test_failed_reward_is_not_repeated():
+    world = make_world(49, loss=0.0)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    real = g1.interp.builtins["grant_quest_rewards"]
+    calls = []
+
+    def failing(rewards):
+        calls.append(1)
+        raise gml.GmlError("the reward could not be given")
+    g1.interp.builtins["grant_quest_rewards"] = failing
+    host.fake.hand_in("arrival")
+    settle(world, 6000)
+    assert len(calls) == 1 and g1.fake.gold == 100 and stage_of(g1, "arrival") == 2
+    assert any("could not be given" in w for w in world.games[1].warnings), world.games[1].warnings
+    g1.interp.builtins["grant_quest_rewards"] = real
+    settle(world, 10000)
+    assert len(calls) == 1 and g1.fake.gold == 100, "a reward that failed is not retried (it might have been half given)"
+    host.fake.hand_in("arrival")                       # the next step is paid
+    settle(world, 6000)
+    assert g1.fake.gold == 110 and g1.fake.items == {"trophy": 1}
+    print("PASS: rewards: a reward that cannot be given is logged and not retried; the next step is paid")
+
+
+# ---- spouses of other players live at the farm --------------------------------------------------------------------------------
+
+def uid(slot):
+    return "local:%032x" % slot
+
+
+def marry(world, owner, name, native=True):
+    """The host's registry says `owner` is married to `name` (the guests got it in romance_claims); the owner's own game has the
+    status fact the game's relationship code writes."""
+    nodes(world)[0].rt["romance_spouse"][name] = uid(owner)
+    for n in nodes(world)[1:]:
+        n.rt["romance_spouse_view"][name] = uid(owner)
+    if native:
+        world.games[owner].node.fake.facts[name + "_status"] = "spouse"
+
+
+def divorce(world, owner, name):
+    nodes(world)[0].rt["romance_spouse"].pop(name, None)
+    for n in nodes(world)[1:]:
+        n.rt["romance_spouse_view"].pop(name, None)
+    world.games[owner].node.fake.facts[name + "_status"] = "best_friend"
+
+
+def at_farm(n, i):
+    return n.fake.where_is(i) in (FARM, HOME)
+
+
+def test_guest_spouse_moves_in():
+    for seed in range(2):
+        Npc.violations.clear()
+        world = make_world(50 + seed, loss=0.1, jitter=40)
+        wait_ready(world)
+        host, g1, g2 = nodes(world)
+        marry(world, 1, "juniper")                      # g1 is married to Juniper (2); her pet Dozy (3) comes along
+        new_day(world, ([ "s/home_day"] * NPC_COUNT,) * 3)
+        for n in (host, g1, g2):
+            assert n.fake.sched[2] == ROOMMATE and n.fake.sched[3] == ROOMMATE, (n.slot, n.fake.sched)
+            assert n.fake.spot(2) == "bed" and n.fake.spot(3) == "floor", (n.slot, n.fake.spot(2), n.fake.spot(3))
+            assert n.fake.npcs[2].brain_dead is False and n.fake.npcs[2].talk_flag is False
+            assert n.fake.facts.get("juniper_status") == ("spouse" if n.slot == 1 else None), "the status is the player's own"
+        assert g1.fake.swaps_done == [] and list(g1.debug()["housed"]) == [], "the game moved in its own player's spouse itself"
+        assert list(host.debug()["housed"]) == ["2", "3"] and list(g2.debug()["housed"]) == ["2", "3"]
+        assert not Npc.violations
+        for hour in range(1, 15):
+            for f in fakes(world):
+                f.advance(1)
+            settle(world, 3000)
+            s = sample(world)
+            assert s[1] == s[0] and s[2] == s[0], f"hour {6 + hour}:\n{s[0]}\n{s[1]}\n{s[2]}"
+            for n in (host, g1, g2):
+                assert at_farm(n, 2) and at_farm(n, 3), (n.slot, hour, n.fake.where_is(2))
+            assert all(f.sched[2] == ROOMMATE for f in fakes(world))
+        assert not Npc.violations
+        # The next day starts the same way, and nothing was asked twice on the first.
+        swaps = len(host.fake.swaps_done)
+        new_day(world, ([ "s/town_day"] * NPC_COUNT,) * 3)
+        assert all(f.sched[2] == ROOMMATE and f.spot(2) == "bed" for f in fakes(world)) and len(host.fake.swaps_done) == swaps + 2
+        assert_clean(world)
+    print("PASS: a guest's spouse (and the pet) lives at the farm in every game: roommate schedule, bed, daily routine, every day")
+
+
+def test_two_spouses_at_the_farm():
+    Npc.violations.clear()
+    world = make_world(52, loss=0.1, jitter=40)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    marry(world, 0, "hayden")                           # the host is married to Hayden (4) and Henrietta (5) lives with them
+    marry(world, 1, "juniper")                          # and g1 to Juniper (2) and Dozy (3)
+    new_day(world, ([ "s/home_day"] * NPC_COUNT,) * 3)
+    for n in (host, g1, g2):
+        assert all(n.fake.sched[i] == ROOMMATE for i in (2, 3, 4, 5)), (n.slot, n.fake.sched)
+        assert all(at_farm(n, i) for i in (2, 3, 4, 5))
+    # One bed: the player's own spouse has it in the game's own way; the other player's spouse starts the day on the floor.
+    assert (host.fake.spot(4), host.fake.spot(2)) == ("bed", "floor")
+    assert (g1.fake.spot(2), g1.fake.spot(4)) == ("bed", "floor")
+    assert (g2.fake.spot(2), g2.fake.spot(4)) == ("bed", "floor"), "a player with no spouse: the first one in villager order"
+    assert all(n.fake.spot(i) == "floor" for n in (host, g1, g2) for i in (3, 5))
+    for hour in range(1, 15):
+        for f in fakes(world):
+            f.advance(1)
+        settle(world, 3000)
+        s = sample(world)
+        assert s[1] == s[0] and s[2] == s[0], f"hour {6 + hour}:\n{s[0]}\n{s[1]}\n{s[2]}"
+        assert all(at_farm(n, i) for n in (host, g1, g2) for i in (2, 3, 4, 5))
+    assert_clean(world)
+    print("PASS: two spouses at the farm (the host's and a guest's): both live there in every game, one bed, nobody left in the village")
+
+
+def test_spouse_of_an_absent_guest():
+    Npc.violations.clear()
+    world = make_world(53, guests=1, loss=0.05, jitter=30)
+    wait_ready(world)
+    host, g1 = nodes(world)
+    host.rt["romance_spouse"]["juniper"] = uid(5)       # a guest who is not in this session (a stored record says so)
+    g1.rt["romance_spouse_view"]["juniper"] = uid(5)
+    new_day(world, ([ "s/home_day"] * NPC_COUNT,) * 2)
+    for n in (host, g1):
+        assert n.fake.sched[2] == ROOMMATE and n.fake.spot(2) == "bed" and n.fake.sched[3] == ROOMMATE
+    for hour in range(1, 15):
+        for f in fakes(world):
+            f.advance(1)
+        settle(world, 3000)
+        assert all(at_farm(n, 2) and at_farm(n, 3) for n in (host, g1))
+        assert sample(world)[1] == sample(world)[0]
+    # The host alone (nobody connected) does the same.
+    solo = make_world(54, guests=0, loss=0.0)
+    solo_host = nodes(solo)[0]
+    solo_host.rt["romance_spouse"]["hayden"] = uid(7)
+    new_day(solo, ([ "s/home_day"] * NPC_COUNT,))
+    assert solo_host.fake.sched[4] == ROOMMATE and solo_host.fake.sched[5] == ROOMMATE and solo_host.fake.spot(4) == "bed"
+    print("PASS: the spouse of a guest who is away lives at the farm all the same (also with nobody else connected)")
+
+
+def test_marriage_in_the_middle_of_a_day_and_divorce():
+    Npc.violations.clear()
+    world = make_world(55, loss=0.05, jitter=30)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    for n in (host, g1, g2):
+        n.set_room(BEACH)
+    new_day(world, ([ "s/home_day"] * NPC_COUNT,) * 3)
+    for f in fakes(world):
+        f.advance(4)                                    # hour 10
+    settle(world, 4000)
+    assert all(f.sched[2] == "s/home_day" for f in fakes(world))
+    marry(world, 1, "juniper")                          # the wedding was this morning; the registry just changed
+    settle(world, 7000)
+    for f in fakes(world):
+        f.advance(1)
+    settle(world, 7000)
+    for f in fakes(world):
+        f.advance(1)
+    settle(world, 4000)
+    for n in (host, g2):
+        assert n.fake.sched[2] == ROOMMATE and n.fake.sched[3] == ROOMMATE, (n.slot, n.fake.sched)
+    assert g1.fake.sched[2] == ROOMMATE, "the guest's own game follows the host's plan (the game moves a spouse in on the next day)"
+    assert not Npc.violations, "mid-day the game's own deferred swap does it, out of sight"
+    assert host.fake.swaps_done == [] and list(host.debug()["housed"]) == ["2", "3"]
+    # Marriage ends: the villagers go back to the schedule the game would give them.
+    divorce(world, 1, "juniper")
+    settle(world, 7000)
+    for f in fakes(world):
+        f.advance(1)
+    settle(world, 7000)
+    for f in fakes(world):
+        f.advance(1)
+    settle(world, 4000)
+    for n in (host, g1, g2):
+        assert n.fake.sched[2] == "s/home_day" and n.fake.sched[3] == "s/home_day", (n.slot, n.fake.sched)
+    assert list(host.debug()["housed"]) == []
+    assert_clean(world)
+    print("PASS: a marriage in the middle of a day moves the spouse in out of sight; a divorce sends them back")
+
+
+def test_move_in_waits_while_the_player_looks():
+    Npc.violations.clear()
+    world = make_world(56, loss=0.05, jitter=30)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    marry(world, 1, "juniper")
+    g2.set_room(HOME)                                   # g2 stands where the villagers wake up
+    new_day(world, ([ "s/home_day"] * NPC_COUNT,) * 3)
+    assert g2.fake.sched[2] == "s/home_day" and g2.fake.swaps_done == [], "in sight: not moved at once"
+    assert g2.fake.spot(2) is None
+    settle(world, 7000)
+    assert g2.fake.npcs[2].swap_schedule_request is not None and not Npc.violations
+    g2.set_room(BEACH)
+    g2.fake.advance(1)
+    assert g2.fake.sched[2] == ROOMMATE and not Npc.violations
+    # Fridays and festival days have their own roommate schedule.
+    for weekday, festival, name in ((4, False, ROOMMATE + "_friday"), (2, True, ROOMMATE + "_festival")):
+        for n in (host, g1, g2):
+            n.fake.weekday, n.fake.festival = weekday, festival
+            n.set_room(BEACH)
+        new_day(world, ([ "s/home_day"] * NPC_COUNT,) * 3)
+        assert all(f.sched[2] == name and f.sched[3] == name for f in fakes(world)), [f.sched for f in fakes(world)]
+    print("PASS: a villager in the player's sight is moved in only after they leave; Friday and festival days use the game's schedules")
+
+
+def test_bad_registry_changes_nobody():
+    world = make_world(57, loss=0.0)
+    wait_ready(world)
+    host, g1, g2 = nodes(world)
+    own = g2.rt["uid"]
+    g2.rt["romance_spouse_view"].update({"nobody": uid(1), "juniper": 5, "adeline": own, "eiland": None, "hayden": ["x"]})
+    host.rt["romance_spouse"].update({"adeline": host.rt["uid"], "dozy": uid(1)})
+    new_day(world, ([ "s/home_day"] * NPC_COUNT,) * 3)
+    settle(world, 6000)
+    assert g2.fake.sched == ["s/home_day"] * NPC_COUNT and g2.fake.swaps_done == [] and list(g2.debug()["housed"]) == []
+    # The host's own registry entry is the game's business, and a pet is not somebody's spouse.
+    assert host.fake.sched[0] == "s/home_day" and host.fake.sched[3] == "s/home_day" and list(host.debug()["housed"]) == []
+    assert_clean(world)
+    print("PASS: a malformed or forged registry (unknown names, wrong types, the player's own spouse) moves nobody and breaks nothing")
 
 
 if __name__ == "__main__":
