@@ -41,4 +41,4 @@ More help: [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md). Technical stuff: [docs/DE
 
 ## License
 
-Public domain (the Unlicense, see `LICENSE`): free to use, change, share and sell for any purpose, no permission needed.
+GNU GPL version 3 (see `LICENSE`): free to use, change and share. Anything you distribute that is based on it must stay open under the same licence.

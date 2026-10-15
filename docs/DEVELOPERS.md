@@ -210,7 +210,7 @@ Linting the already patched live archive reports duplicate seam markers.
 
 ## License and dependencies
 
-The project is in the public domain (the Unlicense in `LICENSE`): any use, modification and redistribution is allowed.
+The project is free software under the GNU GPL version 3 (`LICENSE`): use, modification and redistribution are allowed, and distributed versions must stay open under the same licence.
 Commercial use of any part, including sale or incorporation into a commercial product
 or service, requires prior written permission. Requests are considered individually;
 see `CONTACT.md`.
