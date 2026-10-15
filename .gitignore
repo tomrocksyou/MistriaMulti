@@ -8,5 +8,3 @@
 __pycache__/
 /test-results/
 
-# Claude Code local state and agent worktrees
-/.claude/
