@@ -9,6 +9,7 @@ ladder score; the generator's use of `random_set_seed`), with the rules of the g
 DungeonRunner.gml, par_monster.gml, Pick.gml, GridUtils.gml). It checks logic and wiring; it does not replace testing in the
 game (docs/SYNC-DUNGEON.md lists what has to be checked there).
 """
+import math
 import random
 import sys
 
@@ -87,6 +88,7 @@ class Mine:
         self.ladder_obj = S(x=0, y=0)
         self.player = S(x=40, y=40)
         self.in_mines = False
+        self.aggro_radius, self.wander, self.struck = 48, False, 0
         self.raw = None
         self.room_name = "none"
         self.room_override = None
@@ -174,11 +176,45 @@ class Mine:
                     self.spawn_monster((x + 1) * 8, (y + 1) * 8, rng.randrange(3))
 
     def spawn_monster(self, x, y, monster_id):
+        """par_monster: the fields the stream reads and the follower writes (states 0 idle, 1 walk, 2 attack, 3 hidden)."""
         self.uid += 1
+        name = MONSTERS[monster_id][0]
+        catalogue = gml.GArray(gml.GArray("spr_%s_%d_%d" % (name, st, c) for c in range(4)) for st in range(4))
         mon = S(uid=self.uid, monster_id=monster_id, hit_points=MONSTERS[monster_id][1], original_spawn_pos=vec(x, y), x=x, y=y,
-                depth=0, skip_destroy_logic=False, alive=True)
+                depth=0, skip_destroy_logic=False, alive=True, dir=0, z=0, aggro=False, image_index=0, image_xscale=1,
+                draw_y_offset=0, state=0, config=S(sprite_catalogue=catalogue), sprite_index="spr_%s_0_0" % name)
+        mon["fsm"] = S(current_state_id=lambda: mon.state)
+        mon["get_cardinal"] = lambda: int(mon.dir // 90) % 4
+        mon["calculate_flipper"] = lambda: -1 if 90 <= mon.dir < 270 else 1
+        mon["set_state_sprite"] = lambda reset, state: mon.__setitem__("sprite_index", catalogue[state][mon.get_cardinal()])
         self.monsters.append(mon)
         return mon
+
+    def ai(self, mon):
+        """The species' step: aggro within 48 px of this game's player, walk at it, strike when close."""
+        if mon.state == 3:
+            return                                     # hidden (a mite under ground): no AI in this model
+        dx, dy = self.player.x - mon.x, self.player.y - mon.y
+        dist = math.hypot(dx, dy)
+        mon["aggro"] = dist < self.aggro_radius
+        state = 0
+        if mon.aggro:
+            mon["dir"] = int(math.degrees(math.atan2(-dy, dx))) % 360
+            if dist > 6:
+                mon["x"] += dx / dist
+                mon["y"] += dy / dist
+                state = 1
+            else:
+                state = 2
+                self.struck += 1
+        elif self.wander:
+            mon["x"] += 0.5
+            mon["y"] += 0.25
+            state = 1
+        if state != mon.state:
+            mon["state"] = state
+            mon.set_state_sprite(False, state)
+        mon["image_index"] = (mon.image_index + 0.25) % 4
 
     def make_runner(self):
         e = self
@@ -282,6 +318,7 @@ class Mine:
         for mon in list(self.monsters):
             if not mon.alive:
                 continue
+            self.ai(mon)
             # par_monster's step_end (process_status, then the monster.step_end hook) comes before the species' own check
             self.node.call("mistrimulti_dg_monster_step", mon)
             if mon.hit_points <= 0:
@@ -394,7 +431,7 @@ class Mine:
             "Skill": S(Archaeology=3), "XpValue": S(break_dig_spot=5), "InputId": S(UseToolCharged=7),
             "INPUT": S(check=lambda i: e.charging), "RangePattern": S(One=0, OneByThree=1),
             "quality_to_range_pattern": lambda q: 0 if q == 0 else 1, "spr_fx_small_monster_death_poof": "poof",
-            "obj_dungeon_ladder_down": self.ladder_obj, "obj_ari": self.player, "obj_node_renderer": "r", "par_monster": "m",
+            "spr_nothing": "spr_nothing", "obj_dungeon_ladder_down": self.ladder_obj, "obj_ari": self.player, "obj_node_renderer": "r", "par_monster": "m",
             "room": lambda: e.room_name, "asset_to_string": lambda rm: rm, "is_special_dungeon_room": lambda rm: rm == "special",
             "create_dungeon_itinerary": create_dungeon_itinerary, "random_set_seed": random_set_seed, "randomize": randomize,
             "irandom_range": lambda a, b: e.rng.randint(int(a), int(b)),
@@ -437,7 +474,9 @@ class Driver:
         self.node.interp.call("mistrimulti_dungeon_register_events")
 
     def frame(self):
-        return {"room": self.node.mine.room_key(), "x": 40, "y": 40}
+        frame = self.node.data({"room": self.node.mine.room_key(), "x": 40, "y": 40})
+        self.node.call("mistrimulti_dungeon_frame", frame)       # what Boot adds to the peer frame
+        return dict(frame)
 
     def tick(self, now):
         self.node.call("mistrimulti_dungeon_tick")
@@ -948,8 +987,8 @@ def test_unshared_floors():
     host, g1 = nodes(world)
     host.mine.enter_mines()
     g1.mine.enter_mines()
-    # A side room, the arena and special rooms are not shared: the game's own rules apply (monsters die by themselves).
-    for kw in (dict(side=True), dict(impl=1)):
+    # A side room is not shared: the game's own rules apply (monsters die by themselves).
+    for kw in (dict(side=True),):
         g1.mine.enter_floor(2, **kw)
         world.run(500)
         assert dg(g1)["f"] == -1 and dg(g1)["st"] == "off", kw
@@ -976,7 +1015,7 @@ def test_unshared_floors():
     world2.net.partition(0, 1)
     world2.run(24000)
     assert dg(p2)["st"] == "off" and dg(p2)["f"] == -1, (dg(p2)["st"], dg(p2)["f"])
-    print("PASS: side rooms, the arena, unknown runs and a lost host leave the floor to the game's own rules")
+    print("PASS: side rooms, unknown runs and a lost host leave the floor to the game's own rules")
 
 
 def test_hostile_input():
@@ -995,7 +1034,8 @@ def test_hostile_input():
             {"o": "man", "run": run, "f": 3, "i": 0, "n": 1, "nd": [], "mo": []},
             {"o": "man", "run": run, "f": 3, "i": 0, "n": 1, "nd": [["rock", 1, 1, 1, 1]] * 80, "mo": [], "h": {"need": 1, "rv": 0}},
             {"o": "here", "run": run, "f": 1e12}, {"o": "here", "run": "q", "f": 3}, {"o": "here", "run": run, "f": -7},
-            {"o": "here", "run": 5, "f": 3, "rj": True, "seed": "s"}]
+            {"o": "here", "run": 5, "f": 3, "rj": True, "seed": "s"}, {"o": "here", "run": 5, "f": 3, "sp": True},
+            {"o": "here", "run": run, "f": "a", "sp": True}, {"o": "here", "run": run, "f": 4, "sp": "yes"}]
     for data in junk:
         node = g1
         # as the host would receive them (from slot 1) and as a guest would send them
@@ -1153,10 +1193,318 @@ def test_ladder_position_and_hostile_hits():
     print("PASS: one ladder place per floor; absurd, fractional and off-floor hits are refused")
 
 
+# ---- monster movement: the floor's authority streams, the others follow ---------------------------------------------------------
+
+def far(world, slots=None):
+    """Every player far from every monster (nothing is aggro), so that only the authority's movement shows."""
+    for slot, game in world.games.items():
+        if slots is None or slot in slots:
+            game.node.mine.player.x, game.node.mine.player.y = 5000, 5000
+
+
+def positions(game):
+    return {key_of(m): (m.x, m.y) for m in game.node.mine.monsters if m.alive}
+
+
+def spread(world, a, b):
+    """The largest distance between the same monster's place in two games."""
+    pa, pb = positions(world.games[a]), positions(world.games[b])
+    assert pa.keys() == pb.keys(), (sorted(pa), sorted(pb))
+    return max(abs(pa[k][0] - pb[k][0]) + abs(pa[k][1] - pb[k][1]) for k in pa)
+
+
+def floor_with(world, slots, flr=3, ms=300, **kw):
+    for slot in slots:
+        go(world, slot, flr, ms=ms, **kw)
+    wait_live(world, slots)
+
+
+def test_followers_move_with_the_authority():
+    world = make_world(41, guests=2, loss=0.05, dup=0.03, jitter=30)
+    host, g1, g2 = nodes(world)
+    far(world)
+    floor_with(world, (0, 1, 2))
+    world.run(1500)
+    assert dg(host)["au"] == dg(g1)["au"] == dg(g2)["au"] == 0, "the host is on the floor, so it is the authority"
+    assert len(positions(world.games[0])) >= 3
+    host.mine.wander = True                       # only the authority's AI moves anything (the others' players are far away)
+    world.run(3000)
+    moved = max(x - k[0] for k, (x, y) in positions(world.games[0]).items())
+    moved_y = max(y - k[1] for k, (x, y) in positions(world.games[0]).items())
+    assert moved > 15 and moved_y > 7, "the host's monsters walked"
+    for slot in (1, 2):
+        assert spread(world, 0, slot) < 8, (slot, spread(world, 0, slot))
+    # They also look like the authority's copies: the walking sprite, the same facing.
+    for m in host.mine.monsters:
+        for n in (g1, g2):
+            c = copy_of(world.games[n.slot], key_of(m))
+            assert c.sprite_index == m.sprite_index and c.dir == m.dir, (key_of(m), c.sprite_index, m.sprite_index)
+    # The follower's own AI was idle; it never moved a copy by itself.
+    assert g1.mine.struck == 0 and g2.mine.struck == 0
+    assert max(g.max_frame for g in world.games.values()) < 16384
+    clean(world, "followers")
+    print("PASS: followers put every copy where the authority has it, with its animation, while their own AI idles")
+
+
+def test_authority_election():
+    world = make_world(42, guests=2, jitter=20)
+    host, g1, g2 = nodes(world)
+    far(world)
+    floor_with(world, (1, 2))
+    world.run(1500)
+    assert dg(g1)["au"] == dg(g2)["au"] == 1, "no host on the floor: the lowest slot streams"
+    g1.mine.wander = True
+    world.run(2500)
+    assert spread(world, 1, 2) < 8
+    # The host arrives: it takes over, the others follow it.
+    floor_with(world, (0,))
+    world.run(2000)
+    assert dg(host)["au"] == dg(g1)["au"] == dg(g2)["au"] == 0, [dg(n)["au"] for n in (host, g1, g2)]
+    g1.mine.wander = False
+    host.mine.wander = True
+    world.run(2500)
+    assert spread(world, 0, 1) < 8 and spread(world, 0, 2) < 8
+    # The host leaves: the lowest slot left takes over again.
+    host.mine.leave_mines()
+    world.run(2500)
+    assert dg(g1)["au"] == dg(g2)["au"] == 1, (dg(g1)["au"], dg(g2)["au"])
+    # g1 leaves: g2 is alone, streams to nobody and runs its monsters itself.
+    g1.mine.leave_mines()
+    world.run(2500)
+    assert dg(g2)["au"] == 2 and len(dg(g2)["fol"]) == 0
+    # Only live games count: a game still waiting for its record is never elected.
+    g1.mine.enter_mines()
+    g1.mine.enter_floor(3)
+    assert dg(g1)["st"] != "live"
+    assert g2.call("mistrimulti_dg_elect", g2.rt, dg(g2)) == 2
+    assert g1.call("mistrimulti_dg_elect", g1.rt, dg(g1)) == 2, "and a game that is not live yet follows the live one"
+    clean(world, "election")
+    print("PASS: the authority is the host when it is on the floor, otherwise the lowest live slot, and is re-elected as games come and go")
+
+
+def test_follower_keeps_local_threats():
+    world = make_world(43, guests=1, jitter=20)
+    host, g1 = nodes(world)
+    far(world)
+    floor_with(world, (0, 1))
+    host.mine.wander = True
+    world.run(1500)
+    # g1's player stands next to the place where the host has the first monster: its copy is aggro there, shows its own
+    # animation and strikes, while the other copies still follow the host.
+    near = sorted(positions(world.games[1]).items())[0]
+    k = near[0]
+    g1.mine.player.x, g1.mine.player.y = near[1][0] + 4, near[1][1] + 4
+    world.run(2000)
+    c = copy_of(world.games[1], k)
+    h = copy_of(world.games[0], k)
+    g1.mine.player.x, g1.mine.player.y = h.x + 4, h.y + 4      # the authority's copy has walked on
+    world.run(1500)
+    c = copy_of(world.games[1], k)
+    assert g1.mine.struck > 0, "damage comes from a monster that is where this player sees it"
+    own = "spr_%s_%d_%d" % (MONSTERS[c.monster_id][0], c.state, c.get_cardinal())
+    assert c.aggro and c.dir != h.dir and c.sprite_index == own, \
+        "the threatening copy faces and shows its own animation, not the authority's (%s, %s)" % (c.sprite_index, h.sprite_index)
+    assert abs(c.x - h.x) < 40, "the copy stayed on the authority's track instead of leaving it"
+    others = [m for m in g1.mine.monsters if key_of(m) != k and not m.aggro]
+    assert others and all(abs(m.x - copy_of(world.games[0], key_of(m)).x) < 8 for m in others)
+    assert host.mine.struck == 0, "the authority's player was far away"
+    clean(world, "threats")
+    print("PASS: a copy next to a follower's own player is aggro there and strikes from where it is shown; the rest follow the authority")
+
+
+def test_stream_budget_and_rotation():
+    world = make_world(44, guests=1, jitter=20)
+    host, g1 = nodes(world)
+    for n in (host, g1):
+        n.mine.size = 40
+    far(world)
+    floor_with(world, (0, 1), ms=300)
+    wait_live(world, (0, 1), 20000)
+    count = len(positions(world.games[0]))
+    assert count > 40, "the stub floor needs more monsters than one frame carries (%d)" % count
+    host.mine.wander = True
+    world.run(4000)
+    peer = g1.rt["peers"][0]
+    assert len(peer["dm"]["m"]) <= 40 and peer["dm"]["a"] == 1
+    # Every monster is heard of within a few frames (rotation), so everything follows although a frame holds 40.
+    assert spread(world, 0, 1) < 14, spread(world, 0, 1)
+    assert max(g.max_frame for g in world.games.values()) < 16384
+    clean(world, "budget")
+    print("PASS: a floor with more monsters than a frame carries is streamed in turns inside the frame limit")
+
+
+def test_silent_authority_and_hostile_streams():
+    world = make_world(45, guests=2, jitter=20)
+    host, g1, g2 = nodes(world)
+    far(world)
+    floor_with(world, (0, 1, 2))
+    world.run(1500)
+    keys = sorted(positions(world.games[1]))
+    before = positions(world.games[1])
+    key = dg(g1)["key"]
+    good = [keys[0][0], keys[0][1], 700, 700, 10, 1, 1, 0, 0]
+    host_frame = g1.rt["peers"][0]
+
+    def forge(slot, dm):
+        g1.rt["peers"][slot] = g1.data({"v": 2, "id": slot, "active": True, "room": "x", "dm": dm})
+
+    # Hostile entries from the authority itself: each is dropped, nothing moves, nothing raises.
+    bad_entries = [None, 5, "x", [], [1], good[:-1], good + [0], [1.5] + good[1:], [-1] + good[1:], good[:2] + [10 ** 9, 0] + good[4:],
+                   good[:4] + [400] + good[5:], good[:5] + [99, 0, 0, 0], good[:7] + [2, 0], good[:8] + [1000], ["a"] * 9,
+                   [999, 999] + good[2:]]
+    for entry in bad_entries:
+        forge(0, {"t": 99000, "k": key, "a": 1, "m": [entry]})
+        g1.call("mistrimulti_dg_follow_read", g1.rt, dg(g1), 0)
+        d = dg(g1)
+        d["fseq"] = -1
+        g1.mine.frame()
+        assert all(abs(copy_of(world.games[1], k).x - before[k][0]) < 40 for k in before), entry
+    # Forged structures: wrong floor, far too many entries, not an array, no counter, not the authority's flag, junk.
+    for dm in ({"t": 5, "k": "other", "a": 1, "m": [good]}, {"t": 6, "k": key, "a": 1, "m": [good] * 500},
+               {"t": 7, "k": key, "a": 1, "m": "no"}, {"k": key, "a": 1, "m": [good]}, {"t": 8, "k": key, "a": 0, "m": [good]},
+               "string", 5, []):
+        forge(0, dm)
+        dg(g1)["fseq"] = -1
+        g1.call("mistrimulti_dg_follow_read", g1.rt, dg(g1), 0)
+        g1.mine.frame()
+        assert abs(copy_of(world.games[1], keys[0]).x - before[keys[0]][0]) < 40, dm
+    g1.rt["peers"][0] = host_frame
+    assert dg(g1)["errors"] == 0
+    # g2 is not the authority: what its frame claims moves nothing on g1.
+    claim = {"t": 1, "k": key, "a": 1, "m": [[keys[0][0], keys[0][1], 300, 300, 0, 1, 0, 0, 0]]}
+    for _ in range(4):
+        g1.rt["peers"][2] = g1.data({"v": 2, "id": 2, "active": True, "dm": claim})
+        world.run(150)
+    assert abs(copy_of(world.games[1], keys[0]).x - before[keys[0]][0]) < 10 and dg(g1)["au"] == 0
+    # The authority goes silent (its counter stops): after the grace the followers elect themselves and their own AI runs.
+    world.net.partition(0, 1)
+    world.net.partition(0, 2)
+    world.run(5500)
+    assert dg(g1)["au"] == 1 and dg(g2)["au"] == 1, (dg(g1)["au"], dg(g2)["au"])
+    assert dg(g1)["errors"] == 0 and dg(g2)["errors"] == 0
+    print("PASS: forged or malformed stream data changes nothing; a non-authority's claims are ignored; a silent authority is replaced")
+
+
+def test_kills_while_following():
+    world = make_world(46, guests=2, loss=0.08, dup=0.05, jitter=40)
+    host, g1, g2 = nodes(world)
+    far(world)
+    floor_with(world, (0, 1, 2))
+    host.mine.wander = True
+    world.run(1500)
+    keys = sorted(positions(world.games[1]))
+    k1, k2 = keys[0], keys[1]
+    drops, kills = total(world, "drops"), total(world, "kills")
+    # A follower and the authority both land killing blows on different monsters, and the other follower on the first again.
+    g1.mine.strike(copy_of(world.games[1], k1), 99)
+    host.mine.strike(copy_of(world.games[0], k2), 99)
+    g2.mine.strike(copy_of(world.games[2], k1), 99)
+    world.run(3500)
+    assert total(world, "drops") - drops == 2 and total(world, "kills") - kills == 2
+    for slot in (0, 1, 2):
+        assert copy_of(world.games[slot], k1) is None and copy_of(world.games[slot], k2) is None
+    world.run(2000)
+    assert spread(world, 0, 1) < 10 and spread(world, 0, 2) < 10, "the rest keeps following"
+    clean(world, "kills while following")
+    print("PASS: kills by followers and by the authority stay exactly once while copies are being moved")
+
+
+# ---- the arena and the special rooms --------------------------------------------------------------------------------------
+
+def test_arena_floor_is_shared():
+    world = make_world(47, guests=2, loss=0.05, jitter=30)
+    host, g1, g2 = nodes(world)
+    far(world)
+    floor_with(world, (0, 1, 2), impl=1)
+    synced(world, (0, 1, 2), "arena")
+    assert all(dg(n)["f"] == 3 and ":p" not in n.mine.room_key() for n in (host, g1, g2))
+    # Its monsters are the floor's record like any other: one kill, one drop set, and the floor empties on every game.
+    count = len(positions(world.games[0]))
+    drops = total(world, "drops")
+    for k in sorted(positions(world.games[0])):
+        for slot in (0, 1, 2):
+            c = copy_of(world.games[slot], k)
+            if c is not None:
+                world.games[slot].node.mine.strike(c, 99)
+    world.run(6000)
+    assert [len(n.mine.monsters) for n in (host, g1, g2)] == [0, 0, 0]
+    assert total(world, "drops") - drops == count, (total(world, "drops"), drops, count)
+    clean(world, "arena")
+    print("PASS: the arena floor is shared: one record, shared health, one kill per monster, and it empties on every game")
+
+
+def special_floor(world, slot, flr):
+    mine = world.games[slot].node.mine
+    mine.room_override = "special"
+    mine.enter_floor(flr)
+    mine.room_override = None
+
+
+def test_special_rooms_keep_the_run():
+    world = make_world(48, guests=1, jitter=20)
+    host, g1 = nodes(world)
+    far(world)
+    floor_with(world, (0, 1))
+    run = dg(host)["run"]
+    # Both walk on to a seal room (floor 4 here): no record, no monsters, not "on a floor", but still in the run.
+    for slot in (0, 1):
+        special_floor(world, slot, 4)
+    world.run(1500)
+    assert dg(host)["sp"] == 4 and dg(g1)["sp"] == 4 and dg(host)["f"] == -1
+    assert dg(host)["at"][0]["sp"] is True and dg(host)["at"][1]["sp"] is True
+    assert not any(k.endswith(":4") for k in dg(host)["floors"].keys())
+    world.run(12000)                                     # a long quest scene: much longer than the 5 s an empty mine lives
+    assert dg(host)["run"] == run, "the run must not end under players who are inside a seal room"
+    # They go down to the next floor together: still the same run, shared and live.
+    for slot in (0, 1):
+        world.games[slot].node.mine.enter_floor(5)
+    wait_live(world, (0, 1))
+    assert dg(g1)["my_run"] == run == dg(g1)["run"]
+    synced(world, (0, 1), "after the seal room")
+    assert dg(host)["sp"] == -1 and dg(host)["at"][0]["f"] == 5
+    # A player who leaves the mines from a seal room is forgotten at once; with nobody left the run ends as usual.
+    for slot in (0, 1):
+        special_floor(world, slot, 6)
+    world.run(500)
+    for slot in (0, 1):
+        world.games[slot].node.mine.leave_mines()
+    world.run(1500)
+    assert dg(host)["at"][0] is None and dg(host)["at"][1] is None and dg(host)["sp"] == -1
+    world.run(8000)
+    assert dg(host)["run"] != run, "an empty mine ends the run"
+    clean(world, "special rooms")
+    print("PASS: players inside a seal, priestess or Seridia room keep the run alive; leaving the mines from there is noticed")
+
+
+def test_special_room_after_host_restart():
+    world = make_world(49, guests=1, jitter=20)
+    host, g1 = nodes(world)
+    far(world)
+    floor_with(world, (0, 1))
+    special_floor(world, 1, 4)
+    world.run(1000)
+    run = dg(g1)["my_run"]
+    assert dg(host)["at"][1]["sp"] is True
+    # The host's game restarts and knows nothing; the guest in the seal room says again that it is inside the run, and
+    # the new host (nobody has used it yet) adopts that run.
+    world.start(0)
+    game = world.games[0]
+    game.feature = Driver(game)
+    world.run(9000)
+    host = world.games[0].node
+    assert dg(host)["run"] == run, (dg(host)["run"], run)
+    assert dg(host)["at"][1] is not None and dg(host)["at"][1]["sp"] is True
+    world.run(12000)
+    assert dg(host)["run"] == run, "the run survives while a guest stays in the seal room"
+    print("PASS: a guest in a special room re-announces itself to a restarted host, which adopts its run")
+
+
 TESTS = [test_same_floor, test_results_during_a_join, test_seed_matters, test_two_players_one_enemy, test_poison_and_late_hit, test_nodes, test_ladder,
          test_big_floor_and_simultaneous_entry, test_join_during_changes, test_ladder_position_and_hostile_hits,
          test_floors_apart, test_leave_and_rejoin, test_host_away, test_host_restart, test_unshared_floors, test_different_rooms_are_not_shared, test_hostile_input,
-         test_loss_matrix]
+         test_loss_matrix, test_followers_move_with_the_authority, test_authority_election, test_follower_keeps_local_threats,
+         test_stream_budget_and_rotation, test_silent_authority_and_hostile_streams, test_kills_while_following,
+         test_arena_floor_is_shared, test_special_rooms_keep_the_run, test_special_room_after_host_restart]
 
 if __name__ == "__main__":
     wanted = sys.argv[1:]

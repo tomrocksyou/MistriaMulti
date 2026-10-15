@@ -44,6 +44,28 @@ MUTATIONS = [
     ("a lost host does not unshare the floor", '''        if (d.offline > MISTRIMULTI_DG_OFFLINE) mistrimulti_dg_unsync(d);''', '''        d.errors = d.errors;''', ["test_unshared_floors"]),
     ("a restarted host does not adopt the run", '''        if (typeof(data[$ "rj"]) == "bool" && data.rj && !d.used && mistrimulti_dg_int(data[$ "seed"], 1, 2147483647)) {''',
      '''        if (false) {''', ["test_host_restart"]),
+    # monster movement, the arena and the special rooms
+    ("followers do not move their copies", '''    mon.x = f.fx + (f.tx - f.fx) * a;''', '''    mon.x = mon.x;''', ["test_followers_move_with_the_authority"]),
+    ("followers ignore the vertical place", '''    mon.y = f.fy + (f.ty - f.fy) * a;''', '''    mon.y = mon.y;''', ["test_followers_move_with_the_authority"]),
+    ("followers keep their own animation", '''            if (mon.sprite_index != sprite) {''', '''            if (false) {''', ["test_followers_move_with_the_authority"]),
+    ("a threatening copy is not left to its own AI", '''    if (mon.aggro || f.ss) return;''', '''    if (f.ss) return;''', ["test_follower_keeps_local_threats"]),
+    ("the host is not preferred as authority", '''        if (i == r.id || (r.mask & (1 << i)) == 0 || (best >= 0 && i > best)) continue;''',
+     '''        if (i == r.id || (r.mask & (1 << i)) == 0 || (best >= 0 && i < best)) continue;''', ["test_authority_election"]),
+    ("a game that is not live can be elected", '''    var best = d.st == "live" ? r.id : -1;''', '''    var best = r.id;''', ["test_authority_election"]),
+    ("a frozen authority is never replaced", '''        if (r.ticks - seen.at > MISTRIMULTI_DG_SILENT) continue;''', '''        d.errors = d.errors;''', ["test_silent_authority_and_hostile_streams"]),
+    ("stream entries are not checked", '''    if (!is_array(e) || array_length(e) != 9) return false;''', '''    if (!is_array(e)) return true;''', ["test_silent_authority_and_hostile_streams"]),
+    ("another game's stream is followed", '''    if (!is_struct(dm) || dm[$ "a"] != 1 || dm[$ "k"] != d.key''', '''    if (!is_struct(dm) || dm[$ "k"] != d.key''', ["test_silent_authority_and_hostile_streams"]),
+    ("a stream for another floor is followed", ''' || dm[$ "k"] != d.key || !is_array(dm[$ "m"])''', ''' || !is_array(dm[$ "m"])''', ["test_silent_authority_and_hostile_streams"]),
+    ("the stream is not bounded", '''    var take = min(n, MISTRIMULTI_DG_STREAM);''', '''    var take = n;''', ["test_stream_budget_and_rotation"]),
+    ("the stream never rotates", '''    d.cur = n > 0 ? (d.cur + take) mod n : 0;''', '''    d.cur = 0;''', ["test_stream_budget_and_rotation"]),
+    ("the arena floor is not shared", '''(level[$ "impl"] == DungeonImpl.Enemy && !MISTRIMULTI_DG_ARENA)''', '''(level[$ "impl"] == DungeonImpl.Enemy)''', ["test_arena_floor_is_shared"]),
+    ("a special room is not announced", '''    mistrimulti_dg_special_send(d, false);
+}''', '''    d.errors = d.errors;
+}''', ["test_special_rooms_keep_the_run"]),
+    ("the host does not count players in special rooms", '''        d.at[from] = { run: d.run, f: f, sp: true };''', '''        d.errors = d.errors;''', ["test_special_rooms_keep_the_run"]),
+    ("leaving the mines from a special room is not noticed", '''(DUNGEON_RUNNER == undefined || ARI == undefined) && mistrimulti_dg_leave(d)''',
+     '''false''', ["test_special_rooms_keep_the_run"]),
+    ("a restarted host is not told about special rooms", '''        mistrimulti_dg_special_send(d, true);''', '''        d.errors = d.errors;''', ["test_special_room_after_host_restart"]),
 ]
 
 original = GML.read_text()

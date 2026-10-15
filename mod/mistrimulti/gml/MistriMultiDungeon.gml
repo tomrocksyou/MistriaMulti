@@ -9,10 +9,16 @@
 // reconciles its build with the record. The record lives in the host's memory, not in the host's room, so
 // it does not matter where the host is.
 //
-// Monsters are simulated by each game for its own player (AI cannot be shared: it targets obj_ari, and the host
-// is often on another floor). Their health is the host's: every hit is reported, a game never lets its own
-// copy die, and the host decides who struck the lethal blow. That game kills its copy the normal way (drops,
-// essence and xp are its own, once); every other game removes its copy without drops.
+// Monsters: every game keeps its copies, but where they are comes from one game per floor, the floor's
+// "authority" (the host when it is on the floor, otherwise the lowest slot there). The authority's game runs the
+// monsters normally and streams their state in its peer frame (field dm, 10 Hz, latest wins); every other game
+// moves its copies to the streamed places (see the monster section). Their health is the host's: every hit is
+// reported, a game never lets its own copy die, and the host decides who struck the lethal blow. That game
+// kills its copy the normal way (drops, essence and xp are its own, once); every other game removes its copy
+// without drops.
+//
+// The seal rooms, the priestess's rooms and Seridia's chamber have no monsters; they only keep the run alive
+// for the players inside them. The arena floor is shared like any other floor.
 
 #macro MISTRIMULTI_DG_ERRORS 40
 #macro MISTRIMULTI_DG_SLICE 50
@@ -29,6 +35,15 @@
 #macro MISTRIMULTI_DG_DAMAGE 5000
 #macro MISTRIMULTI_DG_PENDING 300
 #macro MISTRIMULTI_DG_PRESS 20
+// Monster stream (peer frame): at most this many monsters per frame, one frame every this many ticks, and
+// the ticks after which a silent authority is replaced / a monster not heard of goes back to its own AI.
+#macro MISTRIMULTI_DG_STREAM 40
+#macro MISTRIMULTI_DG_STREAM_TICKS 6
+#macro MISTRIMULTI_DG_SILENT 240
+#macro MISTRIMULTI_DG_STALE 120
+#macro MISTRIMULTI_DG_SNAP_DIST 96
+// The arena floor (DungeonImpl.Enemy) is shared like the others. Set to false to leave it to each game.
+#macro MISTRIMULTI_DG_ARENA true
 
 // ---- registration -------------------------------------------------------------------------------------------
 
@@ -68,7 +83,11 @@ function mistrimulti_dg_state() {
             my_run: 0, my_seed: 0, f: -1, st: "off", key: "", rid: "", asked: 0, retry: 0, build_at: 0, rejoin: false,
             offline: 0, up: undefined, rx: undefined, pend: [], gq: [], lad: undefined, reconciling: false, spawning: false,
             mons: {}, ikeys: {}, hp: {}, want: {}, nodes: {}, bypass: 0, swing: {}, swing_at: -100, press: {}, scan_at: 0,
-            mnames: undefined, hits: 0, lost: 0 };
+            mnames: undefined, hits: 0, lost: 0,
+            // special rooms (seal, priestess, Seridia): the floor number this game is in, or -1
+            sp: -1,
+            // monster stream: elected authority (-1 none), the monsters being followed, what this game streams
+            au: -1, fol: {}, fseq: -1, fau: -1, seen: array_create(8, undefined), out: [], out_at: 0, cnt: 0, cur: 0 };
         r.dg = d;
     }
     return d;
@@ -207,6 +226,7 @@ function mistrimulti_dg_peer(slot, joined, stream) {
     } else if (slot == 0 && joined) {
         // A new host: it knows nothing of this floor. Ask again; it adopts our run if nobody has used its own.
         mistrimulti_dg_rejoin(d, true);
+        mistrimulti_dg_special_send(d, true);
     }
 }
 
@@ -267,7 +287,11 @@ function mistrimulti_dg_build_begin(ctx) {
         var level = ctx[$ "level"];
         var flr = ctx[$ "floor"];
         if (!is_struct(level) || !mistrimulti_dg_int(flr, 0, 1000)) return;
-        if (level[$ "is_side_room"] == true || level[$ "impl"] == DungeonImpl.Enemy || is_special_dungeon_room(room())) return;
+        if (is_special_dungeon_room(room())) {
+            mistrimulti_dg_special_enter(d, flr);
+            return;
+        }
+        if (level[$ "is_side_room"] == true || (level[$ "impl"] == DungeonImpl.Enemy && !MISTRIMULTI_DG_ARENA)) return;
         d.f = flr;
         d.st = "build";
         d.key = mistrimulti_dg_floor_key(d.my_run, flr);
@@ -276,6 +300,18 @@ function mistrimulti_dg_build_begin(ctx) {
     } catch (e) {
         mistrimulti_dg_fail(d, e);
     }
+}
+
+// A seal room, the priestess's quarters or Seridia's chamber: static rooms with no monsters and no record. The host
+// is only told that this player is still inside the run, so the run does not end under a player who stays there.
+function mistrimulti_dg_special_enter(d, flr) {
+    d.sp = flr;
+    mistrimulti_dg_special_send(d, false);
+}
+
+function mistrimulti_dg_special_send(d, restart) {
+    if (d.sp < 0 || d.my_run == 0) return;
+    mistrimulti_event_request("dg_act", { o: "here", run: d.my_run, seed: d.my_seed, f: d.sp, sp: true, rj: restart });
 }
 
 // dungeon.floor_built: the game's own randomness resumes; the floor is asked about a tick later, when the
@@ -290,13 +326,18 @@ function mistrimulti_dg_floor_built(ctx) {
 
 // Tell the host this game is no longer on a shared floor. False when the request could not be queued yet.
 function mistrimulti_dg_leave(d) {
-    if (d.f < 0 || d.my_run == 0) return true;
+    if ((d.f < 0 && d.sp < 0) || d.my_run == 0) return true;
     return mistrimulti_event_request("dg_act", { o: "here", run: d.my_run, f: -1 }) != undefined;
 }
 
 // Forget this game's floor (leaving the mines, or a floor that is not shared).
 function mistrimulti_dg_unsync(d) {
     d.f = -1;
+    d.sp = -1;
+    d.au = -1;
+    d.fol = {};
+    d.fseq = -1;
+    d.out = [];
     d.st = "off";
     d.key = "";
     d.up = undefined;
@@ -332,7 +373,11 @@ function mistrimulti_dungeon_tick() {
 }
 
 function mistrimulti_dg_client_tick(r, d) {
-    if (d.f < 0) return;
+    if (d.f < 0) {
+        // in a special room only the run's presence is kept; leaving the mines ends it
+        if (d.sp >= 0 && (DUNGEON_RUNNER == undefined || ARI == undefined) && mistrimulti_dg_leave(d)) mistrimulti_dg_unsync(d);
+        return;
+    }
     if (!mistrimulti_dg_in_dungeon()) {
         // left the mines (stairs, pass-out, death, a menu teleport): tell the host
         if (mistrimulti_dg_leave(d)) mistrimulti_dg_unsync(d);
@@ -358,6 +403,7 @@ function mistrimulti_dg_client_tick(r, d) {
         mistrimulti_dg_upload(d);
     } else if (d.st == "live") {
         mistrimulti_dg_report_gone(r, d);
+        mistrimulti_dg_stream_tick(r, d);
     }
 }
 
@@ -515,7 +561,7 @@ function mistrimulti_dg_floor_of(d, from, data) {
 
 function mistrimulti_dg_op_here(r, d, from, data) {
     var f = data[$ "f"];
-    if (f == -1) {
+    if (is_real(f) && f == -1) {
         d.at[from] = undefined;
         return { ok: true, o: "here", st: "left" };
     }
@@ -533,6 +579,11 @@ function mistrimulti_dg_op_here(r, d, from, data) {
     }
     d.used = true;
     d.empty_at = r.ticks;
+    if (typeof(data[$ "sp"]) == "bool" && data.sp) {
+        // a special room: present in the run, no record
+        d.at[from] = { run: d.run, f: f, sp: true };
+        return { ok: true, o: "here", run: d.run, f: f, st: "special" };
+    }
     var key = mistrimulti_dg_floor_key(d.run, f);
     var fl = d.floors[$ key];
     var room_name = is_string(data[$ "rm"]) && string_length(data.rm) <= 64 ? data.rm : "";
@@ -1141,6 +1192,7 @@ function mistrimulti_dg_monster_step(mon) {
     try {
         var key = d.ikeys[$ string(mon)];
         if (key == undefined) return;
+        if (d.au >= 0 && d.au != r.id) mistrimulti_dg_follow(r, d, mon, key);
         var wanted = d.want[$ key] ?? 0;
         if (wanted != 0) d.want[$ key] = 0;
         var expected = d.hp[$ key];
@@ -1151,6 +1203,171 @@ function mistrimulti_dg_monster_step(mon) {
         d.hp[$ key] = mon.hit_points;
     } catch (e) {
         mistrimulti_dg_fail(d, e);
+    }
+}
+
+// ---- monsters: one game per floor decides where they are -------------------------------------------------------------------------
+//
+// The authority is derived by every game from the same facts, so nothing has to be agreed on: the lowest slot among the games
+// that are live on this floor (each says so with dm.k in its peer frame), which is the host whenever the host is there. The
+// authority's game runs the monsters' AI as ever (they chase its player) and puts their state in its peer frame at 10 Hz. A
+// peer frame is a snapshot where the newest wins, which is what positions need (a lost frame is replaced 100 ms later); the
+// reliable event layer would resend stale positions. Every other game keeps its own copies, with their own AI running, but
+// puts each copy where the authority has it (monster.step_end, every frame, easing between two samples). A copy that is
+// aggro on this game's own player shows its own animation, so that what hurts this player is what this player sees.
+
+// The slot that streams this floor, or -1. A peer counts while its counter keeps changing (a game that froze is dropped).
+function mistrimulti_dg_elect(r, d) {
+    var best = d.st == "live" ? r.id : -1;
+    for (var i = 0; i < 8; i++) {
+        if (i == r.id || (r.mask & (1 << i)) == 0 || (best >= 0 && i > best)) continue;
+        var p = r.peers[i];
+        var dm = is_struct(p) ? p[$ "dm"] : undefined;
+        if (!is_struct(dm) || p[$ "active"] != true || dm[$ "k"] != d.key || !is_real(dm[$ "t"])) continue;
+        var seen = d.seen[i];
+        if (seen == undefined || seen.t != dm.t || seen.k != d.key) {
+            seen = { t: dm.t, k: d.key, at: r.ticks };
+            d.seen[i] = seen;
+        }
+        if (r.ticks - seen.at > MISTRIMULTI_DG_SILENT) continue;
+        best = i;
+    }
+    return best;
+}
+
+function mistrimulti_dg_stream_tick(r, d) {
+    var au = mistrimulti_dg_elect(r, d);
+    if (au != d.au) {
+        d.au = au;
+        d.fol = {};
+        d.fseq = -1;
+        d.out = [];
+        mistrimulti_trace("dgauth", "floor " + d.key + " authority " + string(au) + " (me " + string(r.id) + ")", 40);
+    }
+    if (au == r.id) {
+        if (r.ticks - d.out_at >= MISTRIMULTI_DG_STREAM_TICKS) mistrimulti_dg_stream_build(r, d);
+    } else {
+        // a counter that moves (once a second) shows the other games that this one is still here
+        if (r.ticks - d.out_at >= 60) {
+            d.out_at = r.ticks;
+            d.cnt++;
+        }
+        if (au >= 0) mistrimulti_dg_follow_read(r, d, au);
+    }
+}
+
+// peer frame: dm = { t: counter, k: floor key, a: 1 and m: monsters when this game is the authority }
+function mistrimulti_dungeon_frame(frame) {
+    var r = __mistrimulti_runtime();
+    var d = r[$ "dg"];
+    if (!is_struct(d) || d.f < 0 || d.st != "live" || d.key == "" || !mistrimulti_dg_ok(d)) return;
+    var dm = { t: d.cnt, k: d.key };
+    if (d.au == r.id) {
+        dm.a = 1;
+        dm.m = d.out;
+    }
+    frame.dm = dm;
+}
+
+// [spawn x, spawn y, x, y, direction, state, frame, hidden, z] of the monsters the host's record holds, a slice per frame
+function mistrimulti_dg_stream_build(r, d) {
+    d.out_at = r.ticks;
+    d.cnt++;
+    var keys = struct_get_names(d.mons);
+    var n = array_length(keys);
+    var take = min(n, MISTRIMULTI_DG_STREAM);
+    if (d.cur >= n) d.cur = 0;
+    var out = [];
+    for (var i = 0; i < take; i++) {
+        var mon = d.mons[$ keys[(d.cur + i) mod n]];
+        if (!instance_exists(mon) || mon.hit_points <= 0) continue;
+        var p = mon.original_spawn_pos;
+        var dir = ((round(mon.dir) mod 360) + 360) mod 360;
+        var st = mon[$ "fsm"] != undefined ? mon.fsm.current_state_id() : 0;
+        array_push(out, [round(p.x), round(p.y), clamp(round(mon.x), 0, 40000), clamp(round(mon.y), 0, 40000), dir,
+            is_real(st) ? clamp(floor(st), 0, 63) : 0, clamp(floor(mon.image_index), 0, 1000),
+            mon.sprite_index == spr_nothing ? 1 : 0, clamp(round(mon[$ "z"] ?? 0), -200, 200)]);
+    }
+    d.cur = n > 0 ? (d.cur + take) mod n : 0;
+    d.out = out;
+}
+
+function mistrimulti_dg_stream_ok(e) {
+    if (!is_array(e) || array_length(e) != 9) return false;
+    return mistrimulti_dg_int(e[0], 0, 40000) && mistrimulti_dg_int(e[1], 0, 40000) && mistrimulti_dg_int(e[2], 0, 40000)
+        && mistrimulti_dg_int(e[3], 0, 40000) && mistrimulti_dg_int(e[4], 0, 359) && mistrimulti_dg_int(e[5], 0, 63)
+        && mistrimulti_dg_int(e[6], 0, 1000) && mistrimulti_dg_int(e[7], 0, 1) && mistrimulti_dg_int(e[8], -200, 200);
+}
+
+// The authority's newest frame (if not seen yet): every valid entry that names one of this game's copies becomes a target.
+function mistrimulti_dg_follow_read(r, d, au) {
+    var p = r.peers[au];
+    var dm = is_struct(p) ? p[$ "dm"] : undefined;
+    if (!is_struct(dm) || dm[$ "a"] != 1 || dm[$ "k"] != d.key || !is_array(dm[$ "m"]) || !is_real(dm[$ "t"])) return;
+    if (dm.t == d.fseq || array_length(dm.m) > MISTRIMULTI_DG_STREAM) return;
+    d.fseq = dm.t;
+    for (var i = 0; i < array_length(dm.m); i++) {
+        if (mistrimulti_dg_stream_ok(dm.m[i])) mistrimulti_dg_follow_set(r, d, dm.m[i]);
+    }
+}
+
+function mistrimulti_dg_follow_set(r, d, e) {
+    var key = mistrimulti_dg_cell_key(e[0], e[1]);
+    var mon = d.mons[$ key];
+    if (mon == undefined || !instance_exists(mon)) return;
+    var f = d.fol[$ key];
+    if (f == undefined) f = { at: r.ticks - MISTRIMULTI_DG_STREAM_TICKS, ss: false };
+    // ease from where the copy is now to the new place over about the time between two samples
+    f.fx = mon.x;
+    f.fy = mon.y;
+    f.dur = clamp(r.ticks - f.at, 3, 12);
+    f.tx = e[2];
+    f.ty = e[3];
+    if (abs(f.tx - f.fx) + abs(f.ty - f.fy) > MISTRIMULTI_DG_SNAP_DIST) {
+        f.fx = f.tx;
+        f.fy = f.ty;
+    }
+    f.t0 = r.ticks;
+    f.at = r.ticks;
+    f.dir = e[4];
+    f.s = e[5];
+    f.i = e[6];
+    f.h = e[7];
+    f.z = e[8];
+    f.fix = true;
+    d.fol[$ key] = f;
+}
+
+// monster.step_end on a game that is not the authority: the copy goes where the authority has it, and (unless it is aggro on
+// this game's player, whose own animation tells when it will strike) looks like the authority's copy. A copy not heard of for
+// two seconds (or the sprite of a state its own config lacks) goes back to the game's own rules.
+function mistrimulti_dg_follow(r, d, mon, key) {
+    var f = d.fol[$ key];
+    if (f == undefined || r.ticks - f.at > MISTRIMULTI_DG_STALE) return;
+    var a = clamp((r.ticks - f.t0) / f.dur, 0, 1);
+    mon.x = f.fx + (f.tx - f.fx) * a;
+    mon.y = f.fy + (f.ty - f.fy) * a;
+    if (mon.aggro || f.ss) return;
+    try {
+        mon.dir = f.dir;
+        if (f.h == 1) {
+            mon.sprite_index = spr_nothing;
+        } else {
+            var sprite = mon.config.sprite_catalogue[f.s][mon.get_cardinal()];
+            if (mon.sprite_index != sprite) {
+                mon.set_state_sprite(false, f.s);
+                f.fix = true;
+            }
+        }
+        if (f.fix) {
+            mon.image_index = f.i;
+            f.fix = false;
+        }
+        mon.image_xscale = mon.calculate_flipper();
+        mon.draw_y_offset += f.z - (mon[$ "z"] ?? 0);
+    } catch (e) {
+        f.ss = true;
+        mistrimulti_trace("dgsprite", "a monster's state " + string(f.s) + " has no sprite here: " + string(e), 10);
     }
 }
 
@@ -1330,6 +1547,6 @@ function mistrimulti_dungeon_debug() {
         var fl = d.floors[$ keys[i]];
         floors[$ keys[i]] = { st: fl.st, nodes: array_length(struct_get_names(fl.nodes)), mons: array_length(struct_get_names(fl.mons)), rev: fl.rev };
     }
-    return { run: d.run, my_run: d.my_run, f: d.f, st: d.st, errors: d.errors, hits: d.hits, lost: d.lost,
+    return { run: d.run, my_run: d.my_run, f: d.f, sp: d.sp, au: d.au, fol: array_length(struct_get_names(d.fol)), st: d.st, errors: d.errors, hits: d.hits, lost: d.lost,
         mons: array_length(struct_get_names(d.mons)), nodes: array_length(struct_get_names(d.nodes)), pend: array_length(d.pend), floors: floors };
 }
