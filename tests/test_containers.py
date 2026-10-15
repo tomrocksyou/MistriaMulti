@@ -531,6 +531,30 @@ def test_unsynced_replica_is_corrected():
     print("PASS: a take from a stale replica is refused, the guest gives the items back and shows the host's chest")
 
 
+def test_edit_undone_before_it_could_be_sent():
+    # The same stale guest takes the stack and puts it back before any request could be made (the host's session is not
+    # known yet): the snapshot that skipped the slot meanwhile is asked for again, and the guest shows the host's chest.
+    world = make_world(12, chests={A: {0: ("apple", 3)}}, jitter=30)
+    inv = world.games[1].node.inv(A)
+    inv.slots[0]["add"](make_item("apple"), 5)
+    inv.slots[0]["updates"] = 0
+    world.net.block(0, 1)
+    world.run(1000)
+    ui_take(world.games[1], A, 0, 8)
+    world.run(800)
+    ui_put(world.games[1], A, 0, "apple", 8)
+    world.run(800)
+    world.net.block(0, 1, False)
+    settle(world, 6000)
+    assert world.games[1].node.player.total("apple") == 0, world.games[1].node.player.total("apple")
+    assert world.games[1].node.inv(A).contents()[0] == ("apple", None, 3), world.games[1].node.inv(A).contents()
+    assert world.games[0].node.inv(A).contents()[0] == ("apple", None, 3)
+    converged(world, "undone")
+    conserved(world, "apple", 3, "undone")
+    clean(world, "undone")
+    print("PASS: an edit undone before it could be sent leaves no stale slot")
+
+
 def test_exact_conservation_under_faults():
     # Random takes and puts by both guests; the totals must match exactly at the end.
     for seed in (31, 32, 33, 34):
@@ -905,6 +929,7 @@ def main():
     test_chest_inside_a_building()
     test_simultaneous_takes()
     test_unsynced_replica_is_corrected()
+    test_edit_undone_before_it_could_be_sent()
     test_hostile_requests()
     test_guest_disappears_mid_transaction()
     test_guest_crash_mid_transaction_records()

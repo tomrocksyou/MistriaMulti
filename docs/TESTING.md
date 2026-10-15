@@ -382,3 +382,19 @@ The helper working set observed during this test was about 5 MB on Windows,
 including operating-system libraries. That is one observation, not a memory
 or CPU guarantee. The protocol stores bounded per-player buffers and avoids
 resending unchanged state at the full game frame rate.
+
+## Feature suites
+
+`scripts/runall.sh` covers the native components. The GML feature suites (the engine is
+stubbed, no game and no build are needed) run with:
+
+```sh
+sh scripts/run-features.sh
+```
+
+The script re-runs itself in a private network namespace (`unshare -n`, loopback brought
+up) and runs `test_containers`, `test_ranch`, `test_progress`, `test_farm_sync`,
+`test_wallet`, `test_dungeon`, `test_story`, `test_buildings`, `test_guestsave`,
+`test_devtools`, `test_maplive`, `test_menu` (GML parts), `test_trust_gml`,
+`test_event_features`, `test_event_layer` and `test_engine_audit` (without the real game
+scripts), printing PASS or FAIL with the time of each and exiting non-zero on any failure.

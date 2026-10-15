@@ -75,7 +75,7 @@ function __mistrimulti_ct_locate(node) {
 function __mistrimulti_ct_chest(key, loc, node, size, host) {
     var c = { k: key, loc: loc, node: node, size: size, rev: host ? 0 : -1, synced: host, hot: 0, open_at: -100000,
         bin: node.prototype.interaction_chest[$ "shipping_bin"] == true,
-        base: array_create(size, undefined), seen: array_create(size, 0), hold: array_create(size, false) };
+        base: array_create(size, undefined), seen: array_create(size, 0), hold: array_create(size, false), wait: array_create(size, false) };
     for (var i = 0; i < size; i++) {
         var slot = node.inventory.slot(i);
         c.base[i] = __mistrimulti_ct_state(slot);
@@ -618,6 +618,12 @@ function __mistrimulti_ct_scan_host(ct) {
             var st = __mistrimulti_ct_state(slot);
             if (__mistrimulti_ct_same(st, c.base[i])) {
                 c.seen[i] = slot.updates;
+                if (c.wait[i]) {
+                    // The player undid the edit that was waiting to be sent; the snapshot that skipped the slot is asked for again.
+                    c.wait[i] = false;
+                    c.open_at = -100000;
+                    __mistrimulti_ct_resync(c);
+                }
                 continue;
             }
             if (pack == undefined) pack = __mistrimulti_ct_pack_new();
@@ -809,6 +815,12 @@ function __mistrimulti_ct_collect(ct) {
             var st = __mistrimulti_ct_state(slot);
             if (__mistrimulti_ct_same(st, c.base[i])) {
                 c.seen[i] = slot.updates;
+                if (c.wait[i]) {
+                    // The player undid the edit that was waiting to be sent; the snapshot that skipped the slot is asked for again.
+                    c.wait[i] = false;
+                    c.open_at = -100000;
+                    __mistrimulti_ct_resync(c);
+                }
             } else if (sleeping) {
                 // The end-of-day sequence empties this game's copy of every shipping bin on its own; that is not the
                 // player's move. The host sells the bins (once, into the shared wallet) and decides what they hold.
@@ -850,7 +862,12 @@ function __mistrimulti_ct_send(ct, groups) {
     var rid = mistrimulti_event_request("chest_tx", data);
     if (rid == undefined) {
         for (var a = 0; a < array_length(groups); a++) {
-            for (var j = 0; j < array_length(groups[a].dirty); j++) groups[a].c.seen[groups[a].dirty[j].i] = -1; // compare again next tick
+            // The edit stays and is sent when the host's session is known. Until then snapshots leave these slots alone, so the
+            // request is made against what the guest assumed and the host decides (a snapshot would rewrite the base).
+            for (var j = 0; j < array_length(groups[a].dirty); j++) {
+                groups[a].c.seen[groups[a].dirty[j].i] = -1; // compare again next tick
+                groups[a].c.wait[groups[a].dirty[j].i] = true;
+            }
         }
         return;
     }
@@ -864,6 +881,7 @@ function __mistrimulti_ct_send(ct, groups) {
             array_push(sub.pre, d.pre);
             array_push(sub.exp, d.now);
             c.hold[d.i] = true;
+            c.wait[d.i] = false;
             c.base[d.i] = d.now; // expected result; later edits are measured against it
             c.seen[d.i] = d.u;
         }
@@ -903,7 +921,7 @@ function __mistrimulti_ct_apply_pack(c, data) {
         // A slot with a request in flight takes the host's answer from that request's result. A bin that this game's end of
         // day just emptied is not an edit of the player: the host's state replaces it as it is.
         var ref = c.bin && __mistrimulti_ct_sleeping() ? __mistrimulti_ct_state(c.node.inventory.slot(s.i)) : c.base[s.i];
-        if (!c.hold[s.i]) __mistrimulti_ct_reconcile(c, s.i, s.st, ref);
+        if (!c.hold[s.i] && !c.wait[s.i]) __mistrimulti_ct_reconcile(c, s.i, s.st, ref);
     }
     return true;
 }
