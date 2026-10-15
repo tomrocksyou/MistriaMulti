@@ -305,7 +305,8 @@ def main():
         world.run(2)
         world.kill_helper(3)
         asked = [world.games[3].feature.request(4) for _ in range(3)]
-        world.run(13)
+        # The host expires a silent peer after 10 s; wait until it has (up to 25 s: a slow runner under Wine can take longer).
+        world.run(25, lambda: any(r == 0 and p == 3 and not j for r, p, j in world.ledger.peer_events))
         host_left = any(r == 0 and p == 3 and not j for r, p, j in world.ledger.peer_events)
         world.start_helper(3)
         assert world.run(20, lambda: everyone_connected(world, args.guests)), f"rejoin: {world.masks()}"
@@ -314,7 +315,7 @@ def main():
         checks.full_checks(world, world.ledger)
         assert host_left and all(world.ledger.replies.get(rid) == ["ok"] for rid in asked if rid), \
             (host_left, [world.ledger.replies.get(rid) for rid in asked])
-        results.append("a guest helper killed for 13 s: the host saw it leave and return, requests made while it "
+        results.append("a guest helper killed until the host expired it: the host saw it leave and return, requests made while it "
                        "was away were applied once and answered, nothing was duplicated or reordered")
         print("PASS:", results[-1], flush=True)
 
