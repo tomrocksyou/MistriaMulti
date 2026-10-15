@@ -204,6 +204,9 @@ function __mistrimulti_story_data(st) {
         for (var i = 0; i < WorldMod.LEN; i++) __mistrimulti_story_scan(WORLD_MODS[i].requirements, scenes, facts, 0);
         var gates = [Requirement.BrokeFireSeal, Requirement.SeridiaTransformed, Requirement.SaturdayMarketUnlocked];
         for (var i = 0; i < array_length(gates); i++) __mistrimulti_story_scan(REQUIREMENT_ALIASES[gates[i]], scenes, facts, 0);
+        // What the host's developer command "unlock the mines" brings about (MistriMultiDevTools.gml) is a world gate too, so
+        // the scenes and facts it needs are shared like any other. Guarded: an older game without it keeps the story sync on.
+        try { __mistrimulti_story_scan(REQUIREMENT_ALIASES[Requirement.OpenedMines], scenes, facts, 0); } catch (e) {}
         st.festq = festq;
         st.gate_scenes = scenes;
         st.gate_facts = facts;
