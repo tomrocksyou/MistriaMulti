@@ -94,11 +94,13 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.guestsave", mistrimulti_guestsave_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.import_character", mistrimulti_guestsave_import, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.wallet", mistrimulti_wallet_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.renown", mistrimulti_renown_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.dungeon", mistrimulti_dungeon_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.unlock_mines", mistrimulti_devtools_unlock_mines, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriaMulti 0.3.9 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriaMulti 0.4.0 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -116,6 +118,7 @@ function mistrimulti_register_events() {
     mistrimulti_dungeon_register_events();
     mistrimulti_progress_register_events();
     mistrimulti_wallet_register_events();
+    mistrimulti_renown_register_events();
     mistrimulti_story_register_events();
 }
 
@@ -176,6 +179,7 @@ function mistrimulti_tick() {
     mistrimulti_character_tick();
     mistrimulti_guestsave_tick();
     mistrimulti_drops_frame(); // every frame: the game's item pickup is checked against the host's claims
+    mistrimulti_map_tick(); // keeps the other players' markers moving while the map menu is open
     if (r.ticks mod 3 != 0) return; // 20 Hz bridge; actors animate at the game frame rate.
     // A room change is settled once the location and the engine room stayed the same for a second: nothing is created
     // (other players, shared items, farm nodes) while the game is still tearing down the old room or building the new one.
@@ -208,6 +212,7 @@ function mistrimulti_tick() {
         mistrimulti_dungeon_tick();
         mistrimulti_farm_tick();
         mistrimulti_wallet_tick();
+        mistrimulti_renown_tick();
         mistrimulti_hearts_tick();
         mistrimulti_story_tick();
     } else {
@@ -444,6 +449,9 @@ function mistrimulti_register() {
     mmapi_on("save.game_saving", mistrimulti_wallet_game_saving);
     mmapi_on("save.game_loaded", mistrimulti_wallet_game_loaded);
     mmapi_filter("player.gold_delta", mistrimulti_wallet_gold_delta);
+    mmapi_on("save.game_saving", mistrimulti_renown_game_saving);
+    mmapi_on("save.game_loaded", mistrimulti_renown_game_loaded);
+    mmapi_filter("player.renown_delta", mistrimulti_renown_delta);
     mmapi_filter("npc.heart_points", mistrimulti_hearts_filter);
     mmapi_guard("dialogue.romance_prompt_guard", mistrimulti_romance_prompt_guard);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
@@ -458,9 +466,12 @@ function mistrimulti_register() {
     // Host: approve / refuse a player identity that needs approval. Guest: accept a changed host identity.
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F7"), mistrimulti_trust_hotkey_approve);
     mmapi_hotkey_register_binding(mmapi_hotkey_binding_from_name("SHIFT+F7"), mistrimulti_trust_hotkey_refuse);
+    // Developer command, host only (docs/DEVTOOLS.md): unlock the mines.
+    var unlock_binding = mmapi_hotkey_binding_from_name("CONTROL+F6");
+    if (unlock_binding != undefined) mmapi_hotkey_register_binding(unlock_binding, mistrimulti_devtools_hotkey_unlock_mines);
     mistrimulti_ranch_register_hooks();
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.3.9");
+mmapi_mod_declare("mistrimulti", "0.4.0");
 mistrimulti_register();

@@ -35,7 +35,8 @@ in the source repository.
 
 - Name, pronouns, birthday and appearance.
 - Inventory slots and equipment, including serialized item attributes.
-- Gold, essence, renown, health, stamina, mana and free baths.
+- Gold, essence, renown, health, stamina, mana and free baths. (Gold and renown are mirrors of the shared pool and the shared town
+  rank, `docs/SYNC-WALLET.md` and `docs/SYNC-RENOWN.md`: the host's value wins when a player joins.)
 - Skill XP, learned spells and perks.
 - NPC friendship points, relationship status, known gift preferences and daily
   gift/conversation flags. Daily flags reset when the stored calendar day differs.

@@ -91,7 +91,7 @@ function mistrimulti_savespace_try_set(multiplayer) {
     }
 }
 
-// The game's choice buttons are 97 px wide, too narrow for labels like "Continue your world": use the popup's width.
+// The game's choice buttons are 97 px wide, too narrow for long labels (keep them under about 18 characters): use the popup's width.
 function mistrimulti_widen_choices(mcp) {
     try {
         var w = mcp.popup.backplate.get_width() - 16;
@@ -282,11 +282,11 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/singleplayer": return "Singleplayer";
         case "mistrimulti/multiplayer": return "Multiplayer";
         case "mistrimulti/host_world": return "Multiplayer world";
-        case "mistrimulti/continue_world": return "Continue your world";
-        case "mistrimulti/new_world": return "Start a new world";
+        case "mistrimulti/continue_world": return "Continue world";
+        case "mistrimulti/new_world": return "New world";
         case "mistrimulti/opt_hearts_title": return "Hearts with villagers";
-        case "mistrimulti/opt_hearts_own": return "Each player's own (Recommended)";
-        case "mistrimulti/opt_hearts_shared": return "Shared by everyone";
+        case "mistrimulti/opt_hearts_own": return "Own (Recommended)";
+        case "mistrimulti/opt_hearts_shared": return "Shared";
         case "mistrimulti/no_world_title": return "No world to join yet";
         case "mistrimulti/no_world_body": return "The host's world was not found on this computer. Choose Multiplayer and Join a game again.";
         case "mistrimulti/offline_title": return "Multiplayer is offline";

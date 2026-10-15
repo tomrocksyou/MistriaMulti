@@ -189,7 +189,17 @@ The real-game test showed no badge at all: the mod runtime has no `draw_*` funct
   hidden (alpha 0) elsewhere, e.g. in a singleplayer world. The game shuts ANCHOR down and builds a new one at some state
   changes, which frees every node: each tick the slot checks that its ANCHOR is still the live one and its nodes are not
   freed, and builds new nodes if not. Nodes are not created while a world's room change is unsettled (`room_settled`, Boot).
-  Menus and popups draw above the `Hud` layer, so they cover the badge while open.
+  The badge sits on the `Popup` layer (the layer of the game's toolbar), so it is no longer drawn behind other UI; its z (900)
+  is behind popup contents of the same layer. On the title screen it sits 16 px above the bottom edge, over the game's
+  "(c) 2024-2026 NPC Studio" line (bottom right, `TitleMenu.setup_main_screen`); in a world it sits in the corner (4 px).
+  `mistrimulti_hudtext_set` moves an existing node when the offset changes. Texts are short (about 40 characters at most).
+- **The states, true in a world.** In a multiplayer world (`runtime.enabled`, mode host or join) the badge reads the signals the
+  event layer uses (`MistriMultiBoot.gml` tick, `__mistrimulti_world_link`): the helper's `status.json` heartbeat seen within
+  3 s, and the peer mask. `Online (hosting)`: heartbeat moving. `Online (joined)`: heartbeat moving and the host's bit in the mask.
+  A guest with a heartbeat but no host bit says `Joining the host...`; before the first status read `Connecting...`; a heartbeat
+  that stopped says `Offline - connection lost`. The old "helper not running" text (control.json said a session exists but the
+  separate once-a-second read had not seen a heartbeat) was stale in worlds and is gone: on the title screen a just-started
+  session says `Starting...` for up to 10 s, then `Offline - helper stopped`. The log line carries the reason (`heartbeat N, mask M`).
 - **Never throws.** Every ANCHOR call is inside try/catch; a failure is logged (rate limited) and the slot is dropped and
   rebuilt on the next tick. No `ANCHOR` / screen canvas yet (very early frames): nothing happens, the next tick retries.
 - It logs every change of its text with the reason ("Badge: Multiplayer: Offline - launcher not running ... [the launcher's
@@ -213,7 +223,7 @@ The real-game test showed no badge at all: the mod runtime has no `draw_*` funct
 
 | Command | What it covers |
 | --- | --- |
-| `python3 tests/test_menu.py` | the GML menu and badge against a scripted fake launcher: every screen, validation, error words, cancel/Escape, silent launcher, hostile status file, badge states and fallbacks (14 tests) |
+| `python3 tests/test_menu.py` | the GML menu and badge against a scripted fake launcher: every screen, validation, error words, cancel/Escape, silent launcher, hostile status file, badge states and fallbacks, the badge in a world, short popup labels (15 tests); `python3 tests/mutate_polish.py` breaks the badge and labels on purpose |
 | `unshare -n ... python3 tests/test_menu.py <launcher> <helper> <fakegame>` | plus an end-to-end test: GML menu <-> real Linux launcher + helper <-> a real host: host with password, scan, wrong password, right password, world download, leave, badge Online |
 | `tests/test_launcher_linux.py` (`test_menu_*`) | standby, nothing listening, host/stop, helper arguments, scan and join with a real host, failures, command validation, helper missing, `launcher.cfg` compatibility |
 | `tests/test_launcher.py` (`test_menu_*`, Wine) | the same for the Windows launcher; `--addrs` and `--scan` of `MistriMulti.exe`; a real Windows host helper with a password |

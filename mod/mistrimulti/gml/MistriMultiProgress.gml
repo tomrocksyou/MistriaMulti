@@ -683,8 +683,21 @@ function mistrimulti_progress_capture_misc() {
     }
     return { crown_cooldown: ARI.crown_cooldown, artifacts: clone_value(ARI.quest_artifacts.inner),
         pinned: opt_and_then(ARI.pinned_spell, spell_to_string), perks_off: off,
-        renown: ARI.pending_renown_entries.map_to(serialize_renown_entry).to_array(),
+        renown: mistrimulti_progress_capture_renown(),
         renown_rewards: RENOWN_REWARD_INVENTORY.serialize(), mount: mount, mines_level: MAXIMUM_REACHED_DUNGEON_LEVEL };
+}
+
+// The town rank is shared (docs/SYNC-RENOWN.md): the total is the host's and each game is brought up to it by "carrier" entries
+// in the pending list. Those are derived from the host's total, so the record keeps only this player's own queued gains.
+function mistrimulti_progress_capture_renown() {
+    var list = ARI.pending_renown_entries;
+    var out = [];
+    for (var i = 0; i < list.count(); i++) {
+        var e = list.get(i);
+        if (is_struct(e) && e[$ "mm_carrier"] == true) continue;
+        array_push(out, serialize_renown_entry(e));
+    }
+    return out;
 }
 
 function mistrimulti_progress_valid_misc(v) {

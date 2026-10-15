@@ -38,6 +38,8 @@ Implemented:
   (`docs/SYNC-CONTAINERS.md`; chests verified in the game).
 - One shared gold pool for the whole world, owned by the host, and shared shipping bins sold once by the host
   (`docs/SYNC-WALLET.md`; verified in the game).
+- One shared town rank (renown) for the whole world, owned by the host; every player gets each rank's rewards and popups once
+  (`docs/SYNC-RENOWN.md`; tests only, not yet verified in the game).
 - Per-player progress (recipes, almanac, mail, personal quests, romance and children, cosmetics, counters) is stored on the host
   beside each player's record, committed with the host's save, and one villager can be romanced by one player at a time
   (`docs/SYNC-PROGRESS.md`).

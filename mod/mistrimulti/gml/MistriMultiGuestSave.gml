@@ -17,6 +17,8 @@
 #macro MISTRIMULTI_GUESTSAVE_RETRIES 10
 #macro MISTRIMULTI_GUESTSAVE_EXPORT_GAP 60000000
 #macro MISTRIMULTI_GUESTSAVE_EXPORT_BYTES 524288
+#macro MISTRIMULTI_GUESTSAVE_NOTICE_WAIT 1000000
+#macro MISTRIMULTI_GUESTSAVE_TEXT "Guests do not save: the host keeps your progress."
 #macro MISTRIMULTI_GUESTSAVE_BUSY "This player identity is already connected."
 
 // State of the current world session (kept on the runtime, dropped at the title screen).
@@ -26,6 +28,7 @@ function __mistrimulti_guestsave() {
         r.guestsave = {
             in_session: false, leaving: false, reason: "", blocked: 0, notified_at: -1,
             host_epoch: "", host_world: "", state: "ok", state_at: 0, warned: false,
+            notice_due: -1, rewrites: 0,
             flush_pending: false, retries: 0, retry_at: 0, exported: "", exported_at: -1, export_now: false, export_error: "",
         };
     }
@@ -68,7 +71,10 @@ function mistrimulti_guestsave_blocks(ctx) {
     return false;
 }
 
-// The guest tried to save: tell them where their character is, and send it to the host now.
+// The guest tried to save. The game goes on to show its own "Save complete" notice for the vetoed save (create_save_notification
+// runs right after save_game, whatever the guard said): the local.get filter below rewrites that notice into the one line
+// MISTRIMULTI_GUESTSAVE_TEXT, so the guest sees a single, true message. If the game's notice does not appear within a second
+// (the filter never ran), the tick shows the same line itself instead. Here: send the character to the host now, and arm that wait.
 function mistrimulti_guestsave_blocked() {
     var g = __mistrimulti_guestsave();
     g.blocked++;
@@ -77,11 +83,36 @@ function mistrimulti_guestsave_blocked() {
         var now = get_timer();
         if (g.notified_at < 0 || now - g.notified_at >= MISTRIMULTI_GUESTSAVE_NOTICE_GAP) {
             g.notified_at = now;
-            create_notification(ANCHOR.wrap_for_local("Guest game: nothing is saved on this computer. Your character is saved on the host's computer."));
+            g.notice_due = now + MISTRIMULTI_GUESTSAVE_NOTICE_WAIT;
         }
     } catch (e) {
         mmapi_warn_rate_limited("mistrimulti_guestsave_blocked", "mistrimulti", "Guest save notice failed: " + string(e));
     }
+}
+
+// local.get filter: on a guest the game's "Save complete" text becomes the guest line (the game plays its save sound and icon
+// anyway: nothing in the hooks reaches those, see docs/SYNC-GUESTSAVE.md). The value is returned for every lookup of that key
+// while this game is a guest, so a notice the game builds twice stays consistent.
+function mistrimulti_guestsave_local_get(value, ctx) {
+    if (!is_string(ctx) || ctx != "misc_local/save_complete") return undefined;
+    try {
+        if (!mistrimulti_guestsave_is_guest()) return undefined;
+        var g = __mistrimulti_guestsave();
+        g.notice_due = -1;
+        g.rewrites++;
+        if (g.rewrites == 1) mmapi_log_info("mistrimulti", "The game's save notice was reworded for the guest.");
+        return MISTRIMULTI_GUESTSAVE_TEXT;
+    } catch (e) {
+        return undefined;
+    }
+}
+
+// Tick: the game's own notice did not show after a vetoed save, so say the line ourselves.
+function mistrimulti_guestsave_notice_tick(g) {
+    if (g.notice_due < 0 || get_timer() < g.notice_due) return;
+    g.notice_due = -1;
+    mmapi_log_info("mistrimulti", "The game showed no save notice for the vetoed save; showing the guest line instead.");
+    create_notification(ANCHOR.wrap_for_local(MISTRIMULTI_GUESTSAVE_TEXT));
 }
 
 // Sends the character to the host now instead of at the next checkpoint. An upload sends one record at a time, so while the
@@ -145,6 +176,7 @@ function mistrimulti_guestsave_tick() {
                 g.flush_pending = false;
                 mistrimulti_guestsave_flush();
             }
+            mistrimulti_guestsave_notice_tick(g);
             mistrimulti_guestsave_watch_host(g);
             mistrimulti_guestsave_retry(g);
             mistrimulti_guestsave_export_tick(g);
@@ -329,6 +361,7 @@ function mistrimulti_guestsave_register_hooks() {
     mmapi_on("ui.menu_opened", mistrimulti_guestsave_menu_opened);
     mmapi_on("game.title_entered", mistrimulti_guestsave_title_entered);
     mmapi_filter("local.missing", mistrimulti_guestsave_local_missing);
+    mmapi_filter("local.get", mistrimulti_guestsave_local_get);
 }
 
 function mistrimulti_guestsave_local_missing(value, ctx) {

@@ -128,8 +128,9 @@ Everything above is written and **passes the stand-in test matrix**, but **almos
 2. Fix what the first real session shows. Expect bugs: all GML was written from the game's scripts, never executed in the real game.
    Each `docs/SYNC-*.md` lists its unverified assumptions and an in-game checklist: work through them one feature at a time
    (clock, gold, chests, shipping bin, crops, animals, mines, saving, leaving/rejoining, password).
-3. Cosmetic: the "Continue your world / Start a new world" and some popup buttons overflow their button text; the missing badge on
-   Debian is unexplained (new logging should say why); Windows leftover helper: a new session should stop an old helper first.
+3. Cosmetic (fixed in the Polish package, to verify in game): popup labels shortened ("Continue world", "New world", "Own
+   (Recommended)", "Shared"), the badge moved to the Popup layer above the title copyright line and made true in worlds, the guest
+   save line (docs/SYNC-GUESTSAVE.md); Windows leftover helper: a new session should stop an old helper first.
 4. Fix the red CI; then make the repo public-ready (releases flow in `docs/RELEASES.md` is untested because the repo is private).
 5. Known gaps: items on the ground and furniture pickup inside farm buildings; the world download on TCP 7775 now needs the
    join session's key (`docs/PROTOCOL.md`, `docs/SECURITY.md`; not encrypted). Mines, interiors and story rewards are built

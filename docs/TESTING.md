@@ -44,6 +44,7 @@ The event layer (`docs/EVENT-LAYER.md`) is checked three ways, all on Linux (and
 ```sh
 python3 tests/test_event_layer.py            # about 4 minutes; --quick runs the Python model only
 python3 tests/test_event_features.py
+python3 tests/test_engine_audit.py           # the game-identifier audit tool (docs/AUDIT-1.0.8.md); MISTRIA_GML=<dir> audits real scripts
 python3 tests/test_event_bridge.py build/mistrimulti-helper-linux    # --guests 7 for eight players
 python3 tests/test_event_bridge.py build/mistrimulti-helper.exe      # Windows helper (under Wine on Linux)
 ```
@@ -298,6 +299,8 @@ by host and guest, three players taking one step, world and private cutscenes, l
 flight, a cutscene holding only its own game, 100 steps through a full send queue, hostile input, the villagers' day plan).
 `python3 tests/mutate_story.py` breaks the GML in 20 ways and fails if any test still passes. See `docs/SYNC-STORY.md`.
 
+`python3 tests/test_maplive.py` (seconds) runs the real map-marker GML against a model of the game's MapMenu: live marker updates, rebuild only on change, other locations, closing, hostile peers. The remote hit shake is `test_hit_shake` in `tests/test_farm_sync.py`. See `docs/SYNC-MAPLIVE.md`.
+
 ## Transport checks
 
 From the project folder on Windows:
@@ -379,3 +382,19 @@ The helper working set observed during this test was about 5 MB on Windows,
 including operating-system libraries. That is one observation, not a memory
 or CPU guarantee. The protocol stores bounded per-player buffers and avoids
 resending unchanged state at the full game frame rate.
+
+## Feature suites
+
+`scripts/runall.sh` covers the native components. The GML feature suites (the engine is
+stubbed, no game and no build are needed) run with:
+
+```sh
+sh scripts/run-features.sh
+```
+
+The script re-runs itself in a private network namespace (`unshare -n`, loopback brought
+up) and runs `test_containers`, `test_ranch`, `test_progress`, `test_farm_sync`,
+`test_wallet`, `test_dungeon`, `test_story`, `test_buildings`, `test_guestsave`,
+`test_devtools`, `test_maplive`, `test_menu` (GML parts), `test_trust_gml`,
+`test_event_features`, `test_event_layer` and `test_engine_audit` (without the real game
+scripts), printing PASS or FAIL with the time of each and exiting non-zero on any failure.

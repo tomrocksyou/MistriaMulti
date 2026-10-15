@@ -527,6 +527,7 @@ class Thrown(Exception):
 class Function:
     def __init__(self, name, params, body, interp):
         self.name, self.params, self.body, self.interp = name, params, body, interp
+        self.bound = None       # the struct `self` means inside it, set by method(struct, fn)
 
     def __call__(self, *args):
         return self.interp.invoke(self, list(args))
@@ -658,7 +659,7 @@ class Interpreter:
     def invoke(self, fn, args):
         if len(args) > len(fn.params):
             raise GmlError(f"{fn.name}: {len(args)} arguments for {len(fn.params)} parameters")
-        scope = {}
+        scope = {} if fn.bound is None else {"__self__": fn.bound}
         for i, (pname, default) in enumerate(fn.params):
             if i < len(args) and args[i] is not None:
                 scope[pname] = args[i]
@@ -843,6 +844,10 @@ class Interpreter:
         kind = node[0]
         if kind == "const":
             return node[1]
+        if kind == "self":
+            if "__self__" not in scope:
+                raise GmlError(f"line {node[1]}: self is only supported inside a function made by method()")
+            return scope["__self__"]
         if kind == "name":
             name = node[1]
             if name in scope:
@@ -1081,12 +1086,19 @@ class Interpreter:
             buffer.pos += 1
             return value
 
+        def method(owner, fn):
+            if not isinstance(fn, Function):
+                raise GmlError("method: not a GML function")
+            bound = Function(fn.name, fn.params, fn.body, fn.interp)
+            bound.bound = owner
+            return bound
+
         def no_op(*args):
             return None
 
         return {
             "array_length": array_length, "array_push": array_push, "array_delete": array_delete,
-            "array_pop": array_pop, "array_create": array_create,
+            "array_pop": array_pop, "array_create": array_create, "method": method,
             "string": gml_string, "string_copy": string_copy, "string_length": string_length,
             "string_byte_length": string_byte_length, "string_char_at": string_char_at,
             "ord": lambda c: ord(c[0]) if isinstance(c, str) and c else 0,
