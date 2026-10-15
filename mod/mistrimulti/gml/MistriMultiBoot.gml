@@ -433,6 +433,7 @@ function mistrimulti_register() {
     mmapi_guard("game.save_guard", mistrimulti_save_guard);
     mmapi_on("game.new_day", mistrimulti_new_day);
     mmapi_on("game.new_day", mistrimulti_drops_new_day);
+    mmapi_on("game.new_day", mistrimulti_story_new_day);
     mmapi_override("object.interact", mistrimulti_containers_interact);
     mmapi_on("dungeon.treasure_chest", mistrimulti_drops_treasure);
     mmapi_on("resource.node_picked", mistrimulti_drops_rock);

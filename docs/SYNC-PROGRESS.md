@@ -124,12 +124,15 @@ progress) are personal in nature and are **not carried**: a guest starts with th
 spouse) are the player's. Marriage and engagement dates, the date history, children, "met" and "ex" are the player's too. Each
 player's game uses its own values for dialogue and prompts, so two players can have different hearts with the same villager.
 
-**World.** The villager's body (where they walk, their schedule, outfit, animation, whether they are asleep) is the host's
-simulation and is not synchronised yet. The host's game chooses schedules from the host's own relationship facts, which has
-two consequences that are by design:
+**World.** The villager's body (where they walk, their schedule, outfit, animation, whether they are asleep) is simulated in every
+game and steered by the host's plan (`docs/SYNC-STORY.md`). Each game's own relationship facts choose a villager's schedule, which
+has two consequences that are by design:
 
-- A villager moves into the farm house only as the **host's** spouse. A guest's spouse is recorded and is the guest's partner in
-  dialogue, but their body stays under the host's schedule.
+- A villager lives in the farm house in the game of the player whose spouse they are. **Since the story sync every game also moves
+  in the spouses of the other players** (the host's registry below says who is married to whom, a player who is away included), so
+  a guest's spouse lives at the farm in every game, like the host's would; the spouse is still the guest's partner in dialogue and
+  only in the guest's game. Details, the bed and the unverified assumptions: `docs/SYNC-STORY.md`, "Spouses of other players live
+  at the farm".
 - A guest's friendship, status and daily availability (`talk_flag`, `gift_flag`) are the guest's: talking to a villager once a day
   is per player; a villager is not "used up" for everybody.
 
@@ -157,6 +160,14 @@ stay open to everyone.
 4. A break-up (the status leaving the romantic states) releases the claim. Players are never removed from a claim by absence.
 5. The host's own partner is protected the same way: a guest cannot start dating the host's spouse, and the host cannot take a
    guest's partner (the host's game is set back to "best friend" the same way).
+
+**Spouses (registry).** Next to the claims the host keeps `romance_spouse` (villager -> player), derived from the same records at the
+same moments, for the status "spouse" only: a player has **one** spouse (the first the records name; the game has one
+`ARI.spouse()`), and only a villager the player also holds in the claims. The host's own spouse is included. The `romance_claims`
+event carries it (`{ claims, spouses }`, sent to a game that joins and whenever it changes); a guest keeps only the entries that its
+claims list confirms (`mistrimulti_romance_spouse_view`, at most 256 names). `MistriMultiStory.gml` reads it to move the spouses of
+other players into the farm house in every game. The entry stays while the player is away and ends only when the record says the
+marriage ended. Debug: `mistrimulti.progress` lists `spouses`.
 
 ## Records
 
@@ -188,6 +199,14 @@ A progress file is `{ "v": 1, "revision": n, "data": { "v": 1, "uid", "world", "
 | `counters` | `stats` (name → number), `spoken` (villager → number) |
 | `misc` | `crown_cooldown`, `artifacts`, `pinned`, `perks_off`, `renown`, `renown_rewards`, `mount`, `mines_level` |
 | `daily` | `day` plus today's flags; restored only when `day` is the current in-game day |
+| `story_rewards` | `init` (the ledger was seeded) and `paid` (story quest -> level whose rewards this player has been given, 1 to 1000000, at most 2048 quests); see below |
+
+**`story_rewards`** is not a field of the game's save: it is the player's ledger of story-step rewards (`docs/SYNC-STORY.md`, "Rewards
+of a shared step"), kept in the world facts `mm_paid_<quest>` and `mm_paid_init`. Capture reads those facts for every story quest;
+restore writes them (and clears the ones the record lacks, because a guest's world copy contains the host's), so a returning player
+keeps their ledger in any slot, and it rides the host's save commit like the other sections. A record from before this section, and a
+new character, restore `init: false`: the story sync seeds the ledger at the first pass, marking everything that exists then as
+paid. The host's own ledger needs no section: the facts are saved with its world.
 
 Everything is stored **by name**, written by the game's own `*_to_string` functions (and the game's own `serialize_array_bool`,
 `Inbox.serialize`, `serialize_renown_entry`, `Inventory.serialize`), and restored through the inverse mapping, so a name this
@@ -292,7 +311,6 @@ These are personal in nature and still **copied from the host's save** into a ne
 - Date photos.
 - Personal quests that need a world object (a turn-in box) are restored without that object: a guest's copy of the world does
   not get the box, so such a quest cannot be handed in until the quest feature exists.
-- A guest's engagement or marriage does not move the villager into the farm house (host schedule).
 - A museum donation by a guest is not saved (the museum is shared and needs a host request).
 - Records of players seen only by a version without this feature are not part of the commit until they rejoin once (the host cannot
   list the folder).
@@ -334,7 +352,9 @@ identity files over the event layer and its simulated network, with only the gam
 validation of 43 malformed sections and records, migration, readiness gating, a new guest, delta uploads, returning guests in
 other slots and accounts, a core-only record, crash between checkpoints, damaged/foreign/newer records, an interrupted host write,
 refused and oversized sections, protocol abuse and replays, the flush, the save commit and rollback (including restarts, missing,
-damaged and foreign commits, two generations), one partner per NPC (race, break-up, host partner, restart, late joiner), a 134 KB
+damaged and foreign commits, two generations), one partner per NPC (race, break-up, host partner, restart, late joiner), the spouse
+registry (only marriages, one spouse per player and per villager, break-ups, restarts, a player who is away, a late joiner, a hostile
+list), the story-rewards ledger section (round trip, 12 malformed variants, empty for a new character, replacing the host's), a 134 KB
 record in multi-chunk blobs, and a section that fails to restore. It also needs `python3 tests/test_event_features.py` and
 `python3 tests/test_event_layer.py` to keep passing. None of this runs the real game.
 
@@ -359,8 +379,9 @@ Use two game installs (or one plus the `tests/test_live_game.py` peer), a host w
    replayed after rejoining.
 8. **Romance.** Guest A starts dating a villager; guest B's pink prompts for that villager are greyed within seconds, other villagers
    stay open. A breaks up: B can start. Try both at once (race): the second is told and set back to "best friend". Check the host's
-   own partner is protected. Check that proposals/weddings for the guest work (children, wedding date), and that the guest's spouse
-   stays on the host's schedule.
+   own partner is protected. Check that proposals/weddings for the guest work (children, wedding date). The guest's spouse lives at
+   the farm in the host's game too: `mistrimulti.progress` on the host lists them under `spouses`; the full check is in
+   `docs/SYNC-STORY.md`, checklist 23 to 30. Dating or engaged is not a spouse (`spouses` stays empty).
 9. **Children / pending child** of a guest survive a rejoin; `report_children_facts` shows the right facts.
 10. **Host save commit.** Guests play; the host sleeps (autosave). Check `commits/game-<id>-autosave_sav.json` exists and holds the
     guests' records. Let a guest gain items, then kill the host game without saving and load that autosave: the guest returns to the
