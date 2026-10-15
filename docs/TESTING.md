@@ -44,6 +44,7 @@ The event layer (`docs/EVENT-LAYER.md`) is checked three ways, all on Linux (and
 ```sh
 python3 tests/test_event_layer.py            # about 4 minutes; --quick runs the Python model only
 python3 tests/test_event_features.py
+python3 tests/test_engine_audit.py           # the game-identifier audit tool (docs/AUDIT-1.0.8.md); MISTRIA_GML=<dir> audits real scripts
 python3 tests/test_event_bridge.py build/mistrimulti-helper-linux    # --guests 7 for eight players
 python3 tests/test_event_bridge.py build/mistrimulti-helper.exe      # Windows helper (under Wine on Linux)
 ```
