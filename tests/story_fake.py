@@ -21,6 +21,12 @@ The world the tests play in:
 * Rewards: every task gives 10 gold (`arrival`'s first also an item); `arrival` and `bridge` have quest rewards (an item, renown);
   `bridge`'s second task also starts the personal quest `juniper_heart` and the story quest `dragon`. The cutscenes `fire_seal`
   and `alt_scene` give items and baths, `juniper_two` (a heart event) gives an item. Every grant is counted per reward.
+* Scenes the game starts by itself (the story that everybody watches): `dragon_day2` (a trigger area in town, needs the dragon quest
+  at stage 0, advances it, removes an object, gives an item once, a bath and a world gate reads it), `bridge_vision` (waits in a task
+  of the `bridge` quest), `chapter_intro` (starts the quest `chapter_000`), `night_scene` (plays when the player sleeps) and some
+  that cannot be shown safely (a hand-made trigger, an "or" over a quest stage, an unknown stage). `watch` models the game's
+  `check_cutscene_eligible` and `clean_up_scene` (repeat switch, history, `give_items_once`, baths, objects removed once per call,
+  `quest_to_start` for a quest that is not active, `quest_to_progress`, the blackboard flag `removed_scene_objects`).
 """
 import gml_subset as gml
 
@@ -42,7 +48,9 @@ class G(gml.GStruct):
 
 STORY, CROWN, HEART = 0, 1, 5
 (R_OR, R_SEEN, R_FACT, R_FIRE, R_SERIDIA, R_MARKET, R_SUPPLY, R_INVERT) = range(8)
-R_LEN = 12
+R_QSTAGE, R_QACTIVE, R_QDONE = 12, 13, 14
+R_LEN = 15
+QT_CUTSCENE = 1
 CHEST = 0
 FARM, HOME, TOWN, BEACH = 0, 1, 2, 3
 NPC_COUNT = 6
@@ -61,9 +69,11 @@ ENUMS = {
     "QuestCategory": G(Story=STORY, Crown=CROWN, Heart=HEART, LEN=6),
     "SceneTestTarget": G(General=T_GENERAL, MainStory=T_MAIN, DragonStory=T_DRAGON, MarriageAndChildren=T_MARRIAGE),
     "FestivalId": G(LEN=2),
-    "WorldMod": G(LEN=3),
+    "WorldMod": G(LEN=4),
     "Requirement": G(LEN=R_LEN, Or=R_OR, SeenCutscene=R_SEEN, WorldFactIs=R_FACT, BrokeFireSeal=R_FIRE,
-                     SeridiaTransformed=R_SERIDIA, SaturdayMarketUnlocked=R_MARKET, SuppliedItems=R_SUPPLY, Invert=R_INVERT),
+                     SeridiaTransformed=R_SERIDIA, SaturdayMarketUnlocked=R_MARKET, SuppliedItems=R_SUPPLY, Invert=R_INVERT,
+                     QuestIsAtStage=R_QSTAGE, QuestIsActive=R_QACTIVE, CompletedQuest=R_QDONE),
+    "QuestQueryType": G(Cutscene=QT_CUTSCENE, Other=0),
     "SupplyType": G(Chest=CHEST, Seal=1),
     "ObjectId": G(TurnInBox=TURN_IN_BOX),
     "LocationId": G(Farm=FARM, PlayerHome=HOME, Town=TOWN, Beach=BEACH),
@@ -87,6 +97,7 @@ QUEST_DEFS = {
     "arrival": dict(cat=STORY, tasks=3),
     "bridge": dict(cat=STORY, tasks=2, box_task=0),
     "dragon": dict(cat=STORY, tasks=2),
+    "visions": dict(cat=STORY, tasks=3, cutscenes={1: "bridge_vision"}),
     "spring_quest": dict(cat=STORY, tasks=1),
     "crown_1": dict(cat=CROWN, tasks=2),
     "juniper_heart": dict(cat=HEART, tasks=2),
@@ -107,7 +118,29 @@ SCENES = {
     "date_beach": dict(target=T_GENERAL),
     "tutorial_intro": dict(target=T_GENERAL),
 }
-WORLD_SCENES = {"fire_seal", "upgrade_the_saturday_market_plaza", "narrows_secret", "alt_scene", "quest_gate"}
+SCENES.update({
+    # The scenes the game starts by itself. Every one of them is also a world scene (main/dragon story).
+    "dragon_day2": dict(target=T_DRAGON, trigger=True, needs={"dragon": 0}, quest_to_progress="dragon", removals=1,
+                        items=[("scale", 1)], once=True, baths=1, spell=9),
+    "bridge_vision": dict(target=T_MAIN, items=[("vision_token", 1)], progress_task_quest=True),
+    "chapter_intro": dict(target=T_MAIN, trigger=True, quest_to_start=["chapter_000"]),
+    "night_scene": dict(target=T_MAIN, sleeping=True, removals=1),
+    # Cannot be shown safely: applied silently as before.
+    "manual_scene": dict(target=T_MAIN, trigger="manual", removals=1, items=[("hand_gift", 1)]),
+    "or_scene": dict(target=T_MAIN, trigger=True, or_needs={"dragon": 0}, items=[("or_gift", 1)]),
+    "unknown_stage_scene": dict(target=T_MAIN, trigger=True, quest_to_progress="dragon", items=[("blind_gift", 1)]),
+    "repeat_scene": dict(target=T_MAIN, trigger=True, repeat=True),
+    "story_mode_scene": dict(target=T_MAIN, trigger=True, story_mode=True, removals=1),
+    # Requirements the mirror could break: "not seen" of a world scene, a world fact that must be false; and one it cannot.
+    "inverted_scene": dict(target=T_MAIN, trigger=True, inv_seen=["alt_scene"], items=[("inv_gift", 1)]),
+    "fact_false_scene": dict(target=T_MAIN, trigger=True, facts=[("caldarus_home", None)], items=[("fact_gift", 1)]),
+    "fact_true_scene": dict(target=T_MAIN, trigger=True, facts=[("bridge_fixed", True)]),
+    # Not a world scene by itself, but a world gate reads it; it also has a trigger.
+    "gate_trigger": dict(target=T_GENERAL, trigger=True, items=[("gate_gift", 1)]),
+})
+WORLD_SCENES = {"fire_seal", "upgrade_the_saturday_market_plaza", "narrows_secret", "alt_scene", "quest_gate", "dragon_day2",
+                "bridge_vision", "chapter_intro", "night_scene", "manual_scene", "or_scene", "unknown_stage_scene", "repeat_scene",
+                "story_mode_scene", "gate_trigger", "inverted_scene", "fact_false_scene", "fact_true_scene"}
 
 # villager schedules: name -> list of (from hour, room, activity)
 SCHEDULES = {
@@ -182,6 +215,13 @@ class Fake:
         self.hour = 6
         self.room = TOWN                # the room the player is in (CURRENT_LOCATION_ID)
         self.scene_running = False
+        self.active_scene = None                        # MIST.active_cutscene while a scene runs
+        self.played_today = set()
+        self.views = {}                                 # scene -> times it ran here
+        self.refused = []                               # scenes that were not eligible when a test tried to play them
+        self.blackboard = {}
+        self.cut = {}                                   # scene -> the one struct CUTSCENES.get returns (the mod switches can_repeat on it)
+        self.nuked = set()
         self.gold = save["gold"]
         self.items = dict(save.get("items", {}))        # what the player holds (item -> count)
         self.renown = list(save.get("renown", []))      # renown entries filed for completed quests
@@ -199,7 +239,6 @@ class Fake:
         self.rewards = {}               # quest -> how many times its reward was given here
         self.starts = []                # QUEST_LOG.start calls (name, stage)
         self.removals = 0               # objects erased by a scene's object_removals
-        self.nuked_cells = 0
         self.plaza = 0
         self.boxes = set()
         self.active = {}
@@ -210,10 +249,14 @@ class Fake:
                 self.active[name]["initialize_requirements_on_task"](t)
         for name in save["facts"]:
             self.facts[name] = True
+        for name in self.history:
+            self.facts["cutscene_seen_" + name] = 1.0
         for name, level in save.get("ledger", {}).items():      # world facts are saved with the world
             self.facts["mm_paid_" + name] = True if name == "init" else level
         for name, status in save.get("status", {}).items():
             self.facts[name + "_status"] = status
+        for name, value in save.get("textfacts", {}).items():      # facts that hold text (saved with the world too)
+            self.facts[name] = value
         self.counters = list(save["counters"])
         self.hidden = set(save.get("hidden", []))      # quests this game's version does not know
         self.sched = ["s/home_day"] * NPC_COUNT
@@ -241,7 +284,10 @@ class Fake:
             req = A([None] * R_LEN)
             if d.get("box_task") == t:
                 req[R_SUPPLY] = A([G(type=CHEST, point="box")])
-            tasks.append(G(requirements=req, reward_list=self.reward_list(name, t)))
+            scene = d.get("cutscenes", {}).get(t)
+            targets = [G(type=QT_CUTSCENE, cutscene=scene)] if scene else []
+            tasks.append(G(requirements=req, reward_list=self.reward_list(name, t),
+                           query_targets=G(count=lambda targets=targets: len(targets), get=lambda i, targets=targets: targets[int(i)])))
         return G(category=d["cat"], name=name, tasks=G(count=lambda: len(tasks), get=lambda i: tasks[int(i)]),
                  reward_list=self.reward_list(name, "q"))
 
@@ -315,29 +361,98 @@ class Fake:
 
     # -- cutscenes -----------------------------------------------------------------------------------------------
     def scene_struct(self, name):
+        if name in self.cut:
+            return self.cut[name]
         d = SCENES[name]
-        return G(romantic_choice_warning=d.get("warning"), heart_level_changes=A([1] * d.get("hearts", 0)),
-                 test_target=d["target"], object_removals=A([1] * d.get("removals", 0)),
-                 nuke=A(d["nuke"]) if d.get("nuke") else None,
-                 quest_to_start=A(d["quest_to_start"]) if d.get("quest_to_start") else None,
-                 quest_to_progress=d.get("quest_to_progress"), spell_to_unlock=d.get("spell"), mana_to_set=d.get("mana"),
-                 given_items=A([G(item_id=n, quantity=q) for n, q in d.get("items", [])]), baths=d.get("baths", 0))
+        req = A([None] * R_LEN)
+        if d.get("needs"):
+            req[R_QSTAGE] = A([G(quest=q, stage=st) for q, st in d["needs"].items()])
+        if d.get("needs_active"):
+            req[R_QACTIVE] = A(list(d["needs_active"]))
+        if d.get("inv_seen"):
+            sub = A([None] * R_LEN)
+            sub[R_SEEN] = A(list(d["inv_seen"]))
+            req[R_INVERT] = sub
+        if d.get("facts"):
+            req[R_FACT] = A([A([n, v]) for n, v in d["facts"]])
+        if d.get("or_needs"):
+            sub = A([None] * R_LEN)
+            sub[R_QSTAGE] = A([G(quest=q, stage=st) for q, st in d["or_needs"].items()])
+            req[R_OR] = A([sub])
+        trig = d.get("trigger")
+        self.cut[name] = G(romantic_choice_warning=d.get("warning"), heart_level_changes=A([1] * d.get("hearts", 0)),
+                           test_target=d["target"], object_removals=A([1] * d.get("removals", 0)),
+                           nuke=A(d["nuke"]) if d.get("nuke") else None,
+                           quest_to_start=A(d["quest_to_start"]) if d.get("quest_to_start") else None,
+                           quest_to_progress=d.get("quest_to_progress"), spell_to_unlock=d.get("spell"), mana_to_set=d.get("mana"),
+                           given_items=A([G(item_id=n, quantity=q) for n, q in d.get("items", [])]), baths=d.get("baths", 0),
+                           id=name, trigger=G(location=TOWN, bbox=None, manually_activated=trig == "manual") if trig else None,
+                           when_sleeping=bool(d.get("sleeping")), requirements=req, can_repeat=bool(d.get("repeat")),
+                           give_items_once=bool(d.get("once")), requires_story_mode=bool(d.get("story_mode")))
+        return self.cut[name]
 
-    def watch(self, name):
-        """A cutscene the player watched to its end: the game's clean_up_scene effects, applied by the viewer's own game."""
+    def requirements_ok(self, name):
         d = SCENES[name]
-        if name in self.history:
+        for q, stage in d.get("needs", {}).items():
+            if q not in self.active or self.active[q]["current_stage"] != stage:
+                return False
+        return all(q in self.active for q in d.get("needs_active", []))
+
+    def would_start(self, name, sleeping=False, story=True):
+        """Mist.check_cutscene_eligible for an automatic trigger (the room area, the night): would the game offer the scene?"""
+        c = self.scene_struct(name)
+        d = SCENES[name]
+        return (bool(d.get("trigger") or d.get("sleeping")) and c.when_sleeping == sleeping and self.requirements_ok(name)
+                and (name not in self.history or c.can_repeat) and (story or not c.requires_story_mode)
+                and name not in self.played_today)
+
+    def query_would_start(self, name):
+        """obj_ari: a quest task waits for the scene (the quest is at that task)."""
+        return any(q in self.active and self.active[q]["current_stage"] == t
+                   for q, d in QUEST_DEFS.items() for t, sc in d.get("cutscenes", {}).items() if sc == name)
+
+    @property
+    def active_scene(self):
+        return self._active
+
+    @active_scene.setter
+    def active_scene(self, name):
+        self._active = name
+        if getattr(self, "mist", None) is not None:
+            self.mist["active_cutscene"] = self.scene_struct(name) if name else None
+
+    def trigger_removals(self, name):
+        """trigger_scene_object_removals: every call erases the next matching object, so a second call erases another one."""
+        self.removals += SCENES[name].get("removals", 0)
+
+    def watch(self, name, skipped=False):
+        """A cutscene the player watched to its end (or skipped): the game's clean_up_scene, applied by the viewer's own game.
+        A scene that is already in the history and cannot repeat is not played by the game (the call does nothing)."""
+        d = SCENES[name]
+        c = self.scene_struct(name)
+        if name in self.history and not c.can_repeat and self.active_scene != name:     # eligibility is checked when a scene starts
+            self.refused.append(name)
             return
-        self.history.append(name)
+        was_seen = name in self.history
+        grant_items = not was_seen or not c.give_items_once
+        self.views[name] = self.views.get(name, 0) + 1
+        if not was_seen:
+            self.history.append(name)
+        self.played_today.add(name)
         self.facts["cutscene_seen_" + name] = 1.0
-        for n, q in d.get("items", []):
-            self.items[n] = self.items.get(n, 0) + q
+        if not self.blackboard.pop("removed_scene_objects", False):
+            self.trigger_removals(name)
+        self.blackboard.clear()
+        if grant_items:
+            for n, q in d.get("items", []):
+                self.items[n] = self.items.get(n, 0) + q
         self.ari["free_baths"] += d.get("baths", 0)
-        self.removals += d.get("removals", 0)
         if d.get("nuke"):
-            self.nuked_cells += 4        # the clear-area command empties every cell of the rectangle
+            for x in range(d["nuke"][0] // 8, d["nuke"][2] // 8):          # the clear-area loop empties every cell of the rectangle
+                for y in range(d["nuke"][1] // 8, d["nuke"][3] // 8):
+                    self.nuked.add((x, y))
         for q in d.get("quest_to_start", []):
-            if q not in self.active and q not in self.completed:
+            if q not in self.active:                       # `if !QUEST_LOG.active.contains_key(quest)`: a finished quest starts over
                 self.quest_start(q)
         if d.get("quest_to_progress"):
             q = d["quest_to_progress"]
@@ -345,10 +460,19 @@ class Fake:
                 self.quest_start(q)
             if q in self.active:
                 self.hand_in(q)
-        if d.get("spell") is not None:
+        if d.get("progress_task_quest"):                   # MIST.arbitrary_quest_to_progress: the quest whose task waited for it
+            for q, qd in QUEST_DEFS.items():
+                for t, sc in qd.get("cutscenes", {}).items():
+                    if sc == name and q in self.active and self.active[q]["current_stage"] == t:
+                        self.hand_in(q)
+        if d.get("spell") is not None and d["spell"] not in self.spells:
             self.spells.append(d["spell"])
         if d.get("mana"):
             self.ari["mana_max"] = max(self.ari["mana_max"], d["mana"])
+
+    @property
+    def nuked_cells(self):
+        return len(self.nuked)
 
     # -- villagers -----------------------------------------------------------------------------------------------
     def place_all(self):
@@ -456,7 +580,8 @@ class Fake:
                 "personal": {n: a["current_stage"] for n, a in self.active.items() if QUEST_DEFS[n]["cat"] != STORY},
                 "gold": self.gold, "items": dict(self.items), "renown": list(self.renown), "baths": self.ari["free_baths"],
                 "ledger": {n[len("mm_paid_"):]: v for n, v in self.facts.items() if n.startswith("mm_paid_") and v is not None},
-                "status": {n[:-len("_status")]: v for n, v in self.facts.items() if n.endswith("_status") and v is not None}}
+                "status": {n[:-len("_status")]: v for n, v in self.facts.items() if n.endswith("_status") and v is not None},
+                "textfacts": {n: v for n, v in self.facts.items() if n.startswith("mm_") and isinstance(v, str)}}
 
     # -- builtins --------------------------------------------------------------------------------------------------
     def builtins(self):
@@ -469,7 +594,11 @@ class Fake:
         quest_log = G(active=active, completed=completed, completion_timestamps=stamps, start=f.quest_start)
         history = G(keys=lambda: A(f.history), contains=lambda k: k in f.history,
                     insert=lambda k: f.history.append(k) if k not in f.history else None)
-        mist = G(is_running=lambda: f.scene_running, scene_history=history)
+        played = G(contains=lambda k: k in f.played_today)
+        blackboard = G(set=lambda k, v: f.blackboard.__setitem__(k, v))
+        mist = G(is_running=lambda: f.scene_running, scene_history=history, scenes_played_today=played, blackboard=blackboard)
+        mist["active_cutscene"] = None
+        f.mist = mist
 
         def t2_write(name, value, expiration=None):
             f.facts[name] = value
@@ -488,23 +617,25 @@ class Fake:
         aliases[R_MARKET] = req(fact=A([A(["market_open", True])]))
         mods = A([G(requirements=req(seen=A(["narrows_secret"]))),
                   G(requirements=req(fact=A([A(["bridge_fixed", True])]), or_=A([req(seen=A(["alt_scene"]))]))),
-                  G(requirements=req(fire=True))])
+                  G(requirements=req(fire=True)),
+                  G(requirements=req(seen=A(["dragon_day2", "gate_trigger"])))])
         town = G(node_index_for_cell=lambda x, y: int(y) * 100 + int(x), node_object_id=Cells(f))
         grids = A([None] * 6)
         grids[TOWN] = town
 
         def erase(grid, ni):
-            f.nuked_cells += 1
+            f.nuked.add((int(ni) % 100, int(ni) // 100))
             f.boxes.discard((int(ni) % 100, int(ni) // 100))
 
         return {
             **ENUMS,
             "ARI": f.ari, "MIST": mist, "QUEST_LOG": quest_log, "CUTSCENES": G(contains_key=lambda n: n in SCENES, get=f.scene_struct),
-            "QUESTS": G(get=lambda n: f.quest_struct(n) if n in QUEST_DEFS and n not in f.hidden else None), "T2R": t2r,
+            "QUESTS": G(get=lambda n: f.quest_struct(n) if n in QUEST_DEFS and n not in f.hidden else None,
+                        keys=lambda: A([n for n in QUEST_DEFS if n not in f.hidden])), "T2R": t2r,
             "FESTIVALS": A([G(prototype=G(associated_quest=q)) for q in FESTIVAL_QUESTS]),
             "WORLD_MODS": mods, "REQUIREMENT_ALIASES": aliases, "requirement_is_alias": lambda i: aliases[int(i)] is not None,
             "GRIDS": grids, "trellis_point_location_position": lambda point: G(location_id=TOWN, pos=G(x=40, y=40)),
-            "erase_object_node": erase, "trigger_scene_object_removals": lambda name: setattr(f, "removals", f.removals + SCENES[name].get("removals", 0)),
+            "erase_object_node": erase, "trigger_scene_object_removals": f.trigger_removals,
             "spawn_prios_on_map": lambda *a: setattr(f, "plaza", f.plaza + 1), "location_id_to_gm_room": lambda i: i,
             "spawn_priority_object": 0, "fix_plaza_footsteps": lambda: None,
             "CALENDAR": G(time=0, day_type=lambda: f.weekday, unified_time=lambda: f.hour * 3600), "total_days": lambda: f.day,

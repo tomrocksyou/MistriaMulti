@@ -298,6 +298,7 @@ class Engine:
         e.interp.builtins["MAXIMUM_REACHED_DUNGEON_LEVEL"] = 12
         e.facts.update({"alice_has_met": True, "cara_is_ex": True, "cutscene_seen_first_kiss": 1.0})
         e.facts.update({"mm_paid_init": True, "mm_paid_story_intro": 1000000})
+        e.facts["mm_view"] = '{"dragon_day2": 4}'         # a world cutscene given to this player but not yet watched
         for name in ("alice", "bob"):
             e.facts[name + "_status"] = "best_friend"
         e.facts["bob_status"] = "dating"
@@ -520,7 +521,7 @@ def test_sections_round_trip():
     record = json.loads(gml.to_json(node.call("mistrimulti_progress_capture")))
     assert set(record["sections"]) == {"recipes", "almanac", "seen", "cosmetics", "romance", "inbox", "quests", "counters", "misc",
                                        "daily", "story_rewards"}
-    assert record["sections"]["story_rewards"] == {"init": True, "paid": {"story_intro": 1000000}}
+    assert record["sections"]["story_rewards"] == {"init": True, "paid": {"story_intro": 1000000}, "view": {"dragon_day2": 4}}
     assert node.call("mistrimulti_progress_valid", node.data(record), ALICE, WORLD) is True
     # The story quest stays with the world: only the personal quests are in the record.
     assert record["sections"]["quests"]["done"] == ["crown_a"] and [q["name"] for q in record["sections"]["quests"]["active"]] == ["fetch_b"]
@@ -545,10 +546,12 @@ def test_sections_round_trip():
     assert other.interp.builtins["MAXIMUM_REACHED_DUNGEON_LEVEL"] == 12
     assert other.engine.quest_log["completed"]["contains"]("story_intro"), "the world's story must not be touched"
     assert f["mm_paid_story_intro"] == 1000000 and f["mm_paid_init"] is True, "the host's ledger is replaced by the player's"
+    assert json.loads(f["mm_view"]) == {"dragon_day2": 4}, "the scenes waiting to be watched are the player's, not the host's"
     blank = json.loads(json.dumps(record))
     blank["sections"]["story_rewards"] = {"init": False, "paid": {}}
     other.interp.call("mistrimulti_progress_restore", other.data(blank))
     assert "mm_paid_story_intro" not in f and "mm_paid_init" not in f, "a new character's ledger is empty (the story sync seeds it)"
+    assert "mm_view" not in f, "a new character is waiting for no scene"
     other.interp.call("mistrimulti_progress_restore", other.data(record))
     # Daily flags from another day are not restored.
     stale = json.loads(json.dumps(record))
@@ -623,7 +626,12 @@ def test_validation():
                           {"init": True, "paid": {"q": 0}}, {"init": True, "paid": {"q": -2}}, {"init": True, "paid": {"q": 1.5}},
                           {"init": True, "paid": {"q": "3"}}, {"init": True, "paid": {"q": 1000001}},
                           {"init": True, "paid": {"": 1}}, {"init": True, "paid": {"x" * 97: 1}},
-                          {"init": True, "paid": {"q%d" % i: 1 for i in range(2049)}}],
+                          {"init": True, "paid": {"q%d" % i: 1 for i in range(2049)}},
+                          {"init": True, "paid": {}, "view": []}, {"init": True, "paid": {}, "view": "x"},
+                          {"init": True, "paid": {}, "view": {"s": "3"}}, {"init": True, "paid": {}, "view": {"s": -1}},
+                          {"init": True, "paid": {}, "view": {"s": 1.5}}, {"init": True, "paid": {}, "view": {"s": 1000001}},
+                          {"init": True, "paid": {}, "view": {"": 1}}, {"init": True, "paid": {}, "view": {"x" * 97: 1}},
+                          {"init": True, "paid": {}, "view": {"s%d" % i: 1 for i in range(65)}}],
     }
     count = 0
     for name, variants in bad.items():

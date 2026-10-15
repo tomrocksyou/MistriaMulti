@@ -24,7 +24,8 @@ BOOT = ROOT / "mod/mistrimulti/gml/MistriMultiBoot.gml"
 
 # ---- the extra game data -----------------------------------------------------------------------------------------
 R_MINES, R_QUEST, R_ITEM_REQ, R_NESTED = 8, 9, 10, 11
-sf.ENUMS["Requirement"] = G(**sf.ENUMS["Requirement"], OpenedMines=R_MINES, CompletedQuest=R_QUEST, HasItem=R_ITEM_REQ, Nested=R_NESTED)
+sf.ENUMS["Requirement"] = G({**sf.ENUMS["Requirement"], "OpenedMines": R_MINES, "CompletedQuest": R_QUEST, "HasItem": R_ITEM_REQ,
+                             "Nested": R_NESTED})
 sf.ENUMS["LocationId"] = G(**sf.ENUMS["LocationId"], Dungeon=9)
 sf.SCENES["mines_letter"] = dict(target=sf.T_MAIN, removals=1)
 sf.SCENES["mines_open"] = dict(target=sf.T_MAIN, removals=1, items=[("pickaxe_gift", 1)])
