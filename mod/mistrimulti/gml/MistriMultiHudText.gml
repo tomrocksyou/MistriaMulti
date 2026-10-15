@@ -43,6 +43,8 @@ function mistrimulti_hudtext_build(slot, layer, ax, ay, x, y) {
     slot.shadow = ANCHOR.text(parent, 901, lay).set_align(halign, valign).set_xy(x + 1, y + 1).set_color(0);
     slot.main = ANCHOR.text(parent, 900, lay).set_align(halign, valign).set_xy(x, y);
     slot.anchor = ANCHOR;
+    slot.x = x;
+    slot.y = y;
     slot.text = undefined;
     slot.color = undefined;
     slot.shown = undefined;
@@ -57,7 +59,7 @@ function mistrimulti_hudtext_set(key, text, color, layer, ax, ay, x, y) {
         var slot = h.slots[$ key];
         if (slot == undefined) {
             if (text == "") return true;
-            slot = { anchor: undefined, main: undefined, shadow: undefined, text: undefined, color: undefined, shown: undefined };
+            slot = { anchor: undefined, main: undefined, shadow: undefined, x: x, y: y, text: undefined, color: undefined, shown: undefined };
             h.slots[$ key] = slot;
         }
         var alive = mistrimulti_hudtext_alive(slot);
@@ -72,6 +74,12 @@ function mistrimulti_hudtext_set(key, text, color, layer, ax, ay, x, y) {
             mistrimulti_trace("hudtext", "created the '" + key + "' text node (" + string(h.created) + " in all)", 60);
         }
         var visible = text != "";
+        if (visible && (slot.x != x || slot.y != y)) {    // e.g. the badge moves up on the title screen, above the copyright line
+            slot.main.set_xy(x, y);
+            slot.shadow.set_xy(x + 1, y + 1);
+            slot.x = x;
+            slot.y = y;
+        }
         if (visible && slot.text != text) {
             slot.main.set_text(text);
             slot.shadow.set_text(text);

@@ -11,7 +11,7 @@ spaces of `docs/SAVE-ISOLATION.md` and the event layer (`docs/EVENT-LAYER.md`).
 | --- | --- |
 | Does a guest's game save anything? | **No.** Every save in a joined game is vetoed (`game.save_guard`), whether the game or the mod runtime is healthy or not. |
 | Is the guest's world kept offline (a "guest copy")? | **No.** The guest's character lives in the host's per-player records; the world is the host's. Nothing is written into any save folder. |
-| What does the player see on a save attempt? | A short notice: "Guest game: nothing is saved on this computer. Your character is saved on the host's computer." The attempt also **sends the character to the host at once**. |
+| What does the player see on a save attempt? | ONE line: "Guests do not save: the host keeps your progress." It replaces the game's own "Save complete" text (`local.get` filter on `misc_local/save_complete`, guests only); the mod adds no second notice. The attempt also **sends the character to the host at once**. |
 | Is the guest's character kept locally? | Yes, as a **character export** file (a backup of what the host acknowledged, see below). It is not a save and the game cannot load it. |
 | What happens when the host is gone? | The guest sees a message and returns to the title screen (same path as the settings menu's "Return to main menu"). |
 | Can a multiplayer game write into the solo save folder? | **Never**, for either role: a save whose path is inside the solo `saves` folder is vetoed (a belt-and-braces check on top of the separate save folder). |
@@ -38,15 +38,20 @@ host's.
 
 The game never saves on quit, so "the guest quits" has nothing to protect locally. What matters is that the **last checkpoint
 reached the host**. Both save paths call `save_game`, which is where the guard sits. The game's end-of-day code shows its own
-"saved" icon after the vetoed save (`create_save_notification` is unconditional); the mod's notice and this page say what
-really happened.
+"saved" notice after the vetoed save (`create_save_notification` is unconditional). The mod cannot stop it, but it rewords it:
+the `local.get` filter `mistrimulti_guestsave_local_get` answers the lookup of `misc_local/save_complete` on a guest with the
+guest line, so the player reads one true sentence. **Could not be suppressed:** the game's save sound
+(`SoundEffects/UI/SuccessfulSave`), the save icon next to the text, the "Saving..." text of the load sequence and the short
+fade of the HUD pins: they run in `create_save_notification` / `LoadSequence`, which have no hook. If the game's notice never
+appears (the filter did not run), `mistrimulti_guestsave_notice_tick` shows the same line itself after 1 s (`create_notification`),
+at most once every 5 s.
 
 ## Saving
 
 `mistrimulti_save_guard` (Boot) asks `mistrimulti_guestsave_blocks(ctx)` first:
 
 1. **Guest** (`enabled && mode == "join"`, or the multiplayer save space is active and `control.json` says `join`, which also
-   covers a runtime that failed to start): veto, show the notice (at most once every 5 s) and flush the character (below).
+   covers a runtime that failed to start): veto, arm the 1 s fallback line (at most once every 5 s) and flush the character (below).
 2. **Anybody in multiplayer** (runtime enabled or multiplayer space active) with a `save_path` inside the solo `saves` folder
    (`<original CONFIG_DIRECTORY>/saves/`, compared case-insensitively with `/` and `\` unified): veto and log an error.
 3. Otherwise the existing host behaviour (flush the guests, checkpoint, `progress_flush`) runs and the save is allowed.
@@ -154,7 +159,7 @@ is the same file copied into `players/` of the other world with `data.world` rew
 ## Assumptions about the game that could not be verified here
 
 1. `game.save_guard` vetoes both the journal save and the end-of-day autosave, and a vetoed end-of-day sequence continues
-   normally (the game then shows its own "saved" icon, `create_save_notification`, unconditionally; the mod notice follows).
+   normally (the game then shows its own "saved" notice, `create_save_notification`, unconditionally; for a guest its text is the guest line).
 2. `ui.menu_opened` fires with `kind == Menu.Settings` when the journal's Settings tab is opened (`JournalMenu.set_active_sub_menu`
    calls `ANCHOR.spawn_menu(menu)`; the hook's seam is in `spawn_menu`). If the tab were not spawned with that id, the final flush
    would not fire and the 5 s checkpoint would be the only protection.
@@ -204,11 +209,13 @@ checks that a test fails each time. None of this runs the real game.
 Use two installs (host and guest), a host world on an autosave, and the MMAPI debug console for `mistrimulti.guestsave`
 (`blocked`, `state`, `exported`) when it is enabled.
 
-1. Startup: no error in the MistriaMulti log; MOMI accepts the manifest (no new hook is declared).
-2. **Save attempt.** As a guest, save at the journal. The notice appears, no file appears in `saves/` or `multiplayer/saves/`
+1. Startup: no error in the MistriaMulti log; MOMI accepts the manifest (new hook: `local.get`). Unverified: that the lookup
+   of `misc_local/save_complete` reaches `local.get` with the key string as `ctx`, as the hook page says; the log line "The game's
+   save notice was reworded for the guest." proves it, "showing the guest line instead" means the fallback ran.
+2. **Save attempt.** As a guest, save at the journal. The notice reads "Guests do not save: the host keeps your progress." (once, not "Save complete" and not a second line), no file appears in `saves/` or `multiplayer/saves/`
    (check modification times), and the host's `players/<id>.json` updates within a couple of seconds.
-3. **End of day.** As a guest, sleep through the host's day end: the game continues normally (the "saved" icon is expected, the
-   mod notice follows); no autosave file is touched on the guest.
+3. **End of day.** As a guest, sleep through the host's day end: the game continues normally (the save sound and icon are expected, the text is
+   the guest line); no autosave file is touched on the guest.
 4. **Solo untouched.** Choose Singleplayer: saving works as always, no notice, no export.
 5. **Settings flush.** As a guest, earn gold, open journal > Settings immediately, check the host's record; then "Return to main
    menu". Join again, even through another slot: the character is as it was, no creator.

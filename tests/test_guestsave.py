@@ -145,11 +145,34 @@ def test_guest_save_is_vetoed():
     assert alice.call("mistrimulti_guestsave_blocks", guard_ctx(alice, SOLO_SAVE)) is True, "a guest's save in the solo folder"
     assert alice.call("mistrimulti_guestsave_blocks", None) is True and alice.call("mistrimulti_guestsave_blocks", gml.GStruct()) is True
     assert set(alice.fs.files) == files, "a vetoed save writes nothing"
-    # The same notice is not repeated for every save attempt.
-    assert len(alice.notes) == 1 and "nothing is saved on this computer" in alice.notes[0], alice.notes
+    # The game's own "Save complete" notice is reworded into the one guest line; the mod adds no second notice of its own.
+    TEXT = "Guests do not save: the host keeps your progress."
+    assert alice.call("mistrimulti_guestsave_local_get", "x", "misc_local/save_complete") == TEXT
+    assert alice.call("mistrimulti_guestsave_local_get", "x", "misc_local/saving") is None, "other texts are the game's"
+    assert alice.call("mistrimulti_guestsave_local_get", "x", GStruct(key="misc_local/save_complete")) is None, "no struct keys"
+    assert host.call("mistrimulti_guestsave_local_get", "x", "misc_local/save_complete") is None, "the host's notice stays 'Save complete'"
+    world.run(6000)
+    assert alice.notes == [], "no second line while the game's (reworded) notice is the one shown"
+    assert "saved on the host" not in TEXT and "host's computer" not in TEXT
+    # The reworded notice did not appear (the filter never ran): the mod says the same line itself, once.
     world.run(6000)
     alice.call("mistrimulti_guestsave_blocks", guard_ctx(alice, MP_SAVE))
-    assert len(alice.notes) == 2, "the notice returns after a pause"
+    alice.call("mistrimulti_guestsave_blocks", guard_ctx(alice, MP_SAVE))
+    assert alice.notes == [], "not before the game had its chance"
+    world.run(3000)
+    assert alice.notes == [TEXT], alice.notes
+    alice.call("mistrimulti_guestsave_blocks", guard_ctx(alice, MP_SAVE))
+    world.run(1500)
+    assert alice.notes == [TEXT], "no repeat inside the notice gap"
+    world.run(6000)
+    alice.call("mistrimulti_guestsave_blocks", guard_ctx(alice, MP_SAVE))
+    world.run(3000)
+    assert alice.notes == [TEXT, TEXT], "the fallback returns after a pause"
+    del alice.notes[:]
+    alice.call("mistrimulti_guestsave_blocks", guard_ctx(alice, MP_SAVE))
+    assert alice.call("mistrimulti_guestsave_local_get", "x", "misc_local/save_complete") == TEXT
+    world.run(3000)
+    assert alice.notes == [], "the game showed its notice: no fallback"
     # The host saves its own world, but never into the solo folder.
     assert host.call("mistrimulti_guestsave_blocks", guard_ctx(host, MP_SAVE)) is False
     assert host.call("mistrimulti_guestsave_blocks", guard_ctx(host, SOLO_SAVE.replace("/", "\\"))) is True, "also with backslashes"
@@ -459,7 +482,7 @@ def test_wiring():
     manifest = (ROOT / "mod/mistrimulti/manifest.toml").read_text(encoding="utf-8")
     declared = set(re.findall(r'"([a-z_]+\.[a-z_]+)"', re.search(r"requires_hooks = \[(.*?)\]", manifest, re.S).group(1)))
     used = set(re.findall(r'mmapi_(?:on|guard|filter|override)\("([a-z_]+\.[a-z_]+)"', guest_text))
-    assert used == {"ui.menu_opened", "game.title_entered", "local.missing"} and used <= declared, (used - declared)
+    assert used == {"ui.menu_opened", "game.title_entered", "local.missing", "local.get"} and used <= declared, (used - declared)
     for debug in ("mistrimulti.guestsave", "mistrimulti.import_character"):
         assert debug in boot_text
     assert boot_text.count("mistrimulti_guestsave_tick();") == 1 and "mistrimulti_guestsave_register_hooks();" in boot_text
@@ -494,6 +517,7 @@ def test_wiring():
                      ("on", "game.title_entered", "mistrimulti_guestsave_title_entered"),
                      ("on", "game.title_entered", "mistrimulti_title_entered"),
                      ("filter", "local.missing", "mistrimulti_guestsave_local_missing"),
+                     ("filter", "local.get", "mistrimulti_guestsave_local_get"),
                      ("filter", "local.missing", "mistrimulti_local_missing")):
         assert expected in names, expected
     assert {hook for _k, hook, _f in regs} <= declared, {hook for _k, hook, _f in regs} - declared
