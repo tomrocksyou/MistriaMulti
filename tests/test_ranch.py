@@ -27,7 +27,7 @@ PLAN = {
 
 
 class RanchNode(GmlNode):
-    extra_files = ("MistriMultiRanch.gml",)
+    extra_files = ("MistriMultiBuildings.gml", "MistriMultiRanch.gml")
 
     def __init__(self, slot, epoch, clock, log, plan):
         self.plan = plan
@@ -49,8 +49,8 @@ class Driver:
         self.node.interp.call("mistrimulti_ranch_register_events")
 
     def frame(self):
-        dyn = self.node.interp.builtins["GRID"]["dyn_index"]
-        room = f"{LOCATION_NAMES[self.node.fake.location]}:{'undefined' if dyn is None else dyn}"
+        part = self.node.call("mistrimulti_room_part", self.node.interp.builtins["GRID"])
+        room = f"{LOCATION_NAMES[self.node.fake.location]}:{part}"
         return {"epoch": self.node.rt["epoch"], "room": room, "x": 80, "y": 80}
 
     def tick(self, now):
@@ -156,7 +156,8 @@ def feed_press(node, idx):
 def at_building(world, dyn):
     """Everybody stands inside the barn with this dynamic-room index (None: back on the farm)."""
     for game in world.games.values():
-        game.node.interp.builtins["GRID"] = G(dyn_index=dyn)
+        fake = game.node.fake
+        game.node.interp.builtins["GRID"] = G(dyn_index=None) if dyn is None else fake.dynamic[dyn + fake.shift]
         game.node.interp.builtins["CURRENT_LOCATION_ID"] = FARM if dyn is None else BARN
         game.node.fake.location = FARM if dyn is None else BARN
 
@@ -295,14 +296,14 @@ def _adopt_and_sell(seed):
         menus[n] = G()
         world.games[n].node.hook("mistrimulti_ranch_menu_opened", G(kind=7, menu=menus[n]))
     for n in (1, 2):
-        menus[n]["adopt_animal_to_building"](11, COW, 0, "red", 400, f"Calf{n}")
+        menus[n]["adopt_animal_to_building"](11 + world.games[n].node.fake.shift, COW, 0, "red", 400, f"Calf{n}")
         assert world.games[n].node.fake.gold == 1000, "charged before the host answered"
     settle(world, 5000)
     assert len(animals(host)) == 5 and g1.gold == 600 and g2.gold == 600, (g1.gold, g2.gold, animals(host))
     assert_same_animals(world, "adopt")
     assert g1.unlocks, g1.unlocks
     # The barn is now full: a third adoption is refused and costs nothing.
-    menus[1]["adopt_animal_to_building"](11, COW, 0, "red", 400, "Late")
+    menus[1]["adopt_animal_to_building"](11 + g1.shift, COW, 0, "red", 400, "Late")
     settle(world, 3000)
     assert g1.gold == 600 and any("room" in n for n in g1.notes), g1.notes
     # A guest sells an animal in the game's own menu (paid at once). The host confirms the sale.
@@ -391,7 +392,7 @@ def test_products_pool():
     print("PASS: products: diverted from the ground into the barn pool, collected once by one player, kept across a save")
 
 
-def use_item(node, item_id, x=0, y=0, rot=0, location=FARM):
+def use_item(node, item_id, x=0, y=0, rot=0, location=FARM, grid=None):
     """What the game does when a player uses an item: items.use_guard, then (for furniture) furniture.place_guard."""
     fake = node.fake
     proto = fake.protos[item_id]
@@ -399,7 +400,7 @@ def use_item(node, item_id, x=0, y=0, rot=0, location=FARM):
     result = node.hook("mistrimulti_ranch_use_guard", item)
     if result is False or proto.use != USE_PLACE:
         return result
-    ctx = G(grid=fake.grids[location], x=x, y=y, proto=fake.node_protos()[proto.object], stack_count=0, rotation=rot)
+    ctx = G(grid=grid or fake.grids[location], x=x, y=y, proto=fake.node_protos()[proto.object], stack_count=0, rotation=rot)
     return node.hook("mistrimulti_ranch_place_guard", ctx)
 
 
@@ -469,6 +470,84 @@ def test_furniture():
     for seed in range(50, 55):
         _furniture(seed)
     print("PASS: furniture: vetoed locally, one winner per tile, paid once, host placements shared, late joiner gets the ledger")
+
+
+def barn_at(fake, dyn=11):
+    """The inside of the barn that has this (host) dyn_index, under this game's own number."""
+    return fake.dynamic[dyn + fake.shift]
+
+
+def object_in(fake, x, y, dyn=11):
+    grid = barn_at(fake, dyn)
+    return grid.node_object_id[grid.try_node_index_for_cell(x, y)]
+
+
+def _inside(seed):
+    world = make_world(seed, loss=0.1, dup=0.1, jitter=40)
+    host, g1, g2 = fakes(world)
+    n1, n2 = world.games[1].node, world.games[2].node
+    settle(world, 4000)
+    assert barn_at(g1) is not barn_at(host) and barn_at(g1)["dyn_index"] != barn_at(host)["dyn_index"], "the games must number the barn differently"
+    at_building(world, 11)
+    # A guest places a lamp inside the barn: vetoed locally, decided by the host, paid once, shared under every game's own number.
+    hold(g1, ITEM_LAMP, 1)
+    assert use_item(n1, ITEM_LAMP, 4, 4, grid=barn_at(g1)) is False
+    assert object_in(g1, 4, 4) is None and g1.items[ITEM_LAMP] == 1
+    settle(world, 4000)
+    assert all(object_in(f, 4, 4) == O_LAMP for f in (host, g1, g2)), [object_in(f, 4, 4) for f in (host, g1, g2)]
+    assert g1.items[ITEM_LAMP] == 0, "charged exactly once"
+    assert object_at(host, 4, 4) is None, "the lamp must not appear on the farm"
+    # What the barn may not hold is refused and costs nothing.
+    hold(g1, ITEM_CHAIR, 1)
+    use_item(n1, ITEM_CHAIR, 6, 6, grid=barn_at(g1))
+    settle(world, 3000)
+    assert object_in(host, 6, 6) is None and g1.items[ITEM_CHAIR] == 1
+    # Two guests on one tile of the barn: one wins.
+    hold(g1, ITEM_LAMP, 1)
+    hold(g2, ITEM_LAMP, 1)
+    use_item(n1, ITEM_LAMP, 8, 8, grid=barn_at(g1))
+    use_item(n2, ITEM_LAMP, 8, 8, grid=barn_at(g2))
+    settle(world, 5000)
+    assert all(object_in(f, 8, 8) == O_LAMP for f in (host, g1, g2))
+    assert sorted((g1.items[ITEM_LAMP], g2.items[ITEM_LAMP])) == [0, 1]
+    # The host places a lamp by hand in the barn: the game accepts it first, then everybody gets it.
+    hold(host, ITEM_LAMP, 1)
+    assert use_item(world.games[0].node, ITEM_LAMP, 2, 2, grid=barn_at(host)) is None
+    barn_at(host).write_node(2, 2, O_LAMP, 0)
+    settle(world, 4000)
+    assert all(object_in(f, 2, 2) == O_LAMP for f in (g1, g2))
+    # A player who is not in that barn is refused, even if the request names it (the other barn is not it either).
+    other = world.games[2]
+    other.node.interp.builtins["GRID"] = G(dyn_index=None)
+    other.node.interp.builtins["CURRENT_LOCATION_ID"] = FARM
+    g2.location = FARM
+    settle(world, 2000)
+    base = {"a": "place", "t": "f", "x": 6, "y": 2, "o": O_LAMP, "r": 0, "it": ITEM_LAMP, "inf": ""}
+    n2.call("mistrimulti_event_request", "ranch_act", dict(base, l="b72_52"))
+    n2.call("mistrimulti_event_request", "ranch_act", dict(base, l="b100_52"))
+    # Rubbish names: no such building, wrong types, an overlong name, a LocationId that is not a place to build.
+    for bad in ("b1_1", "b72_52 ", "b72_52" + "9" * 30, "", "x72_52", 77, -1, 2.5, ["b72_52"], {"a": 1}, True, None, BARN):
+        n1.call("mistrimulti_event_request", "ranch_act", dict(base, l=bad))
+    settle(world, 4000)
+    assert object_in(host, 6, 2) is None and object_at(host, 6, 2) is None and object_in(host, 6, 2, 12) is None
+    # A player who comes back later gets the placements of this session, inside the barn too.
+    world.start(2)
+    world.games[2].feature = Driver(world.games[2])
+    late = world.games[2].node.fake
+    settle(world, 8000)
+    assert [object_in(late, x, y) for x, y in ((4, 4), (8, 8), (2, 2))] == [O_LAMP] * 3, [object_in(late, x, y) for x, y in ((4, 4), (8, 8), (2, 2))]
+    # The host takes a lamp away again: guests lose it too.
+    host.erase(barn_at(host), barn_at(host).try_node_index_for_cell(4, 4))
+    settle(world, 5000)
+    assert object_in(g1, 4, 4) is None and object_in(late, 4, 4) is None and object_in(g1, 8, 8) == O_LAMP
+    assert_clean(world)
+
+
+def test_furniture_inside_buildings():
+    for seed in range(70, 73):
+        _inside(seed)
+    print("PASS: furniture inside a barn: vetoed, decided by the host, paid once, shared under each game's own grid number, "
+          "room and name checked, late joiner gets it")
 
 
 def test_blueprint_and_building():
@@ -564,6 +643,42 @@ def test_machine():
     for seed in range(30, 35):
         _machine(seed)
     print("PASS: machines: the request is state of the host, the reward is paid to one player once")
+
+
+def test_machine_inside_a_building():
+    for seed in range(36, 39):
+        world = make_world(seed, loss=0.1, dup=0.1, jitter=40)
+        host, g1, g2 = fakes(world)
+        for f in (host, g1, g2):
+            f.write_node(barn_at(f), 6, 6, O_APIARY, 0)         # a machine inside the barn (factories[1]); factories[0] is on the farm
+        settle(world, 4000)
+        assert all(len(f.factories.data) == 2 for f in (host, g1, g2))
+        machine = host.factories.data[1]
+        machine.production_request, machine.production_tier, machine.day_count = ITEM_APPLE, 0, 0
+        settle(world, 4000)
+        assert g1.factories.data[1].production_request == ITEM_APPLE and g2.factories.data[1].production_request == ITEM_APPLE
+        assert host.factories.data[0].production_request is None, "the farm's machine must not follow the barn's"
+        at_building(world, 11)
+        hold(g1, ITEM_APPLE, 1)
+        hold(g2, ITEM_APPLE, 1)
+        for n in (1, 2):
+            node = world.games[n].node
+            assert press(node, "misc_local/give_item", G(node=node.fake.factories.data[1])) is False
+        settle(world, 5000)
+        assert machine.production_request is None and g1.factories.data[1].production_request is None
+        assert sorted([g1.items[ITEM_APPLE], g2.items[ITEM_APPLE]]) == [0, 1]
+        assert g1.items.get(ITEM_EGG, 0) + g2.items.get(ITEM_EGG, 0) == 1, "the reward goes to one player, once"
+        # Outside the barn, the same request is refused and costs nothing.
+        machine.production_request, machine.production_tier = ITEM_APPLE, 0
+        settle(world, 3000)
+        at_building(world, None)
+        hold(g1, ITEM_APPLE, 1)
+        node = world.games[1].node
+        press(node, "misc_local/give_item", G(node=g1.factories.data[1]))
+        settle(world, 4000)
+        assert machine.production_request == ITEM_APPLE and g1.items[ITEM_APPLE] == 1
+        assert_clean(world)
+    print("PASS: machines inside a barn: the request is host state, the reward is paid once, a player outside is refused")
 
 
 def test_expansion_and_house():
@@ -726,7 +841,7 @@ def test_room_rules():
     assert host.decor.floorings["home"].flooring == "default_v1"
     assert g1.items.get(ITEM_EGG, 0) == 0
     # Walking into the barn collects by itself.
-    node.interp.builtins["GRID"] = G(dyn_index=11)
+    node.interp.builtins["GRID"] = g1.dynamic[11 + g1.shift]
     node.interp.builtins["CURRENT_LOCATION_ID"] = BARN
     g1.location = BARN
     settle(world, 4000)

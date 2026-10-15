@@ -182,6 +182,10 @@ through the player record. `store.purchase`, `store.stock` and `items.give` are 
 
 ## Known limitations
 
+- Chests inside player buildings (barn, coop, greenhouse, mini museum) are keyed by the building's place on the farm, not by
+  the game's own grid number, and only a player in that building may use them (`docs/SYNC-BUILDINGS.md`). Items lying on the
+  ground inside a building are still not shared (`MistriMultiDrops.gml`).
+
 - Hostile guests: structure, ranges and capacity are validated; **provenance is not** (the host cannot check that a guest owned
   what it puts into a chest or claims to have dropped). Same as the rest of the player data.
 - A refusal that must take items back from a player who has already put them into a request that is still in flight (only

@@ -8,7 +8,8 @@ logic and wiring are tested with the engine stubbed (`python3 tests/test_farm_sy
 ## What is synchronised
 
 The farm, plus every other static location whose `LOCATIONS[i].forageables` or `.dig_sites` is above zero
-(forageable and dig-site nodes grow there too). Dynamic grids (the greenhouse, barn and coop interiors) are not covered.
+(forageable and dig-site nodes grow there too), and the inside of every player building (greenhouse, barn, coop, mini
+museum), each named by its building's place on the farm instead of by `dyn_index`; see `docs/SYNC-BUILDINGS.md`.
 
 | Object (category) | Host's own play | A guest's action |
 | --- | --- | --- |
@@ -187,7 +188,8 @@ hook pages. None of it ran. In order of risk:
    `minimum_quality`, `stump_id`, `harvest`, `count`, `post_harvest_day_to_stage` (a list with `.get(0)`), `managed_regrow_days`.
    `try_string_to_object_id`/`try_string_to_item_id` return `undefined` for an unknown name instead of failing.
 8. `LOCATIONS[i].forageables` is a number and `.dig_sites` a number when set; `GRIDS[i]` exists for every location of a
-   loaded world; `grid.dyn_index` is `undefined` for static ones; the Grid struct accepts a new field (`mm_farm`).
+   loaded world; `grid.dyn_index` is `undefined` for static ones; the Grid struct accepts a new field (`mm_farm`). The
+   assumptions for interiors are in `docs/SYNC-BUILDINGS.md`.
 9. The peer frame's `room` has the form `"<location id string>:undefined"` for a static location (as `mistrimulti_room_key()`
    produces); `location_id_to_string` and `point_distance` behave as in `MistriMultiTerrain.gml`.
 10. Replaying the damage rules on the host (`hitpoints -= min(item.damage + modifier, hitpoints)`, the quality gates, the
@@ -203,7 +205,7 @@ hook pages. None of it ran. In order of risk:
 
 ## Known limitations
 
-* Dynamic grids (greenhouse, barn and coop interiors) are not synchronised; `NpcFarm` tiles and the greenhouse's
+* The inside of buildings is synchronised (`docs/SYNC-BUILDINGS.md`); `NpcFarm` tiles and the greenhouse's saved
   watered positions are not special-cased.
 * Harvests, chops, picks and digs by a guest take one round trip (typically 0.1 to 0.4 s) before anything happens, and a
   swing taken out of the list shows no effect until then. The request goes out when the swing is final, up to a few frames

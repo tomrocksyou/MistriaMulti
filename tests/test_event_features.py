@@ -27,7 +27,7 @@ class Grid:
     def __init__(self):
         cells = SIZE * SIZE
         self.struct = gml.GStruct(
-            dims=gml.GStruct(x=SIZE, y=SIZE), is_setup=False,
+            dims=gml.GStruct(x=SIZE, y=SIZE), is_setup=False, location_id=0, dyn_index=None,
             node_terrain_kind=gml.GArray([GROUND] * cells),
             node_terrain_ground_kind=gml.GArray([DIRT] * cells),
             node_terrain_is_watered=gml.GArray([False] * cells),
@@ -50,7 +50,7 @@ NPCS_LEN = 4
 
 
 class FeatureNode(GmlNode):
-    extra_files = ("MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml", "MistriMultiProgress.gml", "MistriMultiHearts.gml")
+    extra_files = ("MistriMultiBuildings.gml", "MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml", "MistriMultiProgress.gml", "MistriMultiHearts.gml")
 
     def builtins(self):
         self.grid = Grid()
@@ -59,8 +59,13 @@ class FeatureNode(GmlNode):
         self.reports = []          # report_hearts calls
         self.calls = []
         mist = gml.GStruct(is_running=lambda: False)
+        self.buildings = []        # the farm's buildings that have an inside (tests that need them add some)
+        self.dyn_grids = {}        # dyn_index -> the inside's grid
         return {
-            "GRIDS": gml.GArray([self.grid.struct]), "LocationId": gml.GStruct(Farm=0, Dungeon=2),
+            "GRIDS": gml.GArray([self.grid.struct]), "LocationId": gml.GStruct(Farm=0, Dungeon=2, LEN=3),
+            "DYNAMIC_GRIDS": gml.GStruct(get=lambda i: self.dyn_grids.get(int(i)), count=lambda: max(self.dyn_grids, default=-1) + 1),
+            "get_buildings": lambda: gml.GStruct(count=lambda: len(self.buildings), get=lambda i: self.buildings[int(i)]),
+            "PlayerBuildingKind": gml.GStruct(Stable=0, Greenhouse=1, MiniMuseum=2),
             "TerrainKind": gml.GStruct(Ground=GROUND), "GroundKind": gml.GStruct(Dirt=DIRT, Soil=SOIL),
             "CURRENT_LOCATION_ID": 0, "water_chunk": self.grid.water,
             "location_id_to_string": lambda i: "farm", "point_distance": lambda a, b, c, d: ((a - c) ** 2 + (b - d) ** 2) ** 0.5,
@@ -79,6 +84,15 @@ class FeatureNode(GmlNode):
             "ANCHOR": gml.GStruct(get_menu=lambda m: gml.GStruct(
                 create_heart_dingaling=lambda i, old: self.dings.append((i, old)))),
         }
+
+    def add_building(self, x, y, dyn, kind=0):
+        """A building on the farm with its inside, a dynamic grid under this game's own number."""
+        inside = gml.GStruct(location_id=0, dyn_index=dyn, dims=gml.GStruct(x=SIZE, y=SIZE))
+        building = gml.GStruct(top_left_x=x, top_left_y=y, dyn_index=dyn,
+                               prototype=gml.GStruct(player_building_kind=kind, location_id=0))
+        self.buildings.append(building)
+        self.dyn_grids[dyn] = inside
+        return inside
 
     def make_npc(self, i):
         npc = gml.GStruct(id=i, heart_points=0)

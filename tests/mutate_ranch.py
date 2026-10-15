@@ -37,7 +37,7 @@ MUTATIONS = [
     return is_real(v) && v == floor(v) && v >= lo && v <= hi;''', '''function __mistrimulti_ranch_int(v, lo, hi) {
     return is_real(v);''', ["test_hostile_input"]),
     ("snapshot not sent to joiner", '''    if (r.enabled && r.mode == "host" && joined) __mistrimulti_ranch_want_snapshot(__mistrimulti_ranch(), slot);''', '''    if (false) __mistrimulti_ranch_want_snapshot(__mistrimulti_ranch(), slot);''', ["test_furniture"]),
-    ("room not checked", '''    return is_struct(peer) && peer[$ "room"] == location_id_to_string(loc) + ":" + string(dyn);''', '''    return true;''', ["test_room_rules"]),
+    ("room not checked", '''    return is_struct(peer) && peer[$ "room"] == room;''', '''    return true;''', ["test_room_rules"]),
 ]
 
 original = GML.read_text()

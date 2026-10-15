@@ -625,12 +625,19 @@ function mistrimulti_ranch_request(from, data, ctx) {
 }
 
 // Where a player is comes from their own frames (the room key of the boot tick): requests that act on a room
-// are accepted only from a player who is in it.
-function __mistrimulti_ranch_here(from, loc, dyn) {
+// are accepted only from a player who is in it. room: mistrimulti_room_of_grid / mistrimulti_room_of_building.
+function __mistrimulti_ranch_here(from, room) {
     var r = __mistrimulti_runtime();
     if (from == r.id) return true;
     var peer = r.peers[from];
-    return is_struct(peer) && peer[$ "room"] == location_id_to_string(loc) + ":" + string(dyn);
+    return is_struct(peer) && peer[$ "room"] == room;
+}
+
+// A place named on the wire: a LocationId, or the name of a building (its inside; the building may not be known
+// here yet, see MistriMultiBuildings.gml).
+function __mistrimulti_ranch_place_ok(ref) {
+    if (is_string(ref)) return string_length(ref) >= 3 && string_length(ref) <= 16 && string_copy(ref, 1, 1) == "b";
+    return __mistrimulti_ranch_int(ref, 0, LocationId.LEN - 1) && GRIDS[ref] != undefined;
 }
 
 function __mistrimulti_ranch_no(why) {
@@ -713,7 +720,7 @@ function __mistrimulti_ranch_do_manger(rc, d, from) {
     if (!__mistrimulti_ranch_text(d[$ "b"], 24) || !__mistrimulti_ranch_int(d[$ "sd"], 0, 1) || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
     var b = __mistrimulti_ranch_stable_by_id(d.b);
     if (b == undefined) return __mistrimulti_ranch_no("gone");
-    if (!__mistrimulti_ranch_here(from, b.prototype.location_id, b.dyn_index)) return __mistrimulti_ranch_no("not_here");
+    if (!__mistrimulti_ranch_here(from, mistrimulti_room_of_building(b))) return __mistrimulti_ranch_no("not_here");
     var proto = ITEM_PROTOTYPES[d.it];
     if (proto.animal_feed == undefined || proto.animal_feed.animal_size != b.prototype.permitted_animal_size) return __mistrimulti_ranch_no("refused");
     var inventory = b.stable[$ "inventory"];
@@ -795,7 +802,7 @@ function __mistrimulti_ranch_do_collect(rc, d, from) {
     if (!__mistrimulti_ranch_text(d[$ "b"], 24)) return __mistrimulti_ranch_no("bad_request");
     var b = __mistrimulti_ranch_stable_by_id(d.b);
     if (b == undefined) return __mistrimulti_ranch_no("gone");
-    if (!__mistrimulti_ranch_here(from, b.prototype.location_id, b.dyn_index)) return __mistrimulti_ranch_no("not_here");
+    if (!__mistrimulti_ranch_here(from, mistrimulti_room_of_building(b))) return __mistrimulti_ranch_no("not_here");
     var items = rc.pool[$ d.b];
     if (!is_array(items) || array_length(items) == 0) return __mistrimulti_ranch_no("empty");
     rc.pool[$ d.b] = [];
@@ -1074,7 +1081,9 @@ function __mistrimulti_ranch_press_give(rc, subject) {
     var node = subject[$ "node"];
     var item = ARI.held_item();
     if (!is_struct(node) || item == undefined) return undefined;
-    __mistrimulti_ranch_ask_paid(rc, { a: "fgive", l: node.parent_grid.location_id, x: node.top_left_x, y: node.top_left_y, it: item.item_id }, {});
+    var place = mistrimulti_grid_ref(node.parent_grid);
+    if (place == undefined) return undefined;
+    __mistrimulti_ranch_ask_paid(rc, { a: "fgive", l: place, x: node.top_left_x, y: node.top_left_y, it: item.item_id }, {});
     return false;
 }
 
@@ -1199,18 +1208,19 @@ function mistrimulti_ranch_place_guard(ctx) {
     if (ctx.proto.object_id != use.item.prototype.object) return undefined;
     try {
         if (r.mode == "join") {
-            var grid = ctx.grid;
-            if (!rc.synced || GRIDS[grid.location_id] != grid) {
-                __mistrimulti_ranch_say(rc.synced ? "Furniture can only be placed in the farm and the house in multiplayer." : "Waiting for the host.");
+            var place = mistrimulti_grid_ref(ctx.grid);
+            if (!rc.synced || place == undefined) {
+                __mistrimulti_ranch_say(rc.synced ? "Furniture can only be placed in the farm, the house and inside your buildings in multiplayer." : "Waiting for the host.");
                 return false;
             }
             var inf = try_infusion_to_string(use.item.infusion) ?? "";
-            __mistrimulti_ranch_ask_paid(rc, { a: "place", t: "f", l: grid.location_id, x: ctx.x, y: ctx.y,
+            __mistrimulti_ranch_ask_paid(rc, { a: "place", t: "f", l: place, x: ctx.x, y: ctx.y,
                 o: ctx.proto.object_id, r: ctx.rotation, it: use.item.item_id, inf: inf }, {});
             return false;
         }
-        if (r.mode == "host" && GRIDS[ctx.grid.location_id] == ctx.grid) {
-            array_push(rc.watch, { t: "f", l: ctx.grid.location_id, x: ctx.x, y: ctx.y, o: ctx.proto.object_id, r: ctx.rotation,
+        var mine = mistrimulti_grid_ref(ctx.grid);
+        if (r.mode == "host" && mine != undefined) {
+            array_push(rc.watch, { t: "f", l: mine, x: ctx.x, y: ctx.y, o: ctx.proto.object_id, r: ctx.rotation,
                 count: __mistrimulti_ranch_placed_count(ctx.proto.object_id), until: rc.n + 40 });
         }
     } catch (e) {
@@ -1267,9 +1277,10 @@ function __mistrimulti_ranch_ledger_add(rc, grid, rec, node) {
 function __mistrimulti_ranch_watch_own(rc) {
     for (var i = array_length(rc.watch) - 1; i >= 0; i--) {
         var w = rc.watch[i];
-        var grid = GRIDS[w.l];
+        var grid = mistrimulti_grid_by_ref(w.l);
         var done = false;
-        if (w.t == "f" && __mistrimulti_ranch_placed_count(w.o) > w.count) {
+        if (grid == undefined) done = true;
+        else if (w.t == "f" && __mistrimulti_ranch_placed_count(w.o) > w.count) {
             var node = __mistrimulti_ranch_find_new(rc, grid, w);
             done = true;
             if (node != undefined) {
@@ -1310,9 +1321,10 @@ function __mistrimulti_ranch_ledger_check(rc) {
 
 function __mistrimulti_ranch_rec_valid(rec) {
     if (!is_struct(rec) || !is_string(rec[$ "k"])) return false;
-    if (!__mistrimulti_ranch_int(rec[$ "l"], 0, LocationId.LEN - 1) || GRIDS[rec.l] == undefined) return false;
-    var grid = GRIDS[rec.l];
-    if (!__mistrimulti_ranch_int(rec[$ "x"], 0, grid.dims.x - 1) || !__mistrimulti_ranch_int(rec[$ "y"], 0, grid.dims.y - 1)) return false;
+    if (!__mistrimulti_ranch_place_ok(rec[$ "l"])) return false;
+    var grid = mistrimulti_grid_by_ref(rec.l);        // undefined: the inside of a building that is not known here yet
+    if (!__mistrimulti_ranch_int(rec[$ "x"], 0, grid == undefined ? 4095 : grid.dims.x - 1)
+        || !__mistrimulti_ranch_int(rec[$ "y"], 0, grid == undefined ? 4095 : grid.dims.y - 1)) return false;
     if (rec.k == "f") {
         return __mistrimulti_ranch_int(rec[$ "o"], 0, ObjectId.LEN - 1) && object_id_to_object_category(rec.o) == ObjectCategory.Furniture
             && __mistrimulti_ranch_int(rec[$ "r"], -64, 64) && __mistrimulti_ranch_text(rec[$ "inf"], 48);
@@ -1340,7 +1352,8 @@ function __mistrimulti_ranch_apply_placement(rc, rec) {
 
 function __mistrimulti_ranch_place_local(rec) {
     var rc = __mistrimulti_ranch();
-    var grid = GRIDS[rec.l];
+    var grid = mistrimulti_grid_by_ref(rec.l);
+    if (grid == undefined) return false;      // a building that is not here yet: tried again
     var ok = false;
     rc.applying++;
     try {
@@ -1390,9 +1403,9 @@ function __mistrimulti_ranch_revert_applied(rc) {
 
 function __mistrimulti_ranch_remove_local(rec) {
     var rc = __mistrimulti_ranch();
-    if (!is_struct(rec) || !__mistrimulti_ranch_int(rec[$ "l"], 0, LocationId.LEN - 1) || GRIDS[rec.l] == undefined) return;
-    var grid = GRIDS[rec.l];
-    if (!__mistrimulti_ranch_int(rec[$ "tx"], 0, grid.dims.x - 1) || !__mistrimulti_ranch_int(rec[$ "ty"], 0, grid.dims.y - 1)) return;
+    if (!is_struct(rec) || !__mistrimulti_ranch_place_ok(rec[$ "l"])) return;
+    var grid = mistrimulti_grid_by_ref(rec.l);
+    if (grid == undefined || !__mistrimulti_ranch_int(rec[$ "tx"], 0, grid.dims.x - 1) || !__mistrimulti_ranch_int(rec[$ "ty"], 0, grid.dims.y - 1)) return;
     rc.applying++;
     try {
         if (rec.k == "f") {
@@ -1495,15 +1508,15 @@ function __mistrimulti_ranch_retry_tick(rc) {
 // Host: place what a guest asked for, if the game accepts it exactly as it would from the host's own hand.
 function __mistrimulti_ranch_do_place(rc, d, from) {
     var t = d[$ "t"];
-    if (!__mistrimulti_ranch_int(d[$ "l"], 0, LocationId.LEN - 1) || GRIDS[d.l] == undefined || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
-    if (!__mistrimulti_ranch_here(from, d.l, undefined)) return __mistrimulti_ranch_no("not_here");
-    var grid = GRIDS[d.l];
+    var grid = mistrimulti_grid_by_ref(d[$ "l"]);
+    if (grid == undefined || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
+    if (!__mistrimulti_ranch_here(from, mistrimulti_room_of_grid(grid))) return __mistrimulti_ranch_no("not_here");
     var proto = ITEM_PROTOTYPES[d.it];
     if (t == "f") {
         if (!__mistrimulti_ranch_int(d[$ "x"], 0, grid.dims.x - 1) || !__mistrimulti_ranch_int(d[$ "y"], 0, grid.dims.y - 1)) return __mistrimulti_ranch_no("bad_request");
         if (!__mistrimulti_ranch_int(d[$ "o"], 0, ObjectId.LEN - 1) || !__mistrimulti_ranch_int(d[$ "r"], -64, 64) || !__mistrimulti_ranch_text(d[$ "inf"], 48)) return __mistrimulti_ranch_no("bad_request");
         if (proto.use != ItemUse.PlaceObject || proto.object != d.o || object_id_to_object_category(d.o) != ObjectCategory.Furniture) return __mistrimulti_ranch_no("refused");
-        if (!__mistrimulti_ranch_placeable(d.o, d.l)) return __mistrimulti_ranch_no("refused");
+        if (!__mistrimulti_ranch_placeable(d.o, grid.location_id)) return __mistrimulti_ranch_no("refused");
         rc.applying++;
         var node = grid.write_node(d.x, d.y, d.o, d.r);
         rc.applying--;
@@ -1514,7 +1527,7 @@ function __mistrimulti_ranch_do_place(rc, d, from) {
         return { ok: true, rec: rec, pay: __mistrimulti_ranch_pay_item(d.it) };
     }
     if (t == "b") {
-        if (d.l != LocationId.Farm || proto.use != ItemUse.Blueprint || !__mistrimulti_ranch_int(d[$ "bp"], 0, Blueprint.LEN - 1) || proto.blueprint.blueprint != d.bp) return __mistrimulti_ranch_no("refused");
+        if (!is_real(d.l) || d.l != LocationId.Farm || proto.use != ItemUse.Blueprint || !__mistrimulti_ranch_int(d[$ "bp"], 0, Blueprint.LEN - 1) || proto.blueprint.blueprint != d.bp) return __mistrimulti_ranch_no("refused");
         if (!__mistrimulti_ranch_int(d[$ "x"], 0, grid.dims.x - 1) || !__mistrimulti_ranch_int(d[$ "y"], 0, grid.dims.y - 1)) return __mistrimulti_ranch_no("bad_request");
         rc.applying++;
         var placed = write_blueprint_to_location(grid, (d.x div 2) * 2, (d.y div 2) * 2, d.bp, item_id_to_string(d.it));
@@ -1525,7 +1538,7 @@ function __mistrimulti_ranch_do_place(rc, d, from) {
         if (site != undefined) __mistrimulti_ranch_ledger_add(rc, grid, brec, site);
         return { ok: true, rec: brec, pay: __mistrimulti_ranch_pay_item(d.it) };
     }
-    if (t == "fl" || t == "wp") return __mistrimulti_ranch_do_decor(rc, d, t, proto);
+    if ((t == "fl" || t == "wp") && is_real(d.l)) return __mistrimulti_ranch_do_decor(rc, d, t, proto);
     return __mistrimulti_ranch_no("bad_request");
 }
 
@@ -1583,9 +1596,9 @@ function __mistrimulti_ranch_do_decor(rc, d, t, proto) {
 // ---- machines (apiary, terrarium) -----------------------------------------------------------------------------
 
 function __mistrimulti_ranch_do_factory(rc, d, from) {
-    if (!__mistrimulti_ranch_int(d[$ "l"], 0, LocationId.LEN - 1) || GRIDS[d.l] == undefined || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
-    if (!__mistrimulti_ranch_here(from, d.l, undefined)) return __mistrimulti_ranch_no("not_here");
-    var grid = GRIDS[d.l];
+    var grid = mistrimulti_grid_by_ref(d[$ "l"]);
+    if (grid == undefined || !__mistrimulti_ranch_int(d[$ "it"], 0, ItemId.LEN - 1)) return __mistrimulti_ranch_no("bad_request");
+    if (!__mistrimulti_ranch_here(from, mistrimulti_room_of_grid(grid))) return __mistrimulti_ranch_no("not_here");
     if (!__mistrimulti_ranch_int(d[$ "x"], 0, grid.dims.x - 1) || !__mistrimulti_ranch_int(d[$ "y"], 0, grid.dims.y - 1)) return __mistrimulti_ranch_no("bad_request");
     var ni = grid.try_node_index_for_cell(d.x, d.y);
     if (ni == undefined || grid.node_object_id[ni] == undefined) return __mistrimulti_ranch_no("gone");
@@ -1614,7 +1627,9 @@ function __mistrimulti_ranch_world_record() {
     }
     for (var j = 0; j < min(FACTORIES.count(), 32); j++) {
         var f = FACTORIES.get(j);
-        array_push(rec.fa, { l: f.parent_grid.location_id, x: f.top_left_x, y: f.top_left_y, q: f.production_request ?? -1,
+        var place = mistrimulti_grid_ref(f.parent_grid);
+        if (place == undefined) continue;
+        array_push(rec.fa, { l: place, x: f.top_left_x, y: f.top_left_y, q: f.production_request ?? -1,
             t: f.production_tier ?? -1, d: f.day_count });
     }
     if (PET.unlocked()) {
@@ -1635,7 +1650,7 @@ function __mistrimulti_ranch_world_valid(rec) {
     }
     for (var j = 0; j < array_length(rec.fa); j++) {
         var f = rec.fa[j];
-        if (!is_struct(f) || !__mistrimulti_ranch_int(f[$ "l"], 0, LocationId.LEN - 1) || !__mistrimulti_ranch_int(f[$ "x"], 0, 4096) || !__mistrimulti_ranch_int(f[$ "y"], 0, 4096)) return false;
+        if (!is_struct(f) || !__mistrimulti_ranch_place_ok(f[$ "l"]) || !__mistrimulti_ranch_int(f[$ "x"], 0, 4096) || !__mistrimulti_ranch_int(f[$ "y"], 0, 4096)) return false;
         if (!__mistrimulti_ranch_int(f[$ "q"], -1, ItemId.LEN - 1) || !__mistrimulti_ranch_int(f[$ "t"], -1, FactoryTier.LEN - 1) || !__mistrimulti_ranch_int(f[$ "d"], 0, 1000)) return false;
     }
     if (rec.pet.u != true) return true;
@@ -1646,7 +1661,7 @@ function __mistrimulti_ranch_world_valid(rec) {
 function __mistrimulti_ranch_apply_factories(fa) {
     for (var i = 0; i < array_length(fa); i++) {
         var f = fa[i];
-        var grid = GRIDS[f.l];
+        var grid = mistrimulti_grid_by_ref(f.l);
         if (grid == undefined) continue;
         var ni = grid.try_node_index_for_cell(f.x, f.y);
         if (ni == undefined || grid.node_object_id[ni] == undefined) continue;

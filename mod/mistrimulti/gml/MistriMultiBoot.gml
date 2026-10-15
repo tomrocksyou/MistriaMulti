@@ -121,7 +121,8 @@ function mistrimulti_register_events() {
 
 function mistrimulti_room_key() {
     if (!instance_exists(obj_ari) || GRID == undefined) return "";
-    return location_id_to_string(CURRENT_LOCATION_ID) + ":" + string(GRID.dyn_index) + mistrimulti_dg_room_suffix();
+    // The inside of a building is named by the building's place, not by the game's own grid number (MistriMultiBuildings.gml).
+    return location_id_to_string(CURRENT_LOCATION_ID) + ":" + mistrimulti_room_part(GRID) + mistrimulti_dg_room_suffix();
 }
 
 function mistrimulti_tick() {

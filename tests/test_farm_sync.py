@@ -395,6 +395,8 @@ class Engine:
             "point_distance": lambda a, b, c, d: ((a - c) ** 2 + (b - d) ** 2) ** 0.5,
             "abs": abs, "round": lambda v: int(v + 0.5) if v >= 0 else -int(-v + 0.5), "clamp": lambda v, lo, hi: max(lo, min(hi, v)),
             "mmapi_filter": lambda *a: None, "mmapi_override": lambda *a: None, "mmapi_on": lambda *a: None,
+            # The farm has no buildings with an inside here (tests/test_buildings.py adds them).
+            "DYNAMIC_GRIDS": S(get=lambda i: None, count=lambda: 0), "get_buildings": lambda: S(count=lambda: 0, get=lambda i: None),
         }
         return b
 
@@ -430,7 +432,7 @@ class Engine:
 
 
 class FarmNode(GmlNode):
-    extra_files = ("MistriMultiFarm.gml",)
+    extra_files = ("MistriMultiBuildings.gml", "MistriMultiFarm.gml")
 
     def builtins(self):
         self.engine = Engine(self.slot)

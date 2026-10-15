@@ -21,6 +21,9 @@ Implemented:
 - Ranch sync (written against the game's scripts, not yet run in the game): animals, the farm pet, barn products, furniture,
   blueprints, new buildings, floors/wallpapers, apiaries and terrariums, farm expansion and house upgrades are host-owned;
   guests pay only when the host agrees (`docs/SYNC-RANCH.md`).
+- The inside of player buildings (greenhouse crops and water, furniture, machines and chests in barns, coops, the greenhouse
+  and the mini museum) is shared, with buildings named by their place on the farm instead of by the game's `dyn_index`
+  (`docs/SYNC-BUILDINGS.md`, not yet run in the game).
 - Atomic game/helper file publication; bounded fragmentation and reassembly; replay rejection;
   one-second idle heartbeats; automatic helper shutdown from the Windows launcher.
 - Guest character creation uses the game's customization menu and saves an independent profile.

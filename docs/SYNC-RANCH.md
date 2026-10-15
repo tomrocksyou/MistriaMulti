@@ -20,8 +20,9 @@ never run in the real game.** The assumptions that only the game can confirm are
 | Farm expansion, house size, upper floor, house look | host | **reported action** (the carpenter's menu charges at once) |
 
 Not shared: positions and walking of animals (see below), mounts, the daycare, anything inside a barn that is not an animal,
-a manger or a pool (auto feeder, ocarina statue, toys), pet jobs, things placed inside a building, picking furniture up, and
-the contents of machines and turn-in boxes (those are containers; see the chest feature).
+a manger or a pool (auto feeder, ocarina statue, toys), pet jobs, picking furniture up, and the contents of machines and
+turn-in boxes (those are containers; see the chest feature). Furniture and machines placed inside a building are shared
+(`docs/SYNC-BUILDINGS.md`).
 
 ### Why animals are not streamed
 
@@ -131,8 +132,8 @@ Shared files changed: `MistriMultiBoot.gml` (register events and hooks, one tick
    `expand_farm()` and `DECOR.apply_house_upgrade(...)` are safe to run when the player is not in that room (the game
    does so for the stairs, but not for the others), and a guest in another room gets the visual result when it enters.
 5. `write_node(x, y, building_object, variant)` on a guest reserves a dynamic room of its own, and everything in this
-   file refers to buildings by position, not `dyn_index`. Greenhouse interiors and everything inside a building are not
-   handled here.
+   file refers to buildings by position, not `dyn_index`. Placements, machines and the room checks use the same name for
+   the inside of a building (`"b72_52"`, `docs/SYNC-BUILDINGS.md`); crops and soil inside are the farm and terrain features'.
 6. `ARI.give_item(id, n)`, `ARI.inventory.remove(id, n)`, `ARI.modify_gold`, `ARI.gain_xp`, `PET.*`, `DECOR.*`,
    `FACTORIES`, `EXPANSION_COST`, `GAME_STATS.furniture_placed[object]` have the shapes read from the scripts.
 7. JSON booleans survive `json_parse` as booleans (the terrain feature relies on it too), and `int64` values
@@ -151,10 +152,11 @@ Shared files changed: `MistriMultiBoot.gml` (register events and hooks, one tick
   `pickup` request that returns the items through the reply.
 * Placements before the session, and changes the host made and saved before a guest copied the world, are only as
   synchronised as the guest's copy of the save. A guest should re-download the world when the host restarts.
-* Furniture can be placed only in main locations (farm, house rooms), not stacked via the guest's own placement, and not
-  inside buildings.
+* Furniture can be placed in the farm, the house rooms and inside the player's buildings (as long as the game lets that
+  object stand in that location), and not stacked via the guest's own placement.
 * Finishing a building is the host's job (a guest is told to ask); its materials sit in a turn-in box that is a container.
-  A finished building's interior (greenhouse crops, museum) is not shared by this feature.
+  A finished building's interior (greenhouse crops and water, furniture, chests) is shared by the features in
+  `docs/SYNC-BUILDINGS.md`.
 * Babies are named in the popup of whoever sleeps; the host's name wins. The daycare is not shared (an animal a guest puts
   there is put back by the next barn record). Animals standing outside at night are judged by the host's copy.
 * A guest cannot give a farm expansion's or a house upgrade's follow-up gifts (recipes) to others: those stay personal.
