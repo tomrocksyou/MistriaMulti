@@ -11,12 +11,13 @@
 #macro MISTRIMULTI_HEARTS_MAX_ADD 5000
 
 function mistrimulti_world_options_default() {
-    return { v: 1, hearts: "own" };
+    return { v: 1, hearts: "own", houses: "shared" };
 }
 
 function mistrimulti_world_options_clean(o) {
     var out = mistrimulti_world_options_default();
     if (is_struct(o) && (o[$ "hearts"] == "own" || o[$ "hearts"] == "shared")) out.hearts = o.hearts;
+    if (is_struct(o) && (o[$ "houses"] == "shared" || o[$ "houses"] == "separate")) out.houses = o.houses;
     return out;
 }
 

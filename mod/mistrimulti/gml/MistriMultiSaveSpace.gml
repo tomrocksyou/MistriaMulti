@@ -204,6 +204,21 @@ function mistrimulti_world_options_hearts(choice, new_state) {
     var opts = mistrimulti_world_options_pending() ?? mistrimulti_world_options_default();
     opts.hearts = choice;
     mistrimulti_world_options_pending(opts);
+    mistrimulti_savespace_later(mistrimulti_world_options_ask_houses, new_state);   // the next question, once this popup closed
+}
+
+function mistrimulti_world_options_ask_houses(new_state) {
+    var mcp = new MultipleChoicePopup("mistrimulti/opt_houses_title");
+    mcp.option("mistrimulti/opt_houses_shared", mistrimulti_world_options_houses, ["shared", new_state]);
+    mcp.option("mistrimulti/opt_houses_separate", mistrimulti_world_options_houses, ["separate", new_state]);
+    mistrimulti_widen_choices(mcp);
+}
+
+function mistrimulti_world_options_houses(choice, new_state) {
+    var s = __mistrimulti_savespace();
+    var opts = mistrimulti_world_options_pending() ?? mistrimulti_world_options_default();
+    opts.houses = choice;
+    mistrimulti_world_options_pending(opts);
     mmapi_log_info("mistrimulti", "New world options: " + json_stringify(opts));
     s.orig_enter_game(new_state);
 }
@@ -287,6 +302,9 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/opt_hearts_title": return "Hearts with villagers";
         case "mistrimulti/opt_hearts_own": return "Each player's own (Recommended)";
         case "mistrimulti/opt_hearts_shared": return "Shared by everyone";
+        case "mistrimulti/opt_houses_title": return "Houses";
+        case "mistrimulti/opt_houses_shared": return "One shared house (Recommended)";
+        case "mistrimulti/opt_houses_separate": return "Separate houses (experimental)";
         case "mistrimulti/no_world_title": return "No world to join yet";
         case "mistrimulti/no_world_body": return "The host's world was not found on this computer. Choose Multiplayer and Join a game again.";
         case "mistrimulti/offline_title": return "Multiplayer is offline";

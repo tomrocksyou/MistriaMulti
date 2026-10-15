@@ -29,6 +29,11 @@ real game (the stand-in tests could not catch them; keep them in mind for every 
   jumps to world time when more than 5 game minutes behind (0.2.8, was 30).
 - 0.3.1: new-world options popup (Hearts: own (Recommended) / shared), `MistriMultiHearts.gml`; popup buttons widened to
   the popup width (`mistrimulti_widen_choices`). Next planned: separate visitable houses as a world option (big, experimental).
+- 0.3.2: new-world option Houses (one shared (Recommended) / separate (experimental)). First step only, `MistriMultiHouses.gml`:
+  F10 (host, on the farm) places a MiniMuseum building whose interior is `reserve_dynamic_room(LocationId.PlayerHome)`;
+  `game.room_transition_pre` sends its door to the house room and the house's front door back to that building. To do:
+  one house per player automatically, guests (sync of the building and of furniture in dynamic house grids), bed and
+  wake-up in your own house, per-house upgrades/wallpaper (DECOR is per location name, so all houses share them).
 - Next: walk the `docs/SYNC-*.md` checklists in the real game (clock first), then the badge.
 
 ## 1. What this is and what the user wants
