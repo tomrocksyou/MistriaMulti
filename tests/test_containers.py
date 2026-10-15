@@ -186,14 +186,17 @@ class ContainerNode(FeatureNode):
         self.interp.functions["__mistrimulti_dr_instances"] = lambda: gml.GArray(self.instances.values())
 
     # -- test-side engine helpers ---------------------------------------------------------------------------
-    def add_chest(self, key_xy, contents, bin=False):
-        """A chest node at a position; contents: {slot: (name, count)}."""
+    def add_chest(self, key_xy, contents, bin=False, inside=False):
+        """A chest node at a position; contents: {slot: (name, count)}. inside: in the barn at (64, 52), which guest 1
+        numbers differently from the others (dynamic grids are numbered by each game)."""
         inv = Inv(SIZE)
         for i, (name, count) in contents.items():
             inv.slots[i]["add"](make_item(name), count)
         for s in inv.slots:
             s["updates"] = 0
         grid = gml.GStruct(location_id=0, dyn_index=None, parent_node=None)
+        if inside:
+            grid = self.dyn_grids[5 if self.slot == 1 else 0] if self.dyn_grids else self.add_building(64, 52, 5 if self.slot == 1 else 0)
         node = gml.GStruct(prototype=gml.GStruct(interaction_chest=gml.GStruct(shipping_bin=bin)), inventory=inv.struct,
                            top_left_x=key_xy[0], top_left_y=key_xy[1], parent_grid=grid)
         node["inv"] = inv
@@ -257,13 +260,15 @@ class Driver:
         node.game_step()
 
 
-def make_world(seed, guests=2, chests=None, **faults):
-    """chests: {(x, y): {slot: (name, count)}}, the same on every game. Returns the world."""
+def make_world(seed, guests=2, chests=None, inside=None, **faults):
+    """chests: {(x, y): {slot: (name, count)}}, the same on every game; inside: the same for chests in a barn. Returns the world."""
     world = World(seed, {i: ContainerNode for i in range(guests + 1)}, **faults)
     for game in world.games.values():
         game.feature = Driver(game)
         for xy, contents in (chests or {}).items():
             game.node.add_chest(xy, contents)
+        for xy, contents in (inside or {}).items():
+            game.node.add_chest(xy, contents, inside=True)
     for slot in range(1, guests + 1):
         # The host's view of the guests' player sessions (the stored records belong to them).
         host = world.games[0].node
@@ -466,6 +471,41 @@ def test_simultaneous_takes():
     converged(world, "take and put")
     clean(world, "take and put")
     print("PASS: simultaneous takes of the same stack: exactly one wins, partial takes merge, take and put cross")
+
+
+IN = (4, 4)
+IN_ROOM = "farm:b64_52"      # the room key of players in the barn (the stand-in names every location "farm")
+
+
+def test_chest_inside_a_building():
+    world = make_world(41, chests={A: {0: ("apple", 5)}}, inside={IN: {0: ("apple", 10), 1: ("bread", 4)}}, loss=0.05, jitter=30)
+    host, g1, g2 = (world.games[i].node for i in range(3))
+    settle(world, 4000)
+    # The barn is numbered differently in guest 1, yet the chest has the same key in every game.
+    assert g1.dyn_grids and list(g1.dyn_grids) == [5] and list(host.dyn_grids) == [0]
+    keys = [sorted(n.rt["ct"]["keys"]) for n in (host, g1, g2)]
+    assert keys[0] == keys[1] == keys[2] == ["0:10,10", "0:b64_52/4,4"], keys
+    # Guest 1 is in the barn and takes from the chest; the host and guest 2 follow.
+    world.games[1].feature.room = IN_ROOM
+    ui_take(world.games[1], IN, 0, 4)
+    settle(world)
+    assert host.inv(IN).contents()[0] == ("apple", None, 6) and g2.inv(IN).contents()[0] == ("apple", None, 6)
+    assert g1.player.total("apple") == 4
+    # Guest 2 is not in the barn: its take is refused, and it gives the items back.
+    ui_take(world.games[2], IN, 1, 3)
+    settle(world)
+    assert host.inv(IN).contents()[1] == ("bread", None, 4) and g2.player.total("bread") == 0, (host.inv(IN).contents(), g2.player.total("bread"))
+    converged(world, "inside")
+    conserved(world, "apple", 15, "inside")
+    clean(world, "inside")
+    # A guest that joins late gets the chest of the barn with the others.
+    g2.inv(IN).slots[0]["add"](make_item("apple"), 1)      # a stale replica
+    g2.inv(IN).slots[0]["updates"] = 0
+    g2.call("mistrimulti_events_reset")
+    settle(world, 6000)
+    assert g2.inv(IN).contents()[0] == ("apple", None, 6), g2.inv(IN).contents()
+    print("PASS: a chest inside a building has the same key in games that number it differently; only a player in that "
+          "building may use it")
 
 
 def test_unsynced_replica_is_corrected():
@@ -857,7 +897,12 @@ def test_loot_seed():
 
 
 def main():
+    if len(sys.argv) > 1:                     # python3 tests/test_containers.py test_basic test_gift
+        for name in sys.argv[1:]:
+            globals()[name]()
+        return
     test_basic()
+    test_chest_inside_a_building()
     test_simultaneous_takes()
     test_unsynced_replica_is_corrected()
     test_hostile_requests()

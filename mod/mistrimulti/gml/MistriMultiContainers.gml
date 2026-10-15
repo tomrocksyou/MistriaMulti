@@ -64,7 +64,11 @@ function __mistrimulti_ct_locate(node) {
         grid = parent[$ "parent_grid"];
         if (grid == undefined) return undefined;
     }
-    if (grid[$ "dyn_index"] != undefined) return undefined;
+    // The inside of a building is named by the building's place, which is the same in every game (MistriMultiBuildings.gml).
+    if (grid[$ "dyn_index"] != undefined) {
+        var inside = mistrimulti_grid_ref(grid);
+        return inside == undefined ? undefined : { key: string(grid.location_id) + ":" + inside + "/" + key, loc: grid.location_id };
+    }
     return { key: string(grid.location_id) + ":" + key, loc: grid.location_id };
 }
 
@@ -405,6 +409,9 @@ function __mistrimulti_ct_reconcile(c, i, auth, ref) {
 function __mistrimulti_ct_here(peer, c) {
     var room = peer[$ "room"];
     if (!is_string(room)) return false;
+    // A chest inside a building: only a player in that very building (two barns share the location).
+    var grid = c.node[$ "parent_grid"];
+    if (grid != undefined && grid[$ "dyn_index"] != undefined) return room == mistrimulti_room_of_grid(grid);
     var prefix = location_id_to_string(c.loc) + ":";
     return string_copy(room, 1, string_length(prefix)) == prefix;
 }

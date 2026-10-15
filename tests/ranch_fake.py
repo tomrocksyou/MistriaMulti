@@ -120,6 +120,8 @@ class Fake:
         self.unlocks = []
         self.expanded = False
         self.location = FARM
+        self.shift = 30 * node.slot           # each game numbers its dynamic grids on its own (guests differ from the host)
+        self.dynamic = {}
         self.grid_dyn = None
         self.rolls = []
         self.warnings = []
@@ -182,7 +184,7 @@ class Fake:
         self.occupy(grid, node, cells)
         if o == O_BARN:
             node.update(variant=0, name="Barn")
-        if self.node_protos()[o].category == 0 and grid.location_id in (FARM, HOME):
+        if self.node_protos()[o].category == 0 and grid.location_id in (FARM, HOME, BARN):
             key = str(o)
             self.stats.furniture_placed[key] = self.stats.furniture_placed.get(key, 0) + 1
         return node
@@ -193,12 +195,17 @@ class Fake:
             for o in range(16):
                 protos.append(G(object_id=o, category=1 if o == O_BARN else 0, placeable_locations=A([FARM, HOME]),
                                 house_stairs=None, size=G(x=2, y=2), factory=None))
+            protos[O_LAMP].placeable_locations = A([FARM, HOME, BARN])     # a lamp may stand inside a barn, a chair may not
             protos[O_APIARY].factory = G(rewards_map=A([A([ITEM_EGG]) for _ in range(5)]), bounce_sprite="bounce")
             self._node_protos = protos
         return self._node_protos
 
     def add_building(self, x, y, dyn, size, capacity, double=False):
+        dyn += self.shift
         stable = G(stalls=make_list([None] * capacity), incubating_fetuses=make_list())
+        inside = self.make_grid(BARN, 10, 10)
+        inside.dyn_index = dyn
+        self.dynamic[dyn] = inside
         building = G(top_left_x=x, top_left_y=y, dyn_index=dyn, object_id=O_BARN, variant=0, name=f"Barn{dyn}", stable=stable,
                      prototype=G(player_building_kind=0, max_occupants=capacity, double_manger=double, manger_size=4, location_id=BARN,
                                  permitted_animal_size=size, incubators=1))
@@ -233,7 +240,7 @@ class Fake:
         return building
 
     def add_animal(self, idx, kind, variant, sex, name, dyn, **fields):
-        building = next(b for b in self.buildings if b.dyn_index == dyn)
+        building = next(b for b in self.buildings if b.dyn_index == dyn + self.shift)
         a = G(idx=idx, kind=kind, variant=variant, sex=sex, name=name, heart_points=0, days_old=10, unhappy_days=0,
               has_eaten=False, has_been_pat=False, has_been_outside=False, production_days=0, ate_breeding_treat=False,
               breeding_with=None, is_incubating=False, cosmetic=None, birthday=5, stable=None, instance=None, is_pet=False)
@@ -356,8 +363,7 @@ class Fake:
         cells = [(x + dx, y + dy) for dx in range(4) for dy in range(4)]
         if not self.free(grid, cells):
             return None
-        dyn = 100 + len(self.buildings)
-        self.add_building(x, y, dyn, SMALL, 4)
+        self.add_building(x, y, 100 + len(self.buildings), SMALL, 4)
         node = self.buildings[-1]
         node.update(parent_grid=grid, top_left_x=x, top_left_y=y, variant=variant)
         self.occupy(grid, node, cells)
@@ -382,7 +388,8 @@ class Fake:
         pet_fiddle = {"ranching/misc/heart_points/pet": 4, "ranching/misc/min_heart_level_for_breeding": 2,
                       "misc/home_variant_cost": 300}
         builtins = {
-            "get_buildings": get_buildings, "find_animal": self.find_animal, "ANIMAL_PROTOTYPES": A(self.animal_protos),
+            "get_buildings": get_buildings, "DYNAMIC_GRIDS": G(get=lambda i: self.dynamic.get(int(i)),
+                                                              count=lambda: max(self.dynamic, default=-1) + 1), "find_animal": self.find_animal, "ANIMAL_PROTOTYPES": A(self.animal_protos),
             "ITEM_PROTOTYPES": A(self.protos), "NODE_PROTOTYPES": A(self.node_protos()),
             "BLUEPRINT_PROTOTYPES": A([G(size=G(x=4, y=4)), G(size=G(x=4, y=4))]), "GRIDS": self.grids, "GRID": G(dyn_index=None),
             "DECOR": self.decor, "ARI": self.ari, "PET": self.pet_state, "PET_ID": -1, "FACTORIES": self.factories,

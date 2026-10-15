@@ -259,6 +259,13 @@ bins, seeded loot and randomised item-conservation runs.
 `python3 tests/test_farm_sync.py` (about 5 minutes) runs the real farm-object GML on the event layer at 5-10% loss: join,
 host changes and day change, guest harvest races (exactly one yield), tool swings, edits, conflicts, rejoin and hostile input.
 
+## Building interior checks
+
+`python3 tests/test_buildings.py` (about 3 minutes) runs the farm, soil and water GML for the inside of a greenhouse and a barn
+whose `dyn_index` differs in one guest (identity, join, guest harvest/plant/charge/tool, walking in, an unknown building,
+soil and water, hostile input); `test_ranch.py` and `test_containers.py` have the furniture, machine and chest scenarios inside a
+barn. `python3 tests/mutate_buildings.py` breaks 16 rules and fails if any test still passes. See `docs/SYNC-BUILDINGS.md`.
+
 ## Mines checks
 
 `python3 tests/test_dungeon.py` (about 20 s, no ports) runs the real mines GML on the event layer: one run seed for the

@@ -13,6 +13,10 @@
 // runs the game's own action when the result arrives, so the yield, perks and xp are the requester's own.
 // The host also sends digests (on join, after a day change, every minute); a guest asks for the chunks that
 // differ, which repairs anything missed, including its own local growth and spawns.
+//
+// Locations are named by "ref" (see MistriMultiBuildings.gml): a LocationId for the farm and the other saved
+// outdoor locations, or a building's name ("b72_52") for the inside of a barn, coop or greenhouse, whose grid number
+// can differ between games. Everything below treats both the same way.
 
 #macro MISTRIMULTI_FARM_CHUNK 8
 #macro MISTRIMULTI_FARM_HASH 1000000007
@@ -57,7 +61,7 @@ function mistrimulti_farm_state() {
     if (!is_struct(r[$ "farm"])) {
         r.farm = { ids: undefined, locs: {}, errors: 0, bypass: 0, tick: 0, rotate: 0, idle: true,
             swing: {}, swing_at: -100, press: {}, pending: {}, pending_keys: [], full: false, jobs: [], chunks: [],
-            hello: false, day_left: 0, day_flag: false, next_digest: 0 };
+            hello: false, day_left: 0, day_flag: false, next_digest: 0, here: "", known: "" };
     }
     return r.farm;
 }
@@ -78,6 +82,16 @@ function mistrimulti_farm_location_ids(f) {
     return ids;
 }
 
+// Every location this game synchronises: the static ones, then the insides of the buildings it has now.
+function mistrimulti_farm_refs(f) {
+    var refs = [];
+    var ids = mistrimulti_farm_location_ids(f);
+    for (var i = 0; i < array_length(ids); i++) array_push(refs, ids[i]);
+    var inside = mistrimulti_building_refs();
+    for (var j = 0; j < array_length(inside); j++) array_push(refs, inside[j]);
+    return refs;
+}
+
 function mistrimulti_farm_ok(f) {
     return f.errors < MISTRIMULTI_FARM_ERRORS && GRIDS != undefined;
 }
@@ -91,16 +105,24 @@ function mistrimulti_farm_int(v) {
     return is_real(v) && v == floor(v) && abs(v) <= 1000000;
 }
 
+// The grid a location ref stands for, if this feature synchronises it.
+function mistrimulti_farm_grid(f, ref) {
+    if (GRIDS == undefined) return undefined;
+    if (is_string(ref)) return mistrimulti_grid_by_ref(ref);
+    if (!is_real(ref) || ref != floor(ref)) return undefined;
+    var ids = mistrimulti_farm_location_ids(f);
+    var known = false;
+    for (var i = 0; i < array_length(ids); i++) if (ids[i] == ref) known = true;
+    if (!known) return undefined;
+    var grid = GRIDS[ref];
+    return grid == undefined || grid.dyn_index != undefined ? undefined : grid;
+}
+
 // The state for one location, rebuilt when the game loads a new grid for it. undefined for unsynchronised ones.
 function mistrimulti_farm_loc(id) {
     var f = mistrimulti_farm_state();
-    if (!is_real(id) || id != floor(id) || GRIDS == undefined) return undefined;
-    var ids = mistrimulti_farm_location_ids(f);
-    var known = false;
-    for (var i = 0; i < array_length(ids); i++) if (ids[i] == id) known = true;
-    if (!known) return undefined;
-    var grid = GRIDS[id];
-    if (grid == undefined || grid.dyn_index != undefined) return undefined;
+    var grid = mistrimulti_farm_grid(f, id);
+    if (grid == undefined) return undefined;
     var ls = f.locs[$ string(id)];
     if (!is_struct(ls) || grid[$ "mm_farm"] != ls.token) {
         var w = grid.dims.x;
@@ -110,21 +132,28 @@ function mistrimulti_farm_loc(id) {
         var token = string(id) + "-" + string(get_timer());
         grid.mm_farm = token;
         // sig: signature of the node anchored at each cell (0 = none); kind: its category + 1; cs: digest per chunk.
-        ls = { id: id, token: token, grid: grid, w: w, h: h, cw: cw, ch: ch, sig: array_create(w * h, 0),
+        ls = { id: grid.location_id, ref: id, token: token, grid: grid, w: w, h: h, cw: cw, ch: ch, sig: array_create(w * h, 0),
             kind: array_create(w * h, 0), cs: array_create(cw * ch, 0), cursor: 0, seeded: false, silent: true,
-            fast: true, day: false, edits: [], want: [], asked: {}, digests: [], seen: {} };
+            fast: true, day: false, edits: [], want: [], asked: {}, digests: [], seen: {}, dyn: grid.dyn_index != undefined };
         f.locs[$ string(id)] = ls;
     }
     return ls;
 }
 
 function mistrimulti_farm_viewing(ls) {
-    return ls.grid.is_setup && ls.grid.location_id == CURRENT_LOCATION_ID;
+    return ls.grid.is_setup && mistrimulti_farm_current(ls);
 }
 
 // Whether the grid the player is in right now is this location's.
 function mistrimulti_farm_current(ls) {
     return GRID != undefined && GRID[$ "mm_farm"] == ls.token;
+}
+
+// The state of the location the player is in, or undefined when it is not synchronised.
+function mistrimulti_farm_loc_here() {
+    if (GRID == undefined) return undefined;
+    var ref = GRID.dyn_index == undefined ? CURRENT_LOCATION_ID : mistrimulti_grid_ref(GRID);
+    return ref == undefined ? undefined : mistrimulti_farm_loc(ref);
 }
 
 // ---- nodes: signatures, records ---------------------------------------------------------------------------------
@@ -493,11 +522,14 @@ function mistrimulti_farm_wrapped(f, ls) {
 }
 
 function mistrimulti_farm_scan_all(r, f) {
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     var count = array_length(ids);
     var left = MISTRIMULTI_FARM_SCAN_TICK;
     var current = -1;
-    for (var i = 0; i < count; i++) if (ids[i] == CURRENT_LOCATION_ID) current = i;
+    for (var i = 0; i < count; i++) {
+        var seen = mistrimulti_farm_loc(ids[i]);
+        if (seen != undefined && mistrimulti_farm_current(seen)) current = i;
+    }
     if (current >= 0) {
         var here = mistrimulti_farm_loc(ids[current]);
         if (here != undefined) left -= mistrimulti_farm_scan(r, f, here, here.fast ? MISTRIMULTI_FARM_SCAN_FAST : MISTRIMULTI_FARM_SCAN_CURRENT);
@@ -516,8 +548,8 @@ function mistrimulti_farm_scan_all(r, f) {
 
 // Queues the current state of one anchor for the next "farm_delta"; the latest state of an anchor wins.
 function mistrimulti_farm_publish(f, ls, ni, node) {
-    var key = string(ls.id) + ":" + string(ni);
-    var entry = node == undefined ? { l: ls.id, g: [ni mod ls.w, ni div ls.w] } : { l: ls.id, n: mistrimulti_farm_record(node) };
+    var key = string(ls.ref) + ":" + string(ni);
+    var entry = node == undefined ? { l: ls.ref, g: [ni mod ls.w, ni div ls.w] } : { l: ls.ref, n: mistrimulti_farm_record(node) };
     if (!struct_exists(f.pending, key)) array_push(f.pending_keys, key);
     f.pending[$ key] = entry;
     f.full = array_length(f.pending_keys) >= MISTRIMULTI_FARM_PENDING;
@@ -530,7 +562,7 @@ function mistrimulti_farm_flush(f) {
         var taken = 0;
         while (taken < array_length(f.pending_keys) && taken < MISTRIMULTI_FARM_BATCH) {
             var entry = f.pending[$ f.pending_keys[taken]];
-            if (entry.l != loc) break;
+            if (string(entry.l) != string(loc)) break;
             if (is_array(entry[$ "n"])) array_push(data.n, entry.n);
             else array_push(data.g, entry.g);
             taken++;
@@ -551,7 +583,7 @@ function mistrimulti_farm_queue_digest(f, slot) {
 // Sends the digests queued by joins, hellos, day changes and the minute timer, a few events per tick, when
 // every change seen so far has been published.
 function mistrimulti_farm_send_digests(f) {
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     var sent = 0;
     while (array_length(f.jobs) > 0 && sent < 2 && array_length(f.pending_keys) == 0
         && mistrimulti_event_backlog() < MISTRIMULTI_FARM_BACKLOG && mistrimulti_event_can_emit(2)) {
@@ -570,7 +602,7 @@ function mistrimulti_farm_send_digests(f) {
         var d = [];
         var stop = min(job.o + 128, array_length(ls.cs));
         for (var c = job.o; c < stop; c++) array_push(d, ls.cs[c]);
-        if (!mistrimulti_event_emit("farm_digest", { l: ls.id, n: array_length(ls.cs), o: job.o, d: d }, job.slot)) break;
+        if (!mistrimulti_event_emit("farm_digest", { l: ls.ref, n: array_length(ls.cs), o: job.o, d: d }, job.slot)) break;
         sent++;
         job.o = stop;
         if (job.o >= array_length(ls.cs)) {
@@ -608,7 +640,7 @@ function mistrimulti_farm_send_chunks(r, f) {
         for (var s = 0; s < slices; s++) {
             var part = [];
             for (var k = s * MISTRIMULTI_FARM_BATCH; k < min(array_length(recs), (s + 1) * MISTRIMULTI_FARM_BATCH); k++) array_push(part, recs[k]);
-            mistrimulti_event_emit("farm_chunk", { l: ls.id, c: job.c, n: part, e: s == slices - 1 ? 1 : 0 }, job.slot);
+            mistrimulti_event_emit("farm_chunk", { l: ls.ref, c: job.c, n: part, e: s == slices - 1 ? 1 : 0 }, job.slot);
         }
         sent++;
     }
@@ -619,7 +651,7 @@ function mistrimulti_farm_host_tick(r, f) {
         f.idle = true; // nobody to tell: stop scanning, and look at everything again when somebody arrives
         return;
     }
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     if (f.idle) {
         f.idle = false;
         for (var i = 0; i < array_length(ids); i++) {
@@ -680,7 +712,7 @@ function mistrimulti_farm_want_event(player, data, ctx) {
     for (var i = 0; i < min(array_length(data.c), 32); i++) {
         var c = data.c[i];
         if (!mistrimulti_farm_int(c) || c < 0 || c >= array_length(ls.cs) || array_length(f.chunks) >= 512) continue;
-        array_push(f.chunks, { slot: player, l: ls.id, c: c });
+        array_push(f.chunks, { slot: player, l: ls.ref, c: c });
     }
     return true;
 }
@@ -775,16 +807,17 @@ function mistrimulti_farm_send_edits(r, f, ls) {
     while (array_length(ls.edits) > 0) {
         var batch = [];
         for (var i = 0; i < min(array_length(ls.edits), MISTRIMULTI_FARM_EDITS); i++) array_push(batch, ls.edits[i]);
-        if (mistrimulti_event_request("farm_act", { a: "edit", l: ls.id, e: batch }) == undefined) return;
+        if (mistrimulti_event_request("farm_act", { a: "edit", l: ls.ref, e: batch }) == undefined) return;
         array_delete(ls.edits, 0, array_length(batch));
     }
 }
 
 function mistrimulti_farm_guest_tick(r, f) {
     if ((r.mask & 1) == 0) return; // no host: nothing can be asked
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     mistrimulti_farm_scan_all(r, f);
     f.tick++;
+    mistrimulti_farm_entered(f);
     for (var i = 0; i < array_length(ids); i++) {
         var ls = mistrimulti_farm_loc(ids[i]);
         if (ls == undefined) continue;
@@ -796,7 +829,7 @@ function mistrimulti_farm_guest_tick(r, f) {
         if (array_length(ls.want) > 0 && mistrimulti_event_can_emit(2)) {
             var batch = [];
             while (array_length(ls.want) > 0 && array_length(batch) < 24) array_push(batch, array_pop(ls.want));
-            if (!mistrimulti_event_emit("farm_want", { l: ls.id, c: batch }, 0)) {
+            if (!mistrimulti_event_emit("farm_want", { l: ls.ref, c: batch }, 0)) {
                 for (var b = 0; b < array_length(batch); b++) array_push(ls.want, batch[b]);
             }
         }
@@ -805,11 +838,29 @@ function mistrimulti_farm_guest_tick(r, f) {
     if (f.tick mod 600 == 0) mistrimulti_farm_expire(r, f);
 }
 
+// A guest that walks into the inside of a building, or gets a new building, asks for the host's digests at once (the
+// host also sends them every minute), so that it does not stand in a stale greenhouse.
+function mistrimulti_farm_entered(f) {
+    // A building that has just appeared in this game (the host finished it, this game was told) may already hold things.
+    var names = "";
+    var inside = mistrimulti_building_refs();
+    for (var i = 0; i < array_length(inside); i++) names += inside[i] + ",";
+    if (names != f.known) {
+        f.known = names;
+        f.hello = true;
+    }
+    var here = mistrimulti_farm_loc_here();
+    var token = here == undefined ? "" : here.token;
+    if (token == f.here) return;
+    f.here = token;
+    if (here != undefined && here.dyn) f.hello = true;
+}
+
 // Forgets old button presses and chunk requests that were never answered.
 function mistrimulti_farm_expire(r, f) {
     var names = struct_get_names(f.press);
     for (var i = 0; i < array_length(names); i++) if (r.ticks - f.press[$ names[i]] > MISTRIMULTI_FARM_PRESS) struct_remove(f.press, names[i]);
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     for (var k = 0; k < array_length(ids); k++) {
         var ls = mistrimulti_farm_loc(ids[k]);
         if (ls == undefined) continue;
@@ -818,11 +869,19 @@ function mistrimulti_farm_expire(r, f) {
             if (f.tick - ls.asked[$ names[m]] > MISTRIMULTI_FARM_RECONCILE) struct_remove(ls.asked, names[m]);
         }
     }
+    // The state of a building that is gone (or whose grid was replaced) is not kept.
+    var keys = struct_get_names(f.locs);
+    for (var n = 0; n < array_length(keys); n++) {
+        var old = f.locs[$ keys[n]];
+        var listed = false;
+        for (var q = 0; q < array_length(ids); q++) if (string(ids[q]) == string(old.ref)) listed = true;
+        if (is_string(old.ref) && !listed) struct_remove(f.locs, keys[n]);
+    }
 }
 
 // The host's stream changed or events were missed: chunk requests in flight will never be answered.
 function mistrimulti_farm_forget_requests(f) {
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     for (var k = 0; k < array_length(ids); k++) {
         var ls = mistrimulti_farm_loc(ids[k]);
         if (ls == undefined) continue;
@@ -854,7 +913,7 @@ function mistrimulti_farm_new_day(ctx) {
     var r = __mistrimulti_runtime();
     var f = mistrimulti_farm_state();
     if (!r.enabled || !mistrimulti_farm_ok(f)) return;
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     f.day_left = 0;
     for (var i = 0; i < array_length(ids); i++) {
         var ls = mistrimulti_farm_loc(ids[i]);
@@ -879,7 +938,7 @@ function mistrimulti_farm_new_day(ctx) {
 // The hooks below act only on a guest that has a host, in a synchronised location.
 function mistrimulti_farm_gate(r, f) {
     return r.enabled && r.mode == "join" && (r.mask & 1) != 0 && f.bypass == 0 && mistrimulti_farm_ok(f)
-        && GRID != undefined && GRID.dyn_index == undefined;
+        && GRID != undefined;
 }
 
 // Which request the tool use on this cell becomes, or "" when the engine may handle it.
@@ -919,7 +978,7 @@ function mistrimulti_farm_tool_targets(value, ctx) {
     try {
         var tool = ctx.item.prototype.tool_type;
         if (tool != ToolType.Axe && tool != ToolType.PickAxe && tool != ToolType.Shovel) return undefined;
-        var ls = mistrimulti_farm_loc(CURRENT_LOCATION_ID);
+        var ls = mistrimulti_farm_loc_here();
         if (ls == undefined || !mistrimulti_farm_current(ls)) return undefined;
         // This hook runs every frame of a swing; a gap between calls means a new swing, which may ask again.
         if (r.ticks - f.swing_at > 3) f.swing = {};
@@ -948,9 +1007,9 @@ function mistrimulti_farm_tool_targets(value, ctx) {
 
 // Sends a swing request once per cell and swing. Returns whether it was sent now.
 function mistrimulti_farm_ask(f, kind, ls, x, y, ctx) {
-    var key = kind + ":" + string(ls.id) + ":" + string(x) + ":" + string(y);
+    var key = kind + ":" + string(ls.ref) + ":" + string(x) + ":" + string(y);
     if (struct_exists(f.swing, key)) return false;
-    var data = { a: kind, l: ls.id, x: x, y: y, i: item_id_to_string(ctx.item.item_id), c: ctx.range_pattern == RangePattern.One ? 0 : 1 };
+    var data = { a: kind, l: ls.ref, x: x, y: y, i: item_id_to_string(ctx.item.item_id), c: ctx.range_pattern == RangePattern.One ? 0 : 1 };
     if (mistrimulti_event_request("farm_act", data) == undefined) return false;
     f.swing[$ key] = true;
     return true;
@@ -964,12 +1023,12 @@ function mistrimulti_farm_interact(node) {
     try {
         var cat = object_id_to_object_category(node.object_id);
         if (cat != ObjectCategory.Crop && cat != ObjectCategory.Bush && cat != ObjectCategory.Tree) return undefined;
-        var ls = mistrimulti_farm_loc(CURRENT_LOCATION_ID);
+        var ls = mistrimulti_farm_loc_here();
         if (ls == undefined || !mistrimulti_farm_current(ls) || !can_interact(node)) return undefined;
-        var key = string(ls.id) + ":" + string(node.top_left_x) + ":" + string(node.top_left_y);
+        var key = string(ls.ref) + ":" + string(node.top_left_x) + ":" + string(node.top_left_y);
         var last = f.press[$ key];
         if (last == undefined || r.ticks - last >= MISTRIMULTI_FARM_PRESS) {
-            if (mistrimulti_event_request("farm_act", { a: "harvest", l: ls.id, x: node.top_left_x, y: node.top_left_y }) != undefined) f.press[$ key] = r.ticks;
+            if (mistrimulti_event_request("farm_act", { a: "harvest", l: ls.ref, x: node.top_left_x, y: node.top_left_y }) != undefined) f.press[$ key] = r.ticks;
         }
         return true; // claimed: the engine's own harvest runs when the host agrees
     } catch (e) {
@@ -981,7 +1040,7 @@ function mistrimulti_farm_interact(node) {
 // ---- host: validating and applying a guest's request ---------------------------------------------------------------------
 
 function mistrimulti_farm_reach(peer, ls, x, y) {
-    return is_struct(peer) && peer[$ "active"] == true && peer[$ "room"] == location_id_to_string(ls.id) + ":" + string(undefined)
+    return is_struct(peer) && peer[$ "active"] == true && peer[$ "room"] == mistrimulti_room_of_grid(ls.grid)
         && is_real(peer[$ "x"]) && is_real(peer[$ "y"])
         && point_distance(peer.x, peer.y, x * 8 + 8, y * 8 + 8) <= MISTRIMULTI_FARM_REACH;
 }
@@ -989,13 +1048,13 @@ function mistrimulti_farm_reach(peer, ls, x, y) {
 // Adds the current state of anchor ni to a result and to the pending publication.
 function mistrimulti_farm_touch(f, ls, res, ni) {
     var node = mistrimulti_farm_refresh(ls, ni);
-    var key = string(ls.id) + ":" + string(ni);
+    var key = string(ls.ref) + ":" + string(ni);
     var entry;
     if (node == undefined) {
-        entry = { l: ls.id, g: [ni mod ls.w, ni div ls.w] };
+        entry = { l: ls.ref, g: [ni mod ls.w, ni div ls.w] };
         if (array_length(res.g) < 32) array_push(res.g, entry.g);
     } else {
-        entry = { l: ls.id, n: mistrimulti_farm_record(node) };
+        entry = { l: ls.ref, n: mistrimulti_farm_record(node) };
         if (array_length(res.n) < 32) array_push(res.n, entry.n);
     }
     if (struct_exists(f.pending, key)) f.pending[$ key] = entry; // an older state must not be published after this one
@@ -1009,7 +1068,7 @@ function mistrimulti_farm_request(player, data, ctx) {
     var peer = r.peers[player];
     var ls = mistrimulti_farm_loc(data[$ "l"]);
     if (ls == undefined || !is_struct(peer) || peer[$ "active"] != true) return refuse;
-    var res = { ok: false, a: data.a, l: ls.id, n: [], g: [] };
+    var res = { ok: false, a: data.a, l: ls.ref, n: [], g: [] };
     try {
         if (data.a == "edit") mistrimulti_farm_op_edit(f, ls, peer, data, res);
         else if (mistrimulti_farm_cell(ls, data[$ "x"], data[$ "y"]) != undefined) {
@@ -1276,7 +1335,7 @@ function mistrimulti_farm_reply(from, res, ctx) {
 // The host allowed the action: bring the node to the state the host had, then run the engine's own action, so
 // drops, perks, xp, stamina and effects are this player's. The hooks above are bypassed meanwhile.
 function mistrimulti_farm_perform(f, ls, res) {
-    var here = CURRENT_LOCATION_ID == ls.id && mistrimulti_farm_current(ls);
+    var here = mistrimulti_farm_current(ls);
     f.bypass++;
     try {
         if (here && is_array(res[$ "p"])) mistrimulti_farm_apply(ls, res.p, false);
@@ -1360,14 +1419,14 @@ function mistrimulti_farm_run(ls, res, here) {
 // For the MMAPI debug agent (mistrimulti.farm): "digest" is equal on the host and a guest when their worlds agree.
 function mistrimulti_farm_debug() {
     var f = mistrimulti_farm_state();
-    var ids = mistrimulti_farm_location_ids(f);
+    var ids = mistrimulti_farm_refs(f);
     var locs = [];
     for (var i = 0; i < array_length(ids); i++) {
         var ls = f.locs[$ string(ids[i])];
         if (!is_struct(ls)) continue;
         var sum = 0;
         for (var c = 0; c < array_length(ls.cs); c++) sum = (sum + ls.cs[c]) mod MISTRIMULTI_FARM_HASH;
-        array_push(locs, { id: ls.id, seeded: ls.seeded, silent: ls.silent, cursor: ls.cursor, digest: sum,
+        array_push(locs, { id: ls.ref, seeded: ls.seeded, silent: ls.silent, cursor: ls.cursor, digest: sum,
             want: array_length(ls.want), edits: array_length(ls.edits) });
     }
     return { errors: f.errors, idle: f.idle, pending: array_length(f.pending_keys), jobs: array_length(f.jobs),
