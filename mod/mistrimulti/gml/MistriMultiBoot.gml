@@ -98,7 +98,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriaMulti 0.3.2 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriaMulti 0.3.3 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -436,7 +436,6 @@ function mistrimulti_register() {
     mmapi_on("dungeon.treasure_chest", mistrimulti_drops_treasure);
     mmapi_on("resource.node_picked", mistrimulti_drops_rock);
     mmapi_on("game.room_changed", mistrimulti_room_changed);
-    mmapi_on("game.room_transition_pre", mistrimulti_houses_transition);
     mmapi_on("save.game_saving", mistrimulti_progress_game_saving);
     mmapi_on("save.game_loaded", mistrimulti_progress_game_loaded);
     mmapi_on("save.game_saving", mistrimulti_wallet_game_saving);
@@ -453,7 +452,6 @@ function mistrimulti_register() {
     mistrimulti_guestsave_register_hooks();
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F8"), mistrimulti_show_status);
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F9"), mistrimulti_drops_give_hotkey);
-    mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F10"), mistrimulti_houses_probe);   // separate houses, experimental
     // Host: approve / refuse a player identity that needs approval. Guest: accept a changed host identity.
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F7"), mistrimulti_trust_hotkey_approve);
     mmapi_hotkey_register_binding(mmapi_hotkey_binding_from_name("SHIFT+F7"), mistrimulti_trust_hotkey_refuse);
@@ -461,5 +459,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.3.2");
+mmapi_mod_declare("mistrimulti", "0.3.3");
 mistrimulti_register();
