@@ -21,7 +21,7 @@ cannot show, and [Known limitations](#known-limitations) is the honest list of w
 | Who owns the story? | The host. A guest's own game applies a step first (the game has no way to ask permission), then tells the host; the host merges it with "max" and tells everybody. The host's game applies guests' steps to its own quest log, so they are in the host's save. |
 | What is world and what is personal? | See [the audit](#audit). Story-category quests, the cutscenes that change the shared map or open a gate, the facts those gates read and the secret-chest counters are the world's. Everything the player earns, says, gets or feels is personal. |
 | Villagers: host simulation or per-game simulation? | **Per-game simulation, steered by the host.** Every game keeps simulating its villagers (the game cannot be told to stop), the host decides *which schedule each villager follows today* and samples *room and activity* every 3 seconds, and a guest swaps its villagers' schedules to match, only ever out of its player's sight. Reasons below. |
-| What does a cutscene do to the others? | Nothing. It is a **private viewing**. It never pauses, moves, waits for or waits on anybody else; only the lasting world effects of the scenes that have any are shared, once, when the scene is over. |
+| What does a cutscene do to the others? | It never pauses, moves, waits for or waits on anybody else. Its lasting world effects are shared once, when the scene is over, so gates and unlocks agree. **A world story scene is then played by every player themselves** (each can skip it with the game's own skip), see [Cutscenes that every player watches](#cutscenes-that-every-player-watches); a scene that cannot be shown safely is applied silently, as before. |
 | Festivals? | A festival is a function of the date, and the date is the clock package's. Nobody is held out and nobody has to enter together; there is no start to miss. See [Festivals](#festivals-and-calendar-events). |
 | Heart events? | Personal. The game plays them with throw-away actors and respawns the real villagers afterwards; nothing about a villager travels from a guest to the host, so a heart event cannot move a villager for anybody else. Their items and hearts are the watcher's alone. |
 | Who gets the rewards of a shared story step? | **Everybody, once.** The player who hands a step in is paid by the game as always; every other game, when it is brought up to the mirror, pays the rewards of the stages it skipped, and a per-player ledger says how far each player has been paid. See [Rewards](#rewards-of-a-shared-step-for-the-players-who-did-not-do-it). |
@@ -49,11 +49,11 @@ What `Mist.clean_up_scene` does when any scene ends, and what is shared:
 
 | Effect | Shared? |
 | --- | --- |
-| `scene_history`, `scenes_played_today`, the `cutscene_seen_<name>` fact | personal for most scenes (`docs/SYNC-PROGRESS.md`); **world** for the scenes below, which every game adds to its own history |
+| `scene_history`, `scenes_played_today`, the `cutscene_seen_<name>` fact | personal for most scenes (`docs/SYNC-PROGRESS.md`); **world** for the scenes below, which every game adds to its own history (a scene the game can show again is also offered again there, see [Cutscenes that every player watches](#cutscenes-that-every-player-watches)) |
 | `object_removals` (objects erased from a location's grid), `nuke` (a rectangle of the town cleared), the plaza upgrade | world: applied once in every game when the scene is done by anybody |
 | `quest_to_start`, `quest_to_progress` | the quest effect is shared as *quest state* (a story quest is mirrored), never as "progress one step" |
 | `spell_to_unlock`, `mana_to_set` | the player's, **and** granted to a player who did not watch a world scene (they would otherwise miss it) |
-| `given_items`, `baths` | the player's, **and** granted once to a player who did not watch a *world* scene (when the scene enters their history); a heart event or romance scene is never a world scene, so its items stay with the watcher |
+| `given_items`, `baths` | the player's, **and** granted once to a player who did not watch a *world* scene: at once (when the scene enters their history) if the scene is applied silently, after the viewing if it is offered to them; a heart event or romance scene is never a world scene, so its items stay with the watcher |
 | `drop_items`, `status_effects`, `set_health_to`, cosmetics, heart/relationship changes, `heart_level_changes`, `romantic_choice_warning` | personal; never granted to a player who did not watch (`drop_items` are objects dropped into one game's copy of a room) |
 | `ends_day`, `end_time_jump`, `when_sleeping` | the player's own clock and day (`docs/SYNC-CLOCK.md`) |
 | `end_position`, camera, music, fades, throw-away actors (`MistNpcBrain`), the held animal | local presentation |
@@ -311,13 +311,91 @@ game still treats the villager as it always did (the guest's spouse is the guest
 | Do others stop? | No. The clock package keeps the world time running while at least one other player's clock runs (a player in a cutscene has a stopped clock, as in the game). |
 | Do others see anything of it? | They see the player's figure in the room as usual. The scene's throw-away actors are local; the real villagers are untouched in every other game. |
 | Can a scene soft-lock anybody else? | Nothing waits for it. The one coupling is the end of the day (all asleep), and the clock package already ends the day 60 seconds after 2 am for a player stuck in a scene. |
-| What changes in other games, and when? | Only the lasting effects of the *world* scenes, once the scene is over (the end, or the skip): objects removed, an area cleared, a story quest started or advanced, a spell. These are the same effects the game applies at the end of every scene; the viewer's game already applied them, the others get them from the mirror. |
+| What changes in other games, and when? | Only the lasting effects of the *world* scenes, once the scene is over (the end, or the skip): objects removed, an area cleared, a story quest started or advanced, a spell. These are the same effects the game applies at the end of every scene; the viewer's game already applied them, the others get them from the mirror, **and play the scene themselves** (see [Cutscenes that every player watches](#cutscenes-that-every-player-watches)). |
 | What happens to the host's save? | The host applies the viewer's world effects to its own game, so they are saved with it. |
 | What if the viewer's game dies in the scene? | Nothing was claimed (the pass is paused during the scene); the others never saw a half-done effect. The viewer replays it. |
 | Same scene triggered in two games at once? | Both play it; the effects are idempotent (see above). |
 | Heart events and romance scenes | Private from start to end. They are not claimed, not mirrored, and the villagers they use are throw-away actors. Nothing in them reaches a villager of another game. |
-| A world scene a player never watched | They get its lasting effects but not the scene (the same rule `docs/SYNC-PROGRESS.md` gives a new guest). Their personal gains from it (items, heart changes) are not granted; spell and mana are. |
+| A world scene a player never watched | They get its lasting effects and, if the scene can be shown safely, the scene itself when their own conditions start it. A scene that cannot be shown safely, and any scene older than a new character, is applied without the scene (the rule `docs/SYNC-PROGRESS.md` gives a new guest); items and baths are paid, heart changes are not; spell and mana are given. |
 | Late join while somebody is in a scene | The snapshot is only data and goes out at once, also while the host is in a scene. |
+
+## Cutscenes that every player watches
+
+**Why.** A world story scene used to be a private viewing whose effects were also written into every other game's history, so the
+other players never saw it (real game 1.0.8: the guest watched the day-2 dragon cutscene, the host never did). The decision now is:
+every player *sees* the important story scenes themselves and may skip them with the game's own skip; what the scene changes in the
+world, and what it pays, still happens once per world and once per player.
+
+**What the game does (from its scripts).** A scene starts by itself in three ways, all of which test the scene's data in the
+player's own game: an area of a room (`trigger`, spawned by `Mist.on_room_start` when `check_cutscene_eligible` holds), a quest task
+that waits for it (`QuestQueryType.Cutscene`, started by the player object when the quest is at that task and the player is in its
+area; afterwards `MIST.arbitrary_quest_to_progress` advances the quest) and the night (`when_sleeping`, `Mist.on_end_day`).
+`check_cutscene_eligible` needs: the scene's `requirements`, not in `scene_history` (unless `can_repeat`), the story mode if the scene
+needs it, not played today. `clean_up_scene` (end *and* skip) then marks the scene played, removes its objects
+(`trigger_scene_object_removals`, unless the scene's script already did and set `removed_scene_objects`), advances or starts its
+quests, gives spell and mana, **always** adds the scene's baths, and gives its items unless the scene gives them once and it was
+already in the history. Gates (`SeenCutscene`) read `scene_history`, which is why the mirror used to insert the scene there.
+
+**Design: a world scene is applied to the other games as a *held scene*** (`mistrimulti_story_apply_scene_view`):
+
+1. The *world effects* land at once, as before (history and the `cutscene_seen_` fact, so every gate that reads the scene agrees;
+   removed objects, cleared area, plaza, spell, mana), once, because it happens when the scene is new to the game.
+2. The scene stays in the history, but the game's data for it is switched to `can_repeat = true`, so the trigger the game itself arms
+   (area, quest task, night) still offers it. The held scenes are listed in the world fact `mm_view` (scene -> game day; for a guest
+   also in the `view` field of the progress section `story_rewards`, [SYNC-PROGRESS.md](SYNC-PROGRESS.md)), so a restart of the
+   game or a rejoin in another slot does not lose them.
+3. **Quests are held** (`__mistrimulti_story_cap`). The quests a held scene belongs to are brought by the mirror only as far as the
+   scene allows, in that game only: a quest it *starts* is not started (nor completed behind its back: the scene would restart a
+   finished quest, `if !active.contains_key`), a quest that waits for it in a task (query target) or that its `requirements` read at a
+   stage (`QuestIsAtStage`) stays at that stage, a quest it must find *active* is not completed. So the scene can start and the quest
+   advances **once** (the scene's own `quest_to_progress` / `arbitrary_quest_to_progress`), after which the mirror brings the game
+   up to the rest. The levels come from the game's data; the mirror itself is unchanged (claims, max, snapshot).
+4. **Viewing** is noticed while the scene runs (every tick: `MIST.active_cutscene` is a held scene): the repeat switch goes off at
+   once (it is never offered a third time) and the game is told its objects were removed (`MIST.blackboard.set(
+   "removed_scene_objects", true)`), so the end of the scene does not remove them again. Skipping ends the same way. When the scene
+   is over the next pass: if the scene gives its items only once, they are given now (the game does not, the scene was in the
+   history); baths and everything else were given by the game. Rewards of the scene's quest step are the game's, and the ledger
+   (below) records them as the player's own step. The viewer's claim finds nothing new: the scene and the level are in the mirror.
+5. **Applied silently instead** (today's behaviour, items and baths paid at once, the reason logged by `mmapi_log_info` and listed by
+   `mistrimulti.story` as `why`) when the scene cannot be shown safely:
+
+   | Reason | Why |
+   | --- | --- |
+   | no area, no quest task and not at night (`manually_activated`, started by a dialogue or an object) | nothing the mod can verify starts it; the player might never see it |
+   | it advances a story quest at a stage nobody can tell (no `QuestIsAtStage`, no task waits for it) | the replay would advance a mirrored quest a second time |
+   | a quest condition inside an `or`, an alias or an inversion in its requirements; a world fact it needs to be false, or a world scene or finished story quest it needs *not* to be seen / done | no cap can be derived, or the mirror itself would make the scene unreachable |
+   | the game repeats it anyway (`can_repeat` in its data), or it builds objects (`upgrade_the_saturday_market_plaza`) | a second application is not harmless |
+   | the player is already past the quest step it belongs to, or has finished the quest it starts | the scene would advance the quest again |
+   | the scene needs the story mode and it is off | it will never be offered |
+   | eight scenes are already waiting | no crowd of held quests |
+   | a *new character* (its rewards ledger is not yet seeded) and the scene was over when it arrived | nobody is owed the story so far, scenes included |
+   | **the scene is not watched within seven game days** (`MISTRIMULTI_STORY_PATIENCE`) | the way out of every other case: nothing waits for ever (a requirement that can never be met, a task the player cannot do, a player who stops playing) |
+
+   A held scene is also given up this way when the player goes past the quest step by another path, or when the game stops knowing
+   the scene. A record that no longer holds the scene in its history (an older save) pays nothing for it.
+6. Order: the host sends a scene before the quest levels that belong to it, and a pass applies scenes before quests, so a game never
+   learns the level before it knows what holds it.
+
+**What is idempotent.** The world effects are applied once per game (a game applies a scene only when it is in neither its history
+nor in the mirror's): the objects the scene removes, the cleared area, spell and mana are not repeated at the viewing (spell and mana
+are guarded by the game itself; the objects by the blackboard flag; the cleared area is a no-op on a second pass). Nothing the
+player earns (gold of a quest step, items, baths, renown) is paid by the mirror before the viewing, and the ledger moves with the
+player's own step, so every reward is paid once per player.
+
+| Situation | Result |
+| --- | --- |
+| A watches, then B | B received the effects (gates open, objects gone) and sees the scene when its own conditions start it; one removal, one spell, one set of rewards in each game |
+| B watches first, or both at once | whoever finishes first tells the mirror; a game that has not played the scene holds it; a game that played it at the same moment finds it already in its history and holds nothing |
+| B is in the scene when A's news arrives | nothing is applied during a scene; at its end the scene is in B's history and the mirror's news changes nothing |
+| B joins late, or was away | held like any new scene (if B's ledger is seeded); a brand-new character gets the scene silently |
+| B or the host restarts while waiting | `mm_view` is in the save (host: the world facts; guest: the progress record), the switch is set again at the first pass |
+| Packets lost, duplicated, reordered | the event layer delivers the scene and the levels once and in order; the claim and the mirror are max-merges |
+| B never watches | after seven game days the scene is applied silently and the quest is released |
+| Heart events, romance, weddings | as before: private, never held, never claimed |
+| Skip | the game's own skip goes through the same clean-up, so it counts as a viewing; whether a scene can be skipped is the game's `can_skip` |
+
+A gate that reads a quest a held scene holds (`CompletedQuest`) opens in that game when the scene has been watched (or after seven
+days); gates that read the scene itself open at once.
 
 ## Festivals and calendar events
 
@@ -368,11 +446,12 @@ and each change the game is asked to make is wrapped on its own).
 
 ## Tests
 
-`python3 tests/test_story.py` (about a minute): the real GML over the simulated helpers and a lossy network (5-15% loss,
+`python3 tests/test_story.py` (about two minutes): the real GML over the simulated helpers and a lossy network (5-15% loss,
 duplication, jitter), with a stand-in game (`tests/story_fake.py`: quests with turn-in boxes, cutscenes of every kind, world gates,
 six villagers with schedules, rooms and activities, a hundred chapter quests, task and quest rewards with gold, items, renown and quests
-to start, scenes with items and baths, and a roommate model that fails for a villager who is neither a spouse nor a pet, as the
-game's `roommate_to_sleep` does). 36 scenarios:
+to start, scenes with items and baths, a roommate model that fails for a villager who is neither a spouse nor a pet, as the
+game's `roommate_to_sleep` does, and the game's scene eligibility and `clean_up_scene` (repeat switch, history, `give_items_once`,
+baths, a second removal that erases another object, `quest_to_start` for a quest that is not active, the blackboard flag). 52 scenarios:
 
 | Scenario | What it shows |
 | --- | --- |
@@ -399,8 +478,14 @@ game's `roommate_to_sleep` does). 36 scenarios:
 | spouses: a marriage in the middle of a day, a divorce | out-of-sight deferred swap, the guest's own game follows the plan, a divorce sends the villager back |
 | spouses: in sight, Fridays, festivals | a villager in the player's room waits; the game's Friday and festival roommate schedules are used |
 | spouses: a bad registry | unknown names, wrong types, the player's own spouse, a pet listed as a spouse: nobody moves |
+| held scene: watched by everybody | the guest watches the dragon scene, then the host and the other guest play it themselves (one skips): effects, spell, items, baths, gold, quest step once each; gates open at once |
+| held scene: any order, all at once, loss | five orders, three players at the same moment, 15% loss and duplication: every game plays it once, nothing twice |
+| held scene: late join, new character, restarts | a returning player is shown it, a new character gets it silently; host and guest restarts keep the waiting scenes; a corrupt list in a save is dropped |
+| held scene: gates, quest tasks, quests it starts, night | the gate opens everywhere at once; a quest task that waits for the scene stays there; a quest the scene starts is neither started nor finished early; the night scene |
+| held scene: safe fall-backs | hand-made trigger, unknown quest step, `or` over a stage, a fact that must be false, a scene that must be unseen, repeatable, plaza, story mode off, player already ahead, more than eight scenes, seven days without watching: applied silently, reason logged |
+| held scene: in the scene when the news comes, record replaced, leaving the world | no double effect, nothing paid for a scene that is not in the history, nothing left switched on |
 
-`python3 tests/test_progress.py` adds: the section `story_rewards` (round trip, 12 malformed variants, new character's empty ledger,
+`python3 tests/test_progress.py` adds: the section `story_rewards` (round trip including the waiting scenes, 21 malformed variants, new character's empty ledger,
 the host's ledger replaced by the player's) and the spouse registry (only marriages, one per player and per villager, told to every
 game, break-ups, restarts, a player who is away, a late joiner, a hostile `spouses` list).
 
@@ -415,6 +500,12 @@ game's bed function, a player's own spouse moved in twice, everybody gets the be
 moved at once, the plan swaps a housed villager out, the pet left in the village, a villager nobody can marry, Fridays) and six in the
 progress package (a dating partner as spouse, several spouses a player, spouses the claims do not hold, a marriage that stays after it
 ended, the host's ledger kept after a restore, a ledger level of zero). All are caught.
+
+`python3 tests/mutate_story_views.py` breaks the shared-scenes part in 25 ways (a scene applied silently, the game not told to offer
+it, quests not held, objects removed twice, items never or twice paid, waiting scenes forgotten by a restart, nobody gives up, a player
+who is ahead made to wait, the switch left on, hand-made triggers, new characters shown the past, quests a scene starts, unknown quest
+steps, `or` conditions, facts and inversions the mirror breaks, query targets, no limit, no sorting at the start of a pass, a record that pays for a missing scene, a world that
+is left with scenes on, repeatable scenes, corrupt saves, late noticing of the viewing) and four in the progress record. All are caught.
 
 Also required to keep passing: `tests/test_event_features.py`, `tests/test_event_layer.py` (syntax of every GML file) and
 `scripts/lint-asm.py`.
@@ -465,7 +556,32 @@ game was not run.
 14. `QUESTS.keys()` lists every quest and `QUESTS.get(name).category`, `.tasks.count()` exist (the ledger section reads them).
 15. `mist_give_items_after_scene(items, location_position)` and `player_wake_position()` can be called from the mod, outside a scene,
     with the `given_items` of `CUTSCENES.get(name)`; `ARI.free_baths` is a number.
-16. A scene's `give_items_once` is ignored here on purpose: the item is given when the scene first enters a player's history.
+16. A scene's `give_items_once` is ignored by the silent route on purpose: the item is given when the scene first enters a player's history. A
+    held scene honours it: the game gives the items of a scene that does not give them once, and this file gives those of a scene that does,
+    after the viewing (the scene was in the history, so the game would not).
+
+*Shared scenes (the held scene is only as good as the first two; the in-game checklist 31 to 38 comes first):*
+
+23. `CUTSCENES.get(name)` returns the one struct the game also reads, and `can_repeat` on it is read by `check_cutscene_eligible` each time
+    (not copied at load). `scene_history` is what `SeenCutscene` and the eligibility test read; `MIST.scenes_played_today` is a set with
+    `contains`; `MIST.active_cutscene.id` is the running scene's name for the whole scene, skip included; `MIST.blackboard.set(
+    "removed_scene_objects", true)` before the end of the scene is what `clean_up_scene` reads (`try_take`), and the blackboard is cleared
+    at the end only.
+24. The shapes read from quest and requirement data: `QUESTS.keys()`, `quest.tasks.get(t).query_targets` is a list with `count()`/`get(i)`
+    of structs with `type` (`QuestQueryType.Cutscene`) and `cutscene`; `QuestIsAtStage` is an array of `{ quest, stage }`, `QuestIsActive` an
+    array of quest names; a scene's `trigger` is undefined or a struct with `manually_activated`; `when_sleeping`, `give_items_once`,
+    `requires_story_mode`, `can_repeat` exist on the scene. If the quest data cannot be read every scene is applied silently.
+25. A quest task that waits for a cutscene is started only while the quest is at that task (so holding the quest there keeps the scene
+    reachable), and the task's own `requirements` do not ask for something that only the player who watched first has. If they do the
+    player waits until the seven days are over.
+26. A second `trigger_scene_object_removals` for a scene whose objects are gone removes nothing or another object of the same kind: the
+    blackboard flag prevents it at the end, but a scene whose script calls the removal itself in the middle (`std` function) still
+    calls it a second time; this is harmless if the objects are unique in the grid (as `object_removals` identifies them by id only).
+27. A scene replay in a game that has the scene's effects: `ARI.learn_spell` and the mana guard are idempotent, the area clear and the
+    scene's own script do not fail on objects that are already gone.
+28. The player's progress record is restored before the first story pass of the session (the held list is read once at that pass).
+29. `T2R.write("mm_view", <text>)` stores text in the world facts like the status facts, and `json_stringify` / `json_parse` round-trip a
+    struct of numbers.
 
 *Spouses:*
 
@@ -558,6 +674,26 @@ items counted before: note gold, inventory, the mail and the quest log of both.
     its own spouse (no "spouse" dialogue, no "kiss" prompt other than the greyed romance ones).
 30. **Log.** No "A villager could not be moved into the farm house" warnings; if there are, `mistrimulti.story` `error` says why.
 
+*Shared scenes* (the day-2 dragon scene is the first thing to try; `mistrimulti.story` lists `views` (waiting scenes), `why` (scenes
+applied silently, with the reason) and `stats.shown / viewed / silent`):
+
+31. **The reported case.** Guest watches the day-2 dragon scene. The host's game: the gate it opens is open, the objects it removes are
+    gone, the dragon quest has not moved (`levels`), `views` lists the scene. The host then walks into the scene's area (or goes to
+    bed, if it is a night scene) and sees it. Afterwards: no second removal, the spell once, the quest at the guest's step, the item
+    once, `views` empty. Try the other way round, and both at once.
+32. **Skip.** Skip the scene on the second player (hold the skip button): same result as watching it.
+33. **Gold and items.** Note gold, inventory and baths of both before: each gets the step's reward and the scene's items once; the
+    mirror pays nothing for the held step until the scene has been watched.
+34. **A quest that waits for a scene** (a quest task whose area starts a cutscene): the second player's quest stays at that task until
+    the scene was watched; it is not marked done. A quest the scene starts is not in the second player's quest log until then.
+35. **Restart.** While the scene is waiting restart the second player's game (and then the host): `views` still lists it and it plays.
+36. **Seven days.** Leave a scene unwatched and sleep seven times: it is applied silently (items and baths arrive), the quest is
+    released, the log says why.
+37. **A scene that is applied silently** (`why`): one that a dialogue or an object starts shows there with the reason and behaves as it
+    did before this feature (no scene, effects at once). Check that none of the scenes of the main story you meet is in `why` for a
+    reason you did not expect.
+38. **Joining late.** A returning character that joins after the scene sees it; a new character does not, and is not blocked.
+
 ## Known limitations
 
 * **A reward is paid when the mirror reaches the game, not when the step is taken,** and a reward that fails is lost rather than
@@ -592,6 +728,16 @@ items counted before: note gold, inventory, the mail and the quest log of both.
 * **After a host crash and an older autosave**, connected guests re-assert the story they made after it. If that is not wanted (a
   deliberate rollback) the guests have to rejoin so that they load the host's world again.
 * **No notification** tells a player that the story moved because of somebody else.
+* **A held scene is only offered by the triggers the mod can read** (an area, a quest task, the night). A scene that a dialogue or an
+  object starts is applied silently (the second player misses the scene itself). A scene that needs something only the first
+  viewer had (an item, a time window) is applied silently after seven days.
+* **A quest held for a scene holds its gates**: a gate that reads the quest (`CompletedQuest`) stays closed in that game until the
+  scene has been watched, and the quests that follow it wait too (a few days at most). A player cannot jump ahead in a chain of
+  held scenes: they are watched in the story's order.
+* **A scene can be watched twice only by accident**: a scene whose script calls the object removal itself in the middle removes the
+  object again in a game that already has the effects (harmless if the object is unique; see assumption 26).
+* **A scene older than a new character is never shown** to it, and a character that comes back with a record older than the scene
+  sees it again (that is correct: they have not seen it).
 * **Timing.** A step takes about a second to leave the player's game and another to reach the others; a world scene's effects land
   a second after the viewer's scene is over.
 * **A plan that does not fit in one event** (more than about 45 villagers with 160-character names) is not sent; the game has 34.

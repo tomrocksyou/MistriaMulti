@@ -815,11 +815,36 @@ function mistrimulti_progress_capture_story_rewards() {
         var level = T2R.read("mm_paid_" + quests[i]);
         if (is_real(level) && level > 0) paid[$ quests[i]] = level;
     }
-    return { init: T2R.read("mm_paid_init") == true, paid: paid };
+    var out = { init: T2R.read("mm_paid_init") == true, paid: paid };
+    var view = mistrimulti_progress_story_view();
+    if (array_length(struct_get_names(view)) > 0) out.view = view;
+    return out;
+}
+
+// The world cutscenes this player has been given the effects of but not watched yet ("mm_view": scene -> game day, text in
+// the world facts; MistriMultiStory.gml). Missing in older records: nothing is held.
+function mistrimulti_progress_story_view() {
+    var text = T2R.read("mm_view");
+    var data = undefined;
+    if (is_string(text)) {
+        try { data = json_parse(text); }
+        catch (e) { data = undefined; }
+    }
+    return is_struct(data) ? data : {};
 }
 
 function mistrimulti_progress_valid_story_rewards(v) {
     if (!mistrimulti_progress_bool_valid(v[$ "init"]) || !is_struct(v[$ "paid"])) return false;
+    var view = v[$ "view"];
+    if (view != undefined) {
+        if (!is_struct(view)) return false;
+        var held = struct_get_names(view);
+        if (array_length(held) > 64) return false;
+        for (var i = 0; i < array_length(held); i++) {
+            var day = view[$ held[i]];
+            if (!mistrimulti_progress_text_valid(held[i], 96) || !is_real(day) || day != floor(day) || day < 0 || day > 1000000) return false;
+        }
+    }
     var keys = struct_get_names(v.paid);
     if (array_length(keys) > 2048) return false;
     for (var i = 0; i < array_length(keys); i++) {
@@ -834,6 +859,8 @@ function mistrimulti_progress_restore_story_rewards(v) {
     var quests = mistrimulti_progress_story_quests();
     for (var i = 0; i < array_length(quests); i++) T2R.write("mm_paid_" + quests[i], v.paid[$ quests[i]]);
     T2R.write("mm_paid_init", v.init ? true : undefined);
+    var view = v[$ "view"];
+    T2R.write("mm_view", is_struct(view) && array_length(struct_get_names(view)) > 0 ? json_stringify(view) : undefined);
 }
 
 // ---- records ------------------------------------------------------------------------------------------------------------------

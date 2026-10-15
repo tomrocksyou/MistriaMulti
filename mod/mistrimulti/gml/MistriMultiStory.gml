@@ -17,6 +17,14 @@
 // A cutscene is a private viewing. It never pauses or moves anybody else. While one runs, this file does nothing at
 // all in that game; when it ends the next pass compares the finished state with the mirror like any other change.
 //
+// EVERYBODY SEES THE STORY SCENES. A world scene that another player watched is not marked as played here for the games that
+// did not watch it: those games get its lasting effects (so gates and unlocks agree) and keep the scene itself, which plays
+// when the game's own conditions start it (the game's skip works as always). The scene enters the history (gates that read it
+// open) while "can_repeat" is switched on for it, so the game still offers it; once it ran, the switch is off again and the
+// personal rest is paid once. Quests that the scene starts or advances, or that wait for it, are held back in that game so
+// the scene can start. A scene that cannot be shown safely (no automatic trigger, unknown stage, a player who is ahead, not
+// watched within MISTRIMULTI_STORY_PATIENCE days) falls back to the silent route and the reason is logged.
+//
 // Two more things belong to the personal side of a shared story step and to the villagers' homes:
 //
 //   3. REWARDS FOR THE PLAYERS WHO DID NOT DO THE STEP. A story step gives its rewards (items, gold, recipe scrolls, a new personal
@@ -43,6 +51,8 @@
 #macro MISTRIMULTI_STORY_ACTIVITIES true   // also steer what villagers do (not only where they are)
 #macro MISTRIMULTI_STORY_PAY_MAX 6         // quests paid in one pass
 #macro MISTRIMULTI_STORY_HOME_TRIES 3      // schedule swaps asked for one housemate in one day
+#macro MISTRIMULTI_STORY_PATIENCE 7        // game days a scene may wait to be watched before it is applied silently
+#macro MISTRIMULTI_STORY_VIEW_MAX 8        // scenes that may wait to be watched at the same time
 
 // ---- state ---------------------------------------------------------------------------------------------------
 
@@ -62,6 +72,8 @@ function __mistrimulti_story() {
 }
 
 function __mistrimulti_story_reset(st) {
+    // Scenes this game was holding for their player must be offered by the game's data again only if this file says so.
+    if (is_struct(st[$ "view"])) __mistrimulti_story_view_disarm(st);
     st.ticks = 0;
     st.ready = false;         // the mirror holds the host's world story (host: after its first pass)
     st.q = {};                // mirror: quest name -> level (stage, or DONE)
@@ -77,6 +89,13 @@ function __mistrimulti_story_reset(st) {
     st.gate_facts = {};       // world facts that a world gate reads
     st.qmemo = {};
     st.smemo = {};
+    st.view = {};             // world scenes applied here but not yet watched here: name -> game day (the fact "mm_view")
+    st.view_ok = false;       // the held scenes of the save were read
+    st.watching = {};         // held scenes that began to run
+    st.past = {};             // scenes that were over before this (new) character arrived: never shown
+    st.vmemo = {};            // scene -> how it can be shown ({ caps } or a reason why not)
+    st.vindex = undefined;    // cutscene -> { quest, stage } that waits for it
+    st.vlogged = {};
     st.sched = undefined;     // known schedule names
     st.snaps = [];            // host: slots waiting for the snapshot
     st.host_stream = "";      // guest: the host session the mirror belongs to
@@ -94,7 +113,7 @@ function __mistrimulti_story_reset(st) {
     st.tries = {};            // villager index -> swaps asked for today
     st.tries_day = -1;
     st.last_error = "";
-    st.stats = { claims: 0, applied: 0, scenes: 0, swaps: 0, steers: 0, refused: 0, paid: 0, homes: 0 };
+    st.stats = { claims: 0, applied: 0, scenes: 0, swaps: 0, steers: 0, refused: 0, paid: 0, homes: 0, shown: 0, viewed: 0, silent: 0 };
 }
 
 function __mistrimulti_story_on(mode) {
@@ -120,6 +139,7 @@ function __mistrimulti_story_follow(st, hs) {
     st.f = {};
     st.k = { n: 0, b: 0, t: 0 };
     st.pend = {};
+    st.past = {};
     st.want_at = -1000000;
 }
 
@@ -141,7 +161,7 @@ function mistrimulti_story_debug() {
         facts: array_length(struct_get_names(st.f)), counters: st.k, pending: array_length(struct_get_names(st.pend)),
         refused: struct_get_names(st.bad), stats: st.stats, plan_day: is_struct(st.plan) ? st.plan.d : -1,
         error: st.last_error, gate_scenes: struct_get_names(st.gate_scenes), gate_facts: struct_get_names(st.gate_facts),
-        housed: struct_get_names(st.homes) };
+        housed: struct_get_names(st.homes), views: st.view, why: st.vlogged };
 }
 
 // ---- registration ----------------------------------------------------------------------------------------------
@@ -426,12 +446,10 @@ function mistrimulti_story_apply_quest(name, level) {
     return true;
 }
 
-// A cutscene of the world that this player did not watch: its lasting effects are applied the way the game applies them
-// when a scene ends (clean_up_scene), minus what is the viewer's alone (hearts, the scene itself, status effects); the scene's
-// items and free baths are paid, as a step's rewards are.
-function mistrimulti_story_apply_scene(name) {
-    if (!CUTSCENES.contains_key(name)) return false;
-    var c = CUTSCENES.get(name);
+// The lasting effects of a world cutscene on a game that did not watch it, the way the game applies them when a scene ends
+// (clean_up_scene), minus what is the viewer's alone (hearts, status effects): the scene enters the history (the gates that
+// read it open), its objects are gone, its area is cleared, its spell and mana are given. Items and baths are separate.
+function __mistrimulti_story_scene_effects(name, c) {
     MIST.scene_history.insert(name);
     T2R.write("cutscene_seen_" + name, 1.0);
     trigger_scene_object_removals(name);
@@ -450,14 +468,296 @@ function mistrimulti_story_apply_scene(name) {
         ARI.mana_max = c.mana_to_set;
         ARI.set_mana(c.mana_to_set);
     }
-    // The scene is now in this player's history, so this runs once per player, here or when they watch it themselves.
+}
+
+// The scene's items (to the bed if the pockets are full) and free baths; either can be left out.
+function __mistrimulti_story_scene_gifts(name, c, items, baths) {
     try {
-        if (array_length(c.given_items) > 0) mist_give_items_after_scene(c.given_items, player_wake_position());
-        if (c.baths > 0) ARI.free_baths += c.baths;
+        if (items && array_length(c.given_items) > 0) mist_give_items_after_scene(c.given_items, player_wake_position());
+        if (baths && c.baths > 0) ARI.free_baths += c.baths;
     } catch (e) {
         __mistrimulti_story_warn("The items of scene " + name + " could not be given: " + string(e));
     }
+}
+
+// A world cutscene this player did not watch and that cannot be shown: all of it is applied, silently, and it counts as played.
+// The scene is now in this player's history, so this runs once per player, here or when they watch it themselves.
+function mistrimulti_story_apply_scene(name) {
+    if (!CUTSCENES.contains_key(name)) return false;
+    var c = CUTSCENES.get(name);
+    __mistrimulti_story_scene_effects(name, c);
+    __mistrimulti_story_scene_gifts(name, c, true, true);
     return true;
+}
+
+// ---- cutscenes that every player watches ---------------------------------------------------------------------------------------
+// A world cutscene that the game can show again is applied here as a HELD scene: its lasting effects land at once (gates agree),
+// it is in the history (gates that read it open) but the game is told it may repeat it ("can_repeat"), so the trigger the game
+// itself arms for it (a room area, a quest task, the night) still starts it. When it runs, the switch goes off, the objects it
+// removes are not removed twice and the personal rest is paid once. Quests that it starts or advances, or that wait for it,
+// are held at the level before it in this game (__mistrimulti_story_cap) until the scene has been watched.
+
+// The scene -> { quest, stage } index of the quest tasks that wait for a cutscene (the game starts such a scene when the quest
+// is at that task and the player is in its area). Built once; false if the quest data cannot be read.
+function __mistrimulti_story_view_index(st) {
+    if (st.vindex != undefined) return st.vindex;
+    var index = {};
+    try {
+        var keys = QUESTS.keys();
+        for (var i = 0; i < array_length(keys); i++) {
+            var quest = QUESTS.get(keys[i]);
+            for (var t = 0; t < quest.tasks.count(); t++) {
+                var targets = quest.tasks.get(t)[$ "query_targets"];
+                if (targets == undefined) continue;
+                for (var k = 0; k < targets.count(); k++) {
+                    var target = targets.get(k);
+                    if (target.type != QuestQueryType.Cutscene || !is_string(target.cutscene)) continue;
+                    var old = index[$ target.cutscene];
+                    if (old == undefined || t < old.stage) index[$ target.cutscene] = { quest: keys[i], stage: t };
+                }
+            }
+        }
+    } catch (e) {
+        index = false;
+        st.last_error = "view index: " + string(e);
+        __mistrimulti_story_warn("The quest tasks that wait for a cutscene could not be read: " + string(e));
+    }
+    st.vindex = index;
+    return index;
+}
+
+// Lowers a cap: the highest level a quest may have in a game while a held scene waits.
+function __mistrimulti_story_cap_set(caps, quest, level) {
+    if (caps[$ quest] == undefined || level < caps[$ quest]) caps[$ quest] = level;
+}
+
+// The conditions of a scene's own requirement that the mirror could change in a game before it watched the scene. A quest
+// condition becomes a cap (stage k: held at k, active: not finished); inside an "or", an inversion or an alias it cannot: false,
+// and the scene cannot be shown. The same for what the mirror makes true for everybody (a world fact, a world scene, a finished
+// story quest) when the scene needs it to be false (`inv`: inside an inversion). CompletedQuest and SeenCutscene that must be
+// true only wait for the mirror, which does that anyway.
+function __mistrimulti_story_view_req(st, req, caps, depth, inv) {
+    if (!is_array(req) || depth > 6) return true;
+    for (var i = 0; i < Requirement.LEN; i++) {
+        var v = req[i];
+        if (v == undefined) continue;
+        if (requirement_is_alias(i)) {
+            if (!__mistrimulti_story_view_req(st, REQUIREMENT_ALIASES[i], caps, depth + 1, inv)) return false;
+        } else if (i == Requirement.Or) {
+            for (var j = 0; j < array_length(v); j++) if (!__mistrimulti_story_view_req(st, v[j], caps, depth + 1, inv)) return false;
+        } else if (i == Requirement.Invert) {
+            if (!__mistrimulti_story_view_req(st, v, caps, depth + 1, !inv)) return false;
+        } else if (i == Requirement.CompletedQuest && inv && is_array(v)) {
+            for (var j = 0; j < array_length(v); j++) if (is_array(v[j]) && __mistrimulti_story_quest_world(st, v[j][0])) return false;
+        } else if (i == Requirement.SeenCutscene && inv && is_array(v)) {
+            for (var j = 0; j < array_length(v); j++) if (is_string(v[j]) && __mistrimulti_story_scene_world(st, v[j])) return false;
+        } else if (i == Requirement.WorldFactIs && is_array(v)) {
+            for (var j = 0; j < array_length(v); j++) {
+                var e = v[j];
+                if (!is_array(e) || array_length(e) != 2 || !is_string(e[0]) || !__mistrimulti_story_fact_world(st, e[0])) continue;
+                if ((e[1] == true) == inv) return false;
+            }
+        } else if (i == Requirement.QuestIsAtStage || i == Requirement.QuestIsActive) {
+            if (depth > 0 || !is_array(v)) return false;
+            for (var j = 0; j < array_length(v); j++) {
+                if (i == Requirement.QuestIsAtStage) {
+                    __mistrimulti_story_cap_set(caps, v[j].quest, v[j].stage);
+                } else {
+                    var quest = QUESTS.get(v[j]);
+                    if (quest == undefined) return false;
+                    __mistrimulti_story_cap_set(caps, v[j], quest.tasks.count() - 1);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+// Can this world scene be shown to a game that did not watch it? { caps: { quest: highest level } } or a reason why not (text).
+function __mistrimulti_story_view_build(st, name) {
+    if (name == "upgrade_the_saturday_market_plaza") return "it builds objects that cannot be built twice";
+    var c = CUTSCENES.get(name);
+    if (c[$ "can_repeat"] == true && st.view[$ name] == undefined) return "the game repeats it anyway";
+    var index = __mistrimulti_story_view_index(st);
+    if (!is_struct(index)) return "the quest data could not be read";
+    var trigger = c[$ "trigger"];
+    var query = index[$ name];
+    if (!((trigger != undefined && trigger[$ "manually_activated"] != true) || c[$ "when_sleeping"] == true || query != undefined)) {
+        return "nothing the game arms starts it (no area, no quest task, not at night)";
+    }
+    var caps = {};
+    if (query != undefined) __mistrimulti_story_cap_set(caps, query.quest, query.stage);
+    if (!__mistrimulti_story_view_req(st, c[$ "requirements"], caps, 0, false)) return "a condition it reads cannot be held";
+    var started = c.quest_to_start;
+    if (is_array(started)) for (var i = 0; i < array_length(started); i++) __mistrimulti_story_cap_set(caps, started[i], -1);
+    var progressed = c.quest_to_progress;
+    if (is_string(progressed) && __mistrimulti_story_quest_world(st, progressed) && caps[$ progressed] == undefined) {
+        return "it advances a quest at a stage nobody can tell";
+    }
+    var out = {};
+    var quests = struct_get_names(caps);
+    for (var i = 0; i < array_length(quests); i++) if (__mistrimulti_story_quest_world(st, quests[i])) out[$ quests[i]] = caps[$ quests[i]];
+    return { caps: out };
+}
+
+// The answer of the above for a world scene, remembered; a reason is logged once. undefined: not showable.
+function __mistrimulti_story_view_info(st, name) {
+    var m = st.vmemo[$ name];
+    if (m == undefined) {
+        try { m = __mistrimulti_story_view_build(st, name); }
+        catch (e) { m = "the data could not be read: " + string(e); }
+        st.vmemo[$ name] = m;
+        if (is_string(m)) __mistrimulti_story_view_why(st, name, m);
+    }
+    return is_struct(m) ? m : undefined;
+}
+
+function __mistrimulti_story_view_why(st, name, text) {
+    if (st.vlogged[$ name] != undefined) return;
+    st.vlogged[$ name] = text;
+    try { mmapi_log_info("mistrimulti", "Story scene " + name + " is applied without watching: " + text); } catch (e) {}
+}
+
+// Is a world scene that is new to this game to be shown? Its info, or undefined (then it is applied silently).
+function __mistrimulti_story_view_wanted(st, name, local) {
+    if (st.past[$ name] == true) return undefined;
+    var info = __mistrimulti_story_view_info(st, name);
+    if (info == undefined) return undefined;
+    if (array_length(struct_get_names(st.view)) >= MISTRIMULTI_STORY_VIEW_MAX) {
+        __mistrimulti_story_view_why(st, name, "too many scenes are waiting to be watched");
+        return undefined;
+    }
+    var c = CUTSCENES.get(name);
+    if (c[$ "requires_story_mode"] == true && STORY_ENABLED != true) return undefined;
+    // A player who is ahead of the scene's quest (or has finished what it starts) would see the scene advance the quest twice.
+    if (!__mistrimulti_story_caps_hold(info, local)) {
+        __mistrimulti_story_view_why(st, name, "this player is already past the quest step it belongs to");
+        return undefined;
+    }
+    return info;
+}
+
+function __mistrimulti_story_caps_hold(info, local) {
+    var quests = struct_get_names(info.caps);
+    for (var i = 0; i < array_length(quests); i++) if ((local.q[$ quests[i]] ?? -1) > info.caps[$ quests[i]]) return false;
+    return true;
+}
+
+// The highest level the held scenes allow a quest in this game, or undefined.
+function __mistrimulti_story_cap(st, quest) {
+    var cap = undefined;
+    var names = struct_get_names(st.view);
+    for (var i = 0; i < array_length(names); i++) {
+        var info = __mistrimulti_story_view_info(st, names[i]);
+        if (info == undefined) continue;
+        var level = info.caps[$ quest];
+        if (level != undefined && (cap == undefined || level < cap)) cap = level;
+    }
+    return cap;
+}
+
+// The held scenes are a fact of the save ("mm_view": name -> game day), carried for a guest by the progress section story_rewards.
+function __mistrimulti_story_view_save(st) {
+    T2R.write("mm_view", array_length(struct_get_names(st.view)) == 0 ? undefined : json_stringify(st.view));
+}
+
+function __mistrimulti_story_view_arm(name, on) {
+    if (CUTSCENES.contains_key(name)) CUTSCENES.get(name).can_repeat = on;
+}
+
+// A world that is left or a stream that ends: nothing stays switched on in the game's data.
+function __mistrimulti_story_view_disarm(st) {
+    try {
+        var names = struct_get_names(st.view);
+        for (var i = 0; i < array_length(names); i++) __mistrimulti_story_view_arm(names[i], false);
+    } catch (e) {}
+}
+
+// The held scenes of this save, once per session: only those that are still in the history and can still be shown.
+function __mistrimulti_story_view_init(st) {
+    if (st.view_ok) return;
+    st.view_ok = true;
+    var text = T2R.read("mm_view");
+    if (!is_string(text)) return;
+    var data = undefined;
+    try { data = json_parse(text); }
+    catch (e) { data = undefined; }
+    if (is_struct(data)) {
+        var names = struct_get_names(data);
+        for (var i = 0; i < array_length(names); i++) {
+            var day = data[$ names[i]];
+            if (!__mistrimulti_story_name(names[i]) || !__mistrimulti_story_int(day, 0, 1000000) || !CUTSCENES.contains_key(names[i])) continue;
+            if (!MIST.scene_history.contains(names[i]) || __mistrimulti_story_view_info(st, names[i]) == undefined) continue;
+            if (array_length(struct_get_names(st.view)) >= MISTRIMULTI_STORY_VIEW_MAX) break;
+            st.view[$ names[i]] = day;
+            __mistrimulti_story_view_arm(names[i], true);
+        }
+    }
+    __mistrimulti_story_view_save(st);
+}
+
+// A world scene new to this game, to be shown: its effects land, the game may play it. Items and baths wait for the viewing.
+function mistrimulti_story_apply_scene_view(st, name) {
+    if (!CUTSCENES.contains_key(name)) return false;
+    __mistrimulti_story_scene_effects(name, CUTSCENES.get(name));
+    st.view[$ name] = total_days();
+    __mistrimulti_story_view_arm(name, true);
+    __mistrimulti_story_view_save(st);
+    st.stats.shown++;
+    return true;
+}
+
+// Every tick: a held scene that is running now is being watched. The game's repeat switch goes off at once (it must not offer
+// the scene a third time) and its end does not remove the scene's objects again.
+function __mistrimulti_story_views_watch(st) {
+    if (array_length(struct_get_names(st.view)) == 0) return;
+    var active = MIST.active_cutscene;
+    if (!is_struct(active) || !is_string(active[$ "id"]) || st.view[$ active.id] == undefined) return;
+    st.watching[$ active.id] = true;
+    __mistrimulti_story_view_arm(active.id, false);
+    MIST.blackboard.set("removed_scene_objects", true);
+}
+
+// A held scene is over: watched (played or skipped), or given up. `silent`: the personal rest of the scene is paid now.
+function __mistrimulti_story_view_finish(st, name, how) {
+    var c = CUTSCENES.get(name);
+    __mistrimulti_story_view_arm(name, false);
+    struct_remove(st.view, name);
+    struct_remove(st.watching, name);
+    if (how == "viewed") {
+        // The game paid the baths, and the items unless the scene gives its items only once (the scene was in the history).
+        if (c[$ "give_items_once"] == true) __mistrimulti_story_scene_gifts(name, c, true, false);
+        st.stats.viewed++;
+    } else if (how != "gone") {
+        __mistrimulti_story_scene_gifts(name, c, true, true);
+        st.stats.silent++;
+        __mistrimulti_story_view_why(st, name, how);
+    }
+}
+
+// Start of a pass: sorts out the held scenes. Watched ones are done; one that waits too long, that cannot start any more
+// (the player went past its quest step) or that is no longer known is applied silently, so nothing waits for ever.
+function __mistrimulti_story_views(st, local) {
+    __mistrimulti_story_view_init(st);
+    var names = struct_get_names(st.view);
+    var changed = false;
+    for (var i = 0; i < array_length(names); i++) {
+        var name = names[i];
+        var info = __mistrimulti_story_view_info(st, name);
+        var how = "";
+        if (!MIST.scene_history.contains(name)) how = "gone";
+        else if (st.watching[$ name] == true || MIST.scenes_played_today.contains(name)) how = "viewed";
+        else if (info == undefined) how = "the scene can no longer be shown";
+        else if (total_days() - st.view[$ name] >= MISTRIMULTI_STORY_PATIENCE) how = "not watched within " + string(MISTRIMULTI_STORY_PATIENCE) + " days";
+        else if (!__mistrimulti_story_caps_hold(info, local)) how = "this player went past the quest step it belongs to";
+        if (how == "") {
+            __mistrimulti_story_view_arm(name, true);
+            continue;
+        }
+        __mistrimulti_story_view_finish(st, name, how);
+        changed = true;
+    }
+    if (changed) __mistrimulti_story_view_save(st);
 }
 
 function __mistrimulti_story_set_counter(key, value) {
@@ -469,34 +769,40 @@ function __mistrimulti_story_set_counter(key, value) {
 // Brings the game up to the mirror (a few changes per pass; each one guarded, a refused one is not tried again).
 function __mistrimulti_story_down(st, local) {
     var left = MISTRIMULTI_STORY_APPLY_MAX;
-    var names = struct_get_names(st.q);
-    for (var i = 0; i < array_length(names) && left > 0; i++) {
-        var key = "q:" + names[i];
-        if (st.q[$ names[i]] <= (local.q[$ names[i]] ?? -1) || st.bad[$ key] == true) continue;
-        left--;
-        try {
-            if (mistrimulti_story_apply_quest(names[i], st.q[$ names[i]])) st.stats.applied++;
-            else { st.bad[$ key] = true; st.stats.refused++; }
-        } catch (e) {
-            st.bad[$ key] = true;
-            st.stats.refused++;
-            st.last_error = key + ": " + string(e);
-            __mistrimulti_story_warn("Story quest " + names[i] + " could not be applied: " + string(e));
-        }
-    }
-    names = struct_get_names(st.sc);
+    // Scenes first: a scene that is held decides, before any quest changes, how far its quests may be brought.
+    var names = struct_get_names(st.sc);
     for (var i = 0; i < array_length(names) && left > 0; i++) {
         var key = "s:" + names[i];
         if (local.sc[$ names[i]] == true || MIST.scene_history.contains(names[i]) || st.bad[$ key] == true) continue;
         left--;
         try {
-            if (mistrimulti_story_apply_scene(names[i])) st.stats.scenes++;
+            var shown = __mistrimulti_story_view_wanted(st, names[i], local) != undefined;
+            if (shown ? mistrimulti_story_apply_scene_view(st, names[i]) : mistrimulti_story_apply_scene(names[i])) st.stats.scenes++;
             else { st.bad[$ key] = true; st.stats.refused++; }
         } catch (e) {
             st.bad[$ key] = true;
             st.stats.refused++;
             st.last_error = key + ": " + string(e);
             __mistrimulti_story_warn("Story scene " + names[i] + " could not be applied: " + string(e));
+        }
+    }
+    names = struct_get_names(st.q);
+    for (var i = 0; i < array_length(names) && left > 0; i++) {
+        var key = "q:" + names[i];
+        // A quest that a held scene starts, advances or waits for is brought only as far as the scene allows.
+        var want = st.q[$ names[i]];
+        var cap = __mistrimulti_story_cap(st, names[i]);
+        if (cap != undefined && cap < want) want = cap;
+        if (want <= (local.q[$ names[i]] ?? -1) || st.bad[$ key] == true) continue;
+        left--;
+        try {
+            if (mistrimulti_story_apply_quest(names[i], want)) st.stats.applied++;
+            else { st.bad[$ key] = true; st.stats.refused++; }
+        } catch (e) {
+            st.bad[$ key] = true;
+            st.stats.refused++;
+            st.last_error = key + ": " + string(e);
+            __mistrimulti_story_warn("Story quest " + names[i] + " could not be applied: " + string(e));
         }
     }
     names = struct_get_names(st.f);
@@ -565,6 +871,11 @@ function mistrimulti_story_snapshot_blob(from, text, meta) {
     if (!is_struct(data)) return true;
     __mistrimulti_story_follow(st, __mistrimulti_story_host_stream());
     mistrimulti_story_merge(st, data, false, MISTRIMULTI_STORY_LIST_MAX);
+    // A new character is not owed the story so far, scenes included: what is over when it arrives is never shown to it.
+    if (T2R.read("mm_paid_init") != true) {
+        var done = struct_get_names(st.sc);
+        for (var i = 0; i < array_length(done); i++) st.past[$ done[i]] = true;
+    }
     if (typeof(data[$ "se"]) == "bool" && STORY_ENABLED != data.se) STORY_ENABLED = data.se;
     st.ready = true;
     return true;
@@ -768,6 +1079,8 @@ function mistrimulti_story_tick() {
     try {
         var st = __mistrimulti_story();
         st.ticks++;
+        // A held scene that begins to run is being watched (every tick: a short scene must not slip through).
+        if (MIST.is_running()) __mistrimulti_story_views_watch(st);
         if (st.ticks mod MISTRIMULTI_STORY_PASS != 0) return;
         // A joining game gets its snapshot at once, even while the host watches a cutscene: it is only data.
         if (r.mode == "host" && st.ready) __mistrimulti_story_send_snapshots(st);
@@ -790,6 +1103,7 @@ function mistrimulti_story_tick() {
 function __mistrimulti_story_host_pass(st) {
     var local = __mistrimulti_story_local(st);
     __mistrimulti_story_own_steps(st, local);
+    __mistrimulti_story_views(st, local);
     if (!st.ready) {
         // First pass of this session: the host's own game is the world as it was saved. Nobody needs a delta for it.
         mistrimulti_story_merge(st, __mistrimulti_story_up(st, local), false, MISTRIMULTI_STORY_LIST_MAX);
@@ -804,13 +1118,14 @@ function __mistrimulti_story_host_pass(st) {
     __mistrimulti_story_rewards(st);
 }
 
-// A delta is cut into events that fit (a name has at most 96 characters, an event at most 8 KB).
+// A delta is cut into events that fit (a name has at most 96 characters, an event at most 8 KB). Scenes go first: a game that
+// learns of a held scene before it learns of the quest levels that belong to it holds those quests back (see the cap).
 function __mistrimulti_story_broadcast(d) {
-    for (var i = 0; i < array_length(d.q); i += MISTRIMULTI_STORY_CLAIM_MAX) {
-        mistrimulti_event_emit("story_delta", { q: __mistrimulti_story_slice(d.q, i), sc: [], f: [], k: {} });
-    }
     for (var i = 0; i < array_length(d.sc); i += MISTRIMULTI_STORY_CLAIM_MAX) {
         mistrimulti_event_emit("story_delta", { q: [], sc: __mistrimulti_story_slice(d.sc, i), f: [], k: {} });
+    }
+    for (var i = 0; i < array_length(d.q); i += MISTRIMULTI_STORY_CLAIM_MAX) {
+        mistrimulti_event_emit("story_delta", { q: __mistrimulti_story_slice(d.q, i), sc: [], f: [], k: {} });
     }
     for (var i = 0; i < array_length(d.f); i += MISTRIMULTI_STORY_CLAIM_MAX) {
         mistrimulti_event_emit("story_delta", { q: [], sc: [], f: __mistrimulti_story_slice(d.f, i), k: {} });
@@ -836,6 +1151,7 @@ function __mistrimulti_story_guest_pass(st) {
     }
     var local = __mistrimulti_story_local(st);
     __mistrimulti_story_own_steps(st, local);
+    __mistrimulti_story_views(st, local);
     var up = __mistrimulti_story_up(st, local);
     var claim = { q: [], sc: [], f: [], k: up.k };
     // Entries already claimed at this level are in flight: do not repeat them.

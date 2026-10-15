@@ -66,5 +66,7 @@ Download the new zip (or tar.gz), unpack it **in the same place** so it replaces
 Tested in the real game: both players' characters, time and weather, sleeping and the new day, hoeing, watering and planting,
 chests, the shipping bin and one shared gold purse, picking things up in town, leaving and rejoining with your own inventory.
 Written but not yet tried in the real game: each other on the map, the mines, animals and buildings, quests and cutscenes.
-Villagers walk the same schedule on every screen but can be a few steps apart. This is an experimental mod: back up saves you
+Villagers walk the same schedule on every screen but can be a few steps apart. Story cutscenes are watched by everybody
+themselves (skip them with the game's own skip button if you like): what a scene changes in the world counts once, and
+rewards are paid once per player. This is an experimental mod: back up saves you
 care about (the launcher also keeps copies of your singleplayer saves in `mod_data/mistrimulti/solo_backups`).

@@ -14,6 +14,7 @@ import sys
 
 from event_sim import GmlNode, World
 import gml_subset as gml
+import story_fake as sf
 from story_fake import (A, G, Npc, Fake, PRELUDE, default_save, WORLD_SCENES, FARM, HOME, TOWN, BEACH, NPC_COUNT,
                         ACT_READ, ACT_EAT, ROOMMATE)
 
@@ -138,9 +139,11 @@ def play(world, slot, scene, seconds=3):
     """A player watches a cutscene: while it runs the game is busy (the mod does nothing in it), then its effects land."""
     f = world.games[slot].node.fake
     f.scene_running = True
+    f.active_scene = scene
     world.run(seconds * SECOND)
     f.watch(scene)
     f.scene_running = False
+    f.active_scene = None
 
 
 def stage_of(node, quest):
@@ -1173,6 +1176,464 @@ def test_bad_registry_changes_nobody():
     assert host.fake.sched[0] == "s/home_day" and host.fake.sched[3] == "s/home_day" and list(host.debug()["housed"]) == []
     assert_clean(world)
     print("PASS: a malformed or forged registry (unknown names, wrong types, the player's own spouse) moves nobody and breaks nothing")
+
+
+# ---- everybody sees the story scenes (held scenes) -------------------------------------------------------------------------------
+# A world scene that one player watched is given to the others as its lasting effects only; each game plays the scene itself when
+# its own conditions start it. See "Cutscenes that every player watches" in docs/SYNC-STORY.md.
+
+def view_saves(guests=2, **extra):
+    """Every game starts from a character that has been in this world before (its rewards ledger is seeded) with the dragon quest
+    waiting at its first task: the scene `dragon_day2` needs exactly that."""
+    saves = {}
+    for slot in range(guests + 1):
+        saves[slot] = {**default_save(), "quests": {"arrival": 1, "dragon": 0, "visions": 0},
+                       "ledger": {"init": True, "arrival": 1}, **extra}
+    return saves
+
+
+def views_of(node):
+    return dict(node.fake.views)
+
+
+def held(node):
+    return sorted(node.debug()["views"])
+
+
+def assert_held_in(node, scene, quest, level):
+    """The scene's effects landed (history, gate fact), the game still offers it, the quest waits for it."""
+    f = node.fake
+    assert scene in f.history and f.facts.get("cutscene_seen_" + scene) == 1.0, (node.slot, "effects missing", f.history)
+    assert f.scene_struct(scene).can_repeat is True and scene in held(node), (node.slot, held(node))
+    assert f.views.get(scene) is None, (node.slot, "the scene must not have been played by the mirror")
+    assert stage_of(node, quest) == level, (node.slot, quest, stage_of(node, quest))
+
+
+def test_view_scene_is_watched_by_everybody():
+    """The real-game finding: the guest watched the dragon scene, the host never saw it. Now every game plays it once."""
+    for seed in range(2):
+        saves = view_saves()
+        world = make_world(60 + seed, saves=saves, loss=0.05, dup=0.05, jitter=30)
+        wait_ready(world)
+        settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+        host, g1, g2 = nodes(world)
+        assert all(n.fake.would_start("dragon_day2") for n in (host, g1, g2))
+        play(world, 1, "dragon_day2", 3)                        # the guest watches it
+        settle(world, 8000)
+        assert views_of(g1) == {"dragon_day2": 1} and g1.fake.items == {"scale": 1} and g1.fake.ari["free_baths"] == 1
+        assert stage_of(g1, "dragon") == 1 and g1.fake.gold == 110 and g1.fake.removals == 1
+        for n in (host, g2):
+            assert_held_in(n, "dragon_day2", "dragon", 0)
+            f = n.fake
+            assert f.removals == 1 and f.spells == [9], "the world effects landed once"
+            assert f.would_start("dragon_day2"), "the game still offers the scene"
+            assert f.items == {} and f.ari["free_baths"] == 0 and f.gold == 100, "the personal rest waits for the viewing"
+        assert held(g1) == [], "the player who watched it has nothing to watch"
+        # The host sees it now (and the game's skip, which ends the scene the same way, is the other player's choice).
+        play(world, 0, "dragon_day2", 3)
+        settle(world, 8000)
+        assert views_of(host) == {"dragon_day2": 1} and held(host) == []
+        assert host.fake.removals == 1, "the objects it removes are not removed twice"
+        assert host.fake.items == {"scale": 1}, "a scene that gives its items once: paid once, after the viewing"
+        assert host.fake.ari["free_baths"] == 1 and host.fake.gold == 110 and host.fake.spells == [9]
+        assert not host.fake.would_start("dragon_day2") and host.fake.scene_struct("dragon_day2").can_repeat is False
+        assert stage_of(host, "dragon") == 1
+        assert_held_in(g2, "dragon_day2", "dragon", 0)
+        play(world, 2, "dragon_day2", 1)                        # the other guest skips it
+        settle(world, 8000)
+        for n in (host, g1, g2):
+            f = n.fake
+            assert views_of(n) == {"dragon_day2": 1}, (n.slot, f.views)
+            assert f.removals == 1 and f.spells == [9] and f.items == {"scale": 1} and f.ari["free_baths"] == 1, (n.slot, f.items)
+            assert f.gold == 110 and f.rewards == {"dragon": 1}, (n.slot, f.gold, f.rewards)
+            assert stage_of(n, "dragon") == 1 and held(n) == []
+            assert not f.would_start("dragon_day2") and f.scene_struct("dragon_day2").can_repeat is False
+            assert f.refused == []
+        assert_converged(world, "held scene")
+        assert_clean(world)
+    print("PASS: held scene: the guest watches it, then the host and the other guest play it themselves; effects and rewards once")
+
+
+def test_view_either_player_first_and_at_once():
+    for order in ((0, 1), (1, 0), (2,), (0, 1, 2), (2, 1)):
+        for seed in range(2):
+            world = make_world(70 + seed + 10 * len(order), saves=view_saves(), loss=0.15, dup=0.15, jitter=60)
+            wait_ready(world)
+            settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+            host, g1, g2 = nodes(world)
+            if len(order) == 3:
+                for slot in order:                              # all three at the same moment
+                    world.games[slot].node.fake.scene_running = True
+                    world.games[slot].node.fake.active_scene = "dragon_day2"
+                world.run(2000)
+                for slot in order:
+                    world.games[slot].node.fake.watch("dragon_day2")
+                    world.games[slot].node.fake.scene_running = False
+                    world.games[slot].node.fake.active_scene = None
+            else:
+                for slot in order:
+                    play(world, slot, "dragon_day2", 2)
+                    settle(world, 4000)
+            settle(world, 8000)
+            for slot in (0, 1, 2):
+                if slot not in order:
+                    play(world, slot, "dragon_day2", 2)
+            settle(world, 12000)
+            for n in (host, g1, g2):
+                f = n.fake
+                assert views_of(n) == {"dragon_day2": 1}, (order, n.slot, f.views)
+                assert f.removals == 1 and f.spells == [9] and f.items == {"scale": 1} and f.ari["free_baths"] == 1, (order, n.slot, f.items, f.removals)
+                assert f.gold == 110 and f.rewards == {"dragon": 1} and stage_of(n, "dragon") == 1, (order, n.slot, f.gold)
+                assert held(n) == [] and not f.would_start("dragon_day2") and f.refused == [], (order, n.slot, held(n), f.refused)
+                assert all(v == 1 for v in f.granted.values()), f.granted
+            assert_converged(world, "order %s" % (order,))
+            assert_clean(world)
+    print("PASS: held scene: whoever triggers it first, in any order or all at once, under loss, everybody sees it once and is paid once")
+
+
+def test_view_late_join_and_new_character():
+    saves = view_saves(guests=3)
+    saves[3]["ledger"] = {}                                      # slot 3 is a brand-new character
+    world = make_world(80, guests=3, saves=saves, loss=0.05, jitter=30)
+    world.net.partition(0, 3)
+    wait_ready(world, skip=3)
+    settle(world, 3000)
+    world.net.partition(0, 2)
+    host, g1, g2, g3 = nodes(world)
+    play(world, 1, "dragon_day2", 2)
+    settle(world, 6000)
+    assert held(host) == ["dragon_day2"] and g2.fake.history == ["tutorial_intro"]
+    world.net.partition(0, 2, False)
+    world.net.partition(0, 3, False)
+    settle(world, 14000)
+    assert synced(world)
+    assert_held_in(g2, "dragon_day2", "dragon", 0)               # a character that was away is shown it when it returns
+    f3 = g3.fake
+    assert "dragon_day2" in f3.history and f3.views == {} and held(g3) == [] and not f3.would_start("dragon_day2")
+    assert f3.items == {"scale": 1} and f3.ari["free_baths"] == 1, "a new character is not owed the scene: it gets the scene's gifts at once"
+    assert stage_of(g3, "dragon") == 1 and f3.scene_struct("dragon_day2").can_repeat is False
+    play(world, 2, "dragon_day2", 2)
+    play(world, 0, "dragon_day2", 2)
+    settle(world, 8000)
+    for n in (host, g1, g2, g3):
+        assert n.fake.items == {"scale": 1} and n.fake.removals == 1 and stage_of(n, "dragon") == 1, (n.slot, n.fake.items)
+    assert_converged(world, "late join")
+    assert_clean(world)
+    print("PASS: held scene: a returning player that joins later is shown it; a new character is not owed it")
+
+
+def test_view_survives_restarts():
+    saves = view_saves()
+    world = make_world(81, saves=saves, loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    play(world, 1, "dragon_day2", 2)
+    settle(world, 6000)
+    assert held(host) == ["dragon_day2"] and held(g2) == ["dragon_day2"]
+    # The host crashes and restarts from a save made while it was waiting to see the scene.
+    saves[0] = host.fake.export(host.counters())
+    assert "mm_view" in saves[0]["textfacts"]
+    restart(world, 0)
+    settle(world, 15000)
+    host = nodes(world)[0]
+    assert_held_in(host, "dragon_day2", "dragon", 0)
+    assert host.fake.would_start("dragon_day2")
+    # The guest restarts too, from a save with the scene held.
+    saves[2] = g2.fake.export(g2.counters())
+    restart(world, 2)
+    settle(world, 15000)
+    g2 = nodes(world)[2]
+    assert_held_in(g2, "dragon_day2", "dragon", 0)
+    play(world, 0, "dragon_day2", 2)
+    play(world, 2, "dragon_day2", 2)
+    settle(world, 12000)
+    for n in nodes(world):
+        assert views_of(n) == {"dragon_day2": 1} and n.fake.items == {"scale": 1} and stage_of(n, "dragon") == 1, (n.slot, n.fake.views, n.fake.items)
+        # a game that restarted starts counting again; none of them removed anything at the viewing
+        assert n.fake.removals == (1 if n.slot == 1 else 0), (n.slot, n.fake.removals)
+    assert_converged(world, "restarts")
+    assert_clean(world)
+    print("PASS: held scene: a host or guest that restarts while waiting to see the scene still gets it, once")
+
+
+def test_view_corrupt_save_is_ignored():
+    texts = ["not json", "[1,2]", '{"nowhere": 3, "dragon_day2": "x"}', '{"dragon_day2": 4}', '{"dragon_day2": -1}']
+    for text in texts:
+        saves = view_saves(textfacts={"mm_view": text})
+        world = make_world(82, saves=saves, loss=0.0)
+        wait_ready(world)
+        settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+        settle(world, 3000)
+        for n in nodes(world):
+            # '{"dragon_day2": 4}' names a scene that is not in the history: nothing is held and nothing is switched on
+            assert held(n) == [] and n.fake.scene_struct("dragon_day2").can_repeat is False, (text, n.slot, held(n))
+            assert n.fake.facts.get("mm_view") is None, "an unusable list is dropped"
+            assert n.fake.items == {} and n.debug()["stats"]["silent"] == 0, "and nothing is paid for it"
+        assert_clean(world)
+    print("PASS: held scene: an unusable list of held scenes in a save is dropped without effect")
+
+
+def test_view_gate_agrees_at_once():
+    world = make_world(83, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    assert "gate_trigger" in host.debug()["gate_scenes"] and "dragon_day2" in host.debug()["gate_scenes"]
+    play(world, 1, "gate_trigger", 2)                           # a scene a world gate reads, started by an area
+    settle(world, 6000)
+    for n in (host, g2):
+        assert "gate_trigger" in n.fake.history and n.fake.facts.get("cutscene_seen_gate_trigger") == 1.0, "the gate opens in every game"
+        assert n.fake.would_start("gate_trigger") and n.fake.items == {}
+    play(world, 0, "gate_trigger", 2)
+    settle(world, 6000)
+    assert host.fake.items == {"gate_gift": 1} and g1.fake.items == {"gate_gift": 1} and g2.fake.items == {}
+    assert not host.fake.would_start("gate_trigger")
+    assert_clean(world)
+    print("PASS: held scene: the gate a scene opens agrees in every game at once, the scene itself is still offered")
+
+
+def test_view_quest_waiting_for_the_scene():
+    # A task of the quest "visions" waits for a cutscene (a quest query target): the game starts it when the quest is at that task.
+    world = make_world(84, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    g1.fake.hand_in("visions")                                   # task 0
+    settle(world, 5000)
+    assert all(stage_of(n, "visions") == 1 and n.fake.query_would_start("bridge_vision") for n in (host, g1, g2))
+    play(world, 1, "bridge_vision", 2)                          # the guest watches it: the task is done, the quest moves on
+    settle(world, 8000)
+    assert stage_of(g1, "visions") == 2 and g1.fake.items == {"vision_token": 1}
+    for n in (host, g2):
+        assert stage_of(n, "visions") == 1, "held at the task that waits for the scene"
+        assert n.fake.query_would_start("bridge_vision"), "the game can still start it"
+        assert held(n) == ["bridge_vision"] and n.fake.items == {}
+    play(world, 2, "bridge_vision", 2)
+    settle(world, 6000)
+    assert stage_of(g2, "visions") == 2 and stage_of(host, "visions") == 1 and held(host) == ["bridge_vision"]
+    play(world, 0, "bridge_vision", 2)
+    settle(world, 8000)
+    for n in (host, g1, g2):
+        assert stage_of(n, "visions") == 2 and n.fake.items == {"vision_token": 1} and held(n) == [], (n.slot, n.fake.items)
+        assert n.fake.gold == 120 and n.fake.rewards == {"visions": 2}, (n.slot, n.fake.gold, n.fake.rewards)
+        assert n.fake.views == {"bridge_vision": 1}
+    assert_converged(world, "quest waiting for a scene")
+    assert_clean(world)
+    print("PASS: held scene: a quest task that waits for the scene stays at that task in the game that has not seen it")
+
+
+def test_view_scene_that_starts_a_quest():
+    saves = view_saves()
+    world = make_world(85, saves=saves, loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    play(world, 0, "chapter_intro", 2)                          # starts chapter_000
+    host.fake.hand_in("chapter_000")
+    settle(world, 8000)
+    assert stage_of(host, "chapter_000") == "done"
+    for n in (g1, g2):
+        assert stage_of(n, "chapter_000") is None, "a quest the scene starts is not started or finished before the scene"
+        assert held(n) == ["chapter_intro"] and n.fake.would_start("chapter_intro")
+    play(world, 1, "chapter_intro", 2)
+    settle(world, 8000)
+    assert stage_of(g1, "chapter_000") == "done" and g1.fake.starts.count(("chapter_000", 0)) == 1
+    assert stage_of(g2, "chapter_000") is None
+    play(world, 2, "chapter_intro", 2)
+    settle(world, 8000)
+    for n in (host, g1, g2):
+        assert stage_of(n, "chapter_000") == "done" and n.fake.starts.count(("chapter_000", 0)) == 1, (n.slot, n.fake.starts)
+        assert n.fake.gold == 110 and n.fake.rewards == {"chapter_000": 1}, (n.slot, n.fake.gold, n.fake.rewards)
+    assert_converged(world, "scene that starts a quest")
+    assert_clean(world)
+    print("PASS: held scene: a quest the scene starts is not started, finished or restarted behind the scene's back")
+
+
+def test_view_night_scene():
+    world = make_world(86, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    play(world, 2, "night_scene", 2)
+    settle(world, 6000)
+    for n in (host, g1):
+        assert n.fake.would_start("night_scene", sleeping=True) and not n.fake.would_start("night_scene"), "offered when the player sleeps"
+        assert held(n) == ["night_scene"] and n.fake.removals == 1
+    play(world, 0, "night_scene", 2)
+    play(world, 1, "night_scene", 2)
+    settle(world, 6000)
+    assert all(n.fake.removals == 1 and n.fake.views == {"night_scene": 1} and held(n) == [] for n in (host, g1, g2))
+    assert_clean(world)
+    print("PASS: held scene: a scene played when the player sleeps is offered at night to the players who did not see it")
+
+
+def test_view_falls_back_to_the_silent_route():
+    # Scenes that cannot be shown safely are applied silently, as before, and the reason is logged. Played by the host.
+    cases = [("manual_scene", "hand_gift", "nothing the game arms"), ("or_scene", "or_gift", "cannot be held"),
+             ("unknown_stage_scene", "blind_gift", "stage nobody can tell"), ("repeat_scene", None, "repeats it anyway"),
+             ("upgrade_the_saturday_market_plaza", None, "cannot be built twice"),
+             ("inverted_scene", "inv_gift", "cannot be held"), ("fact_false_scene", "fact_gift", "cannot be held")]
+    for scene, gift, reason in cases:
+        world = make_world(87, saves=view_saves(), loss=0.05, jitter=30)
+        wait_ready(world)
+        settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+        host, g1, g2 = nodes(world)
+        play(world, 0, scene, 2)
+        settle(world, 8000)
+        for n in (g1, g2):
+            f = n.fake
+            assert scene in f.history and held(n) == [] and f.views == {}, (scene, n.slot, held(n))
+            assert (scene == "repeat_scene" or not f.would_start(scene)) and f.scene_struct(scene).can_repeat is (scene == "repeat_scene")
+            if gift:
+                assert f.items.get(gift) == 1, (scene, f.items)
+            assert any(reason in why for why in n.debug()["why"].values()), (scene, n.debug()["why"])
+        assert_converged(world, scene)
+        assert_clean(world)
+    # The story mode is off (the host's setting): a scene that needs it is never offered, so it is applied silently.
+    world = make_world(88, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    for n in (host, g1, g2):
+        n.interp.globals["story_enabled"] = False
+    play(world, 0, "story_mode_scene", 2)
+    settle(world, 8000)
+    assert all("story_mode_scene" in n.fake.history and held(n) == [] for n in (g1, g2))
+    print("PASS: held scene: a scene that cannot be shown safely (hand-made trigger, unknown quest step, repeatable, ...) is applied silently, with the reason logged")
+
+
+def test_view_player_ahead_of_the_scene():
+    world = make_world(89, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    world.net.partition(0, 2)
+    g2.fake.active["dragon"]["current_stage"] = 1                # this player went on without the scene
+    play(world, 0, "dragon_day2", 2)
+    settle(world, 6000)
+    world.net.partition(0, 2, False)
+    settle(world, 14000)
+    assert held(g1) == ["dragon_day2"]
+    f = g2.fake
+    assert "dragon_day2" in f.history and held(g2) == [] and not f.would_start("dragon_day2")
+    assert f.items == {"scale": 1} and f.ari["free_baths"] == 1, "no scene to wait for: its gifts are paid at once"
+    assert any("past the quest step" in why for why in g2.debug()["why"].values())
+    assert_clean(world)
+    print("PASS: held scene: a player who is already past the scene's quest step gets it silently instead of a second advance")
+
+
+def test_view_nobody_waits_for_ever():
+    world = make_world(90, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    play(world, 1, "dragon_day2", 2)
+    settle(world, 6000)
+    assert held(host) == ["dragon_day2"] and stage_of(host, "dragon") == 0
+    for f in (host.fake, g2.fake):
+        f.day += 3
+    settle(world, 3000)
+    assert held(host) == ["dragon_day2"], "three days are not enough"
+    for f in (host.fake, g2.fake):
+        f.day += 5                                               # eight days since the scene was applied
+    settle(world, 6000)
+    for n in (host, g2):
+        f = n.fake
+        assert held(n) == [] and not f.would_start("dragon_day2") and f.scene_struct("dragon_day2").can_repeat is False
+        assert f.items == {"scale": 1} and f.ari["free_baths"] == 1, "given up: the gifts are paid"
+        assert stage_of(n, "dragon") == 1, "the quest is no longer held"
+        assert f.gold == 110 and f.rewards == {"dragon": 1} and f.views == {}, (f.gold, f.rewards)
+        assert any("not watched within" in why for why in n.debug()["why"].values())
+    assert_converged(world, "patience")
+    assert_clean(world)
+    print("PASS: held scene: a scene nobody watches is given up after seven days; the quest and the gifts are released")
+
+
+def test_view_scene_already_running_when_it_arrives():
+    world = make_world(91, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+    host, g1, g2 = nodes(world)
+    g2.fake.scene_running = True                                 # the guest is watching it itself when the host's news arrives
+    g2.fake.active_scene = "dragon_day2"
+    world.run(1000)
+    play(world, 0, "dragon_day2", 1)
+    world.run(3000)
+    assert "dragon_day2" not in g2.fake.history and held(g2) == [], "nothing is applied to a game while its scene runs"
+    g2.fake.watch("dragon_day2")
+    g2.fake.scene_running = False
+    g2.fake.active_scene = None
+    settle(world, 8000)
+    assert views_of(g2) == {"dragon_day2": 1} and g2.fake.removals == 1 and g2.fake.items == {"scale": 1} and held(g2) == []
+    assert stage_of(g2, "dragon") == 1 and g2.fake.gold == 110
+    assert_held_in(g1, "dragon_day2", "dragon", 0)
+    assert_clean(world)
+    print("PASS: held scene: a player already in the scene when the news arrives sees it once and gets nothing twice")
+
+
+def test_view_many_scenes_and_the_limit():
+    # More scenes wait than the limit allows: the rest are applied silently. (Eight at most, so that no quest is held by a crowd.)
+    for i in range(10):
+        sf.SCENES["x_scene_%d" % i] = dict(target=sf.T_MAIN, trigger=True, items=[("x_gift_%d" % i, 1)])
+        sf.WORLD_SCENES.add("x_scene_%d" % i)
+    try:
+        world = make_world(92, saves=view_saves(), loss=0.0)
+        wait_ready(world)
+        settle(world, 3000)                                          # a pass has run: the rewards ledger knows the starting levels
+        host, g1, g2 = nodes(world)
+        for i in range(10):
+            play(world, 0, "x_scene_%d" % i, 1)
+        settle(world, 25000)
+        for n in (g1, g2):
+            assert len(held(n)) == 8, held(n)
+            silent = [i for i in range(10) if "x_scene_%d" % i not in held(n)]
+            assert len(silent) == 2 and all(n.fake.items.get("x_gift_%d" % i) == 1 for i in silent), n.fake.items
+            assert all("x_scene_%d" % i in n.fake.history for i in range(10))
+        assert_clean(world)
+    finally:
+        for i in range(10):
+            sf.SCENES.pop("x_scene_%d" % i, None)
+            sf.WORLD_SCENES.discard("x_scene_%d" % i)
+    print("PASS: held scene: at most eight scenes wait at a time; the rest are applied silently")
+
+
+
+def test_view_record_replaced_and_world_left():
+    world = make_world(93, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)
+    host, g1, g2 = nodes(world)
+    play(world, 1, "dragon_day2", 2)
+    settle(world, 6000)
+    assert held(g2) == ["dragon_day2"] and g2.fake.scene_struct("dragon_day2").can_repeat is True
+    # The progress record of an older save replaces the history (docs/SYNC-PROGRESS.md): the scene is no longer in it. Nothing
+    # is paid for the scene that was held (it was not watched).
+    g2.fake.history.remove("dragon_day2")
+    settle(world, 3000)
+    assert g2.fake.items == {} and g2.fake.ari["free_baths"] == 0 and g2.debug()["stats"]["silent"] == 0
+    assert held(g2) == ["dragon_day2"], "the mirror still has the scene: it is held again, as for any game that has not seen it"
+    # Leaving the world (a new event stream): the game's data is clean again for the next world.
+    assert held(host) == ["dragon_day2"] and host.fake.scene_struct("dragon_day2").can_repeat is True
+    host.call("__mistrimulti_story_reset", host.rt["story"])
+    assert host.fake.scene_struct("dragon_day2").can_repeat is False and held(host) == []
+    print("PASS: held scene: a record that no longer holds the scene pays nothing; leaving the world switches every scene off")
+
+
+def test_view_requirements_the_mirror_cannot_break():
+    # A scene that needs a world fact to be true (the mirror only makes facts true) can be held.
+    world = make_world(94, saves=view_saves(), loss=0.05, jitter=30)
+    wait_ready(world)
+    settle(world, 3000)
+    host, g1, g2 = nodes(world)
+    play(world, 0, "fact_true_scene", 2)
+    settle(world, 6000)
+    assert held(g1) == ["fact_true_scene"] and held(g2) == ["fact_true_scene"], (held(g1), held(g2))
+    play(world, 1, "fact_true_scene", 1)
+    settle(world, 4000)
+    assert held(g1) == [] and held(g2) == ["fact_true_scene"]
+    assert_clean(world)
+    print("PASS: held scene: a scene that needs a world fact to be true is held like any other")
 
 
 if __name__ == "__main__":
