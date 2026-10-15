@@ -155,7 +155,13 @@ class EventLayer:
         else:
             if len(ev.pending_ids) >= PENDING_LIMIT:
                 return None
-            if not self._ev_push("~q", d, 0, ev.host_stream):
+            # A request is bound to the host session it is made in. Until this guest has seen the host's stream it
+            # could not say which session that is, and a request without it would also be applied by a later host
+            # session (exactly-once across a host restart).
+            host = self._ev_stream_of(0)
+            if host == "" or host != ev.host_stream:
+                return None
+            if not self._ev_push("~q", d, 0, host):
                 return None
             ev.pending[rid] = json.loads(stringify(d))
             ev.pending_ids.append(rid)

@@ -205,6 +205,16 @@ class World:
 
     def kill_helper(self, slot):
         process = self.processes.pop(slot)
+        if self.helper.name.endswith(".exe") and not ON_WINDOWS:
+            # Under Wine a SIGKILLed process leaves its UDP port bound inside wineserver (for 30 s and more under load),
+            # so the restarted helper cannot bind it, exits with code 3 and the new game runs on the dead helper's
+            # stale files. Ask for the normal exit, which closes the socket; the game side sees the same silence.
+            (self.bridge(slot) / "stop.flag").write_text("stop")
+            try:
+                process.wait(timeout=10)
+                return
+            except subprocess.TimeoutExpired:
+                pass
         process.kill()
         process.wait(timeout=10)
 
@@ -218,6 +228,8 @@ class World:
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             started = time.monotonic()
+            for slot, process in self.processes.items():
+                assert process.poll() is None, f"the helper of slot {slot} exited with code {process.returncode}"
             for game in list(self.games.values()):
                 game.bridge_tick()
             if until is not None and until():

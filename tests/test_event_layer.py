@@ -446,6 +446,26 @@ def scenario_big_blob(kind, seed=8):
     return f"100 KB and 256 KB blobs exact under 5% loss in {elapsed:.1f} s simulated; oversize refused"
 
 
+def scenario_unbound_request(kind, seed=12):
+    """A guest that has not seen the host's stream yet cannot make a request: one without a host session would also
+    be applied by a restarted host (the original failure: requests applied twice across a host restart)."""
+    world = World(seed, impls(kind, 3))
+    ledger = Ledger()
+    attach(world, ledger, {"all": {"traffic": False}})
+    world.net.block(0, 1)                  # the host's frames do not reach guest 1; its own reach the host
+    world.run(3000)
+    guest = world.games[1].feature
+    assert guest.request(3) is None, "a request was accepted before the host's stream was known"
+    assert world.games[1].node.call("mistrimulti_event_requests_pending") == 0
+    world.net.block(0, 1, False)
+    world.run(3000)
+    rid = guest.request(3)
+    assert rid is not None, "no request after the host's stream became known"
+    world.run(3000)
+    assert ledger.applied.get(rid) == 1 and ledger.replies.get(rid) == ["ok"]
+    return "a guest that has not seen the host's stream makes no request; with it, requests are bound to that host session"
+
+
 def scenario_slot_reuse(kind, seed=9):
     world = World(seed, impls(kind, 3))
     ledger = Ledger()
@@ -493,6 +513,7 @@ def run_scenarios(kind, quick):
         ("stall", lambda: scenario_stall(kind)),
         ("big blob", lambda: scenario_big_blob(kind)),
         ("slot reuse", lambda: scenario_slot_reuse(kind)),
+        ("unbound request", lambda: scenario_unbound_request(kind)),
     ]
     for name, fn in plan:
         started = time.monotonic()
