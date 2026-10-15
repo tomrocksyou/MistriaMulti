@@ -176,6 +176,7 @@ function mistrimulti_tick() {
     mistrimulti_character_tick();
     mistrimulti_guestsave_tick();
     mistrimulti_drops_frame(); // every frame: the game's item pickup is checked against the host's claims
+    mistrimulti_map_tick(); // keeps the other players' markers moving while the map menu is open
     if (r.ticks mod 3 != 0) return; // 20 Hz bridge; actors animate at the game frame rate.
     // A room change is settled once the location and the engine room stayed the same for a second: nothing is created
     // (other players, shared items, farm nodes) while the game is still tearing down the old room or building the new one.

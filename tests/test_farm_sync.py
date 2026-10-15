@@ -83,6 +83,8 @@ def make_prototypes():
     return protos
 
 
+FX = {"tool_fx/chop": S(damaged=S(node_trauma=0.7, tree=gml.GArray([S(node_trauma=0.1 * (i + 1)) for i in range(5)]))),
+      "tool_fx/pick": S(damaged=S(node_trauma=0.9))}
 PROTOS = make_prototypes()
 ITEM_PROTOS = gml.GArray()
 for _i, _name in enumerate(ITEMS):
@@ -198,6 +200,7 @@ class Engine:
         self.grids = [Grid(self, 0, W), Grid(self, 1, TOWN)]
         self.node = None
         self.calls = []
+        self.shakes = []        # (kind, trauma) of every node shake the GML asked for
 
     # -- helpers for the tests --
     def put(self, loc, name, x, y, ctx=None, **fields):
@@ -388,6 +391,10 @@ class Engine:
             "erase_object_node_by_parent": lambda grid, node: e.grids[grid["location_id"]].erase(node),
             "erase_object_renderer": lambda node: node.__setitem__("renderer", None),
             "set_collision_on_node": lambda *a: None,
+            # NodeRendererUtils.gml: the shake of a node's renderer; the fx tables of Chop.gml / Pick.gml (values are made up)
+            "traumatize": lambda r, amount: e.shakes.append(("t", amount)),
+            "rot_traumatize": lambda r, amount: e.shakes.append(("rot", amount)),
+            "fiddle_get": lambda key: FX[key],
             "can_interact": self.can_interact, "interact": self.interact,
             "chop_node": self.chop_node, "pick_node": self.pick_node, "shovel_node": self.shovel_node,
             "has_flag": lambda v, f: (v & f) == f, "instance_exists": lambda v: v is not None,
@@ -725,6 +732,75 @@ def test_guest_tools():
           "bad tool / reach / charging refused")
 
 
+def test_hit_shake():
+    world = setup_world(41, loss=0.04, jitter=40)
+    host, g1, g2 = (world.games[i].node for i in range(3))
+    world.run(5000)
+    place(world.games[1], 5, 19)
+    # A guest's axe on the oak (stage 4, hp 8 -> 6): the host's and the other guest's copies shake with the table of the
+    # oak's stage; the swinger's own game does it in chop_node (here a stub), and nobody gets items or stamina.
+    swing(world.games[1], "axe", [(4, 16)])
+    world.run(3000)
+    assert host.engine.at(0, 2, 14)["hitpoints"] == 6
+    assert host.engine.shakes == [("rot", 0.5)] and g2.engine.shakes == [("rot", 0.5)], (host.engine.shakes, g2.engine.shakes)
+    assert g1.engine.shakes == [], "the swinger's copy must not shake twice"
+    assert host.engine.inventory == {} and g2.engine.inventory == {} and g2.engine.stamina == 0
+    # The same hit again on a stump (hp 4 -> 2) and a rock (hp 8 -> 5): the plain shake of each table.
+    place(world.games[1], 9, 19)
+    swing(world.games[1], "axe", [(8, 16)])
+    place(world.games[1], 17, 9)
+    swing(world.games[1], "pickaxe_gold", [(16, 6)])
+    world.run(3000)
+    assert host.engine.at(0, 8, 16)["hitpoints"] == 2 and host.engine.at(0, 16, 6)["hitpoints"] == 5
+    assert host.engine.shakes == [("rot", 0.5), ("t", 0.7), ("t", 0.9)], host.engine.shakes
+    assert g2.engine.shakes == host.engine.shakes, g2.engine.shakes
+    # The blow that fells or breaks the node removes it without a shake (and without an item on the others).
+    before = (len(host.engine.shakes), len(g2.engine.shakes))
+    for _ in range(3):
+        next_swing(world, world.games[1])
+        place(world.games[1], 5, 19)
+        swing(world.games[1], "axe", [(4, 16)])
+    world.run(3000)
+    assert host.engine.at(0, 2, 14) is None and g2.engine.at(0, 2, 14) is None
+    assert len(host.engine.shakes) == before[0] + 2 and len(g2.engine.shakes) == before[1] + 2, "only the non-lethal hits shake"
+    assert host.engine.inventory == {} and g2.engine.inventory == {}
+    # A guest standing in the town has no renderer for the farm's nodes: nothing to shake there.
+    g2.engine.enter(1)
+    n = len(g2.engine.shakes)
+    place(world.games[1], 17, 9)
+    next_swing(world, world.games[1])
+    swing(world.games[1], "pickaxe_gold", [(16, 6)])
+    world.run(3000)
+    assert host.engine.at(0, 16, 6)["hitpoints"] == 2 and len(g2.engine.shakes) == n
+    # A late joiner's snapshot of damaged nodes does not shake them.
+    g2.engine.enter(0)
+    g1.engine.shakes.clear()
+    for loc in (0, 1):
+        old = g1.engine.grids[loc]
+        for node in old.nodes():
+            old.erase(node)
+    populate(g1.engine)
+    g1.engine.enter(0)
+    g1.call("mistrimulti_events_reset")
+    world.run(12000)
+    assert g1.engine.at(0, 16, 6)["hitpoints"] == 2 and g1.engine.shakes == [], g1.engine.shakes
+    # A node with no hitpoints left is going away, not being hit: the helper does not shake it (and a rise does not either).
+    ls = host.rt["farm"]["locs"]["0"]
+    rock = host.engine.at(0, 16, 6)
+    n = len(host.engine.shakes)
+    rock["hitpoints"] = 0
+    host.call("mistrimulti_farm_hit_shake", ls, rock, CAT["Rock"], 5)
+    rock["hitpoints"] = 2
+    host.call("mistrimulti_farm_hit_shake", ls, rock, CAT["Rock"], 1)
+    assert len(host.engine.shakes) == n
+    host.call("mistrimulti_farm_hit_shake", ls, rock, CAT["Rock"], 5)
+    assert len(host.engine.shakes) == n + 1
+    assert_same(world, "after the hits")
+    assert_clean(world)
+    print("PASS: hit shake: another player's non-lethal hit on a tree, stump or rock shakes it (host and guests), "
+          "no drops, no double shake for the swinger, none when not in the room or on a snapshot")
+
+
 def test_guest_edits():
     world = setup_world(35, loss=0.06, dup=0.04, jitter=50)
     host, g1, g2 = (world.games[i].node for i in range(3))
@@ -943,6 +1019,7 @@ if __name__ == "__main__":
     test_host_changes()
     test_guest_harvest()
     test_guest_tools()
+    test_hit_shake()
     test_guest_edits()
     test_conflicts()
     test_rejoin_and_gap()
