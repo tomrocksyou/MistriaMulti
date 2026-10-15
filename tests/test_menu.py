@@ -649,7 +649,12 @@ def test_texts_and_keys():
     key = env.interp.call("mistrimulti_menu_t", "hello")
     assert env.local(key) == "hello"
     assert env.local("mistrimulti/multiplayer") == "Multiplayer" and env.local("misc_local/cancel") == "misc_local/cancel"
-    print("PASS: menu: dynamic texts get their own keys, are bounded, and other keys are left to the game")
+    # The popup buttons are about 97 px wide (the mod widens them to the popup, but the game's text does not wrap): short labels.
+    for key in ("mistrimulti/singleplayer", "mistrimulti/multiplayer", "mistrimulti/continue_world", "mistrimulti/new_world",
+                "mistrimulti/opt_hearts_own", "mistrimulti/opt_hearts_shared"):
+        assert 0 < len(env.local(key)) <= 18, (key, env.local(key))
+    assert env.local("mistrimulti/continue_world") == "Continue world" and env.local("mistrimulti/new_world") == "New world"
+    print("PASS: menu: dynamic texts get their own keys, are bounded, other keys are left to the game, and the popup button labels are short")
 
 
 def test_failure_never_reaches_the_game():
@@ -682,7 +687,7 @@ def badge(env):
 
 def shown(env):
     """The badge as the player sees it: (text, colour) of the visible coloured node, or None."""
-    nodes = [n for n in env.anchor.nodes if not n["freed"] and not n["stale"] and n["alpha"] == 1 and n["z"] == 900 and n["layer"] == LAYERS["Hud"]]
+    nodes = [n for n in env.anchor.nodes if not n["freed"] and not n["stale"] and n["alpha"] == 1 and n["z"] == 900 and n["layer"] == LAYERS["Popup"]]
     assert len(nodes) <= 1, nodes
     return (nodes[0]["text"], nodes[0]["color"]) if nodes else None
 
@@ -697,6 +702,7 @@ def test_badge():
     assert b["text"].startswith("Multiplayer: Idle") and b["level"] == "idle", b
     t, c = shown(env)
     assert t.startswith("Multiplayer: Idle") and c == AMBER, (t, c)
+    assert "helper not running" not in t
     # no launcher at all: Offline with the reason, and a first log line says why
     env.files.pop(f"{MOD}/menu/status.json")
     b = badge(env)
@@ -717,7 +723,7 @@ def test_badge():
     # a hosting session: Online only while the helper's own heartbeat moves
     env.files[f"{MOD}/control.json"] = json.dumps({"enabled": True, "mode": "host", "id": 0, "bridge": MOD + "/bridge_0"})
     b = badge(env)
-    assert b["text"] == "Multiplayer: Offline - helper not running" and not b["online"], b
+    assert b["text"] == "Multiplayer: Starting..." and not b["online"] and b["level"] == "idle", b    # no heartbeat yet: not an error
     for i in range(3):
         env.files[f"{MOD}/bridge_0/status.json"] = json.dumps({"running": True, "heartbeat": 1000 + i})
         env.frames(1)
@@ -728,10 +734,10 @@ def test_badge():
     env.us += 4_000_000                                      # the helper's heartbeat stops
     env.launcher.publish()
     b = badge(env)
-    assert b["text"] == "Multiplayer: Offline - helper not running", b
+    assert b["text"] == "Multiplayer: Offline - helper stopped" and b["why"], b
     env.files[f"{MOD}/control.json"] = json.dumps({"enabled": False, "mode": "idle", "id": 0, "bridge": ""})
     env.launcher.publish()
-    assert badge(env)["level"] == "idle"
+    assert badge(env)["level"] == "idle" and badge(env)["text"] == "Multiplayer: Idle - ready"
     # the launcher stopped answering
     env.us += 5_000_000
     assert badge(env)["text"] == "Multiplayer: Offline - launcher stopped"
@@ -744,11 +750,64 @@ def test_badge():
     print("PASS: menu: the badge says Offline (with the reason), Idle or Online in red / amber / green, and logs every change of its text with the reason")
 
 
+def world_runtime(env, mode, beat, mask):
+    """The runtime as MistriMultiBoot.gml's tick leaves it: helper status.json read, heartbeat seen, peer mask."""
+    env.rt.update(enabled=True, mode=mode, status=GStruct(running=True, mask=mask, heartbeat=beat), status_heartbeat=beat,
+                  status_seen_at=env.us, mask=mask)
+
+
+def test_badge_in_world():
+    """In a multiplayer world the badge follows the signals the event layer uses (heartbeat + peer mask), not control.json."""
+    env = make()
+    env.launcher.publish()
+    # control.json says nothing useful (no session file at all) yet both players play: Online, never 'helper not running'
+    world_runtime(env, "host", 7, 0b11)
+    env.frames(70)
+    assert shown(env)[0] == "Multiplayer: Online (hosting)" and shown(env)[1] == GREEN, shown(env)
+    world_runtime(env, "join", 8, 0b11)
+    env.frames(70)
+    assert shown(env) == ("Multiplayer: Online (joined)", GREEN), shown(env)
+    assert any("Badge: Multiplayer: Online (joined)" in t and "heartbeat 8" in t and "mask 3" in t for k, t in env.logs), env.logs
+    # a guest that does not see the host yet is not Online
+    world_runtime(env, "join", 9, 0b10)
+    env.frames(70)
+    assert shown(env) == ("Multiplayer: Joining the host...", AMBER), shown(env)
+    # a heartbeat that stopped moving: Offline with a plain reason; the world coming back flips it again
+    world_runtime(env, "join", 9, 0b11)
+    env.us += 4_000_000
+    env.frames(70)
+    assert shown(env) == ("Multiplayer: Offline - connection lost", RED), shown(env)
+    world_runtime(env, "host", 12, 0b01)
+    env.frames(70)
+    assert shown(env)[0] == "Multiplayer: Online (hosting)"
+    # the runtime has not read the helper yet (first second of the world)
+    env.rt.update(status=None, status_seen_at=0, status_heartbeat=-1)
+    env.frames(70)
+    assert shown(env)[0] == "Multiplayer: Connecting..."
+    # every text change was logged with its reason
+    texts = [t for k, t in env.logs if t.startswith("Badge: ")]
+    assert len(texts) >= 6 and all("(" in t and "[" in t for t in texts), texts
+    # position: above the game's copyright line on the title screen, the plain corner in a world
+    env = make()
+    env.rt.update(enabled=False)
+    env.interp.builtins["instance_exists"] = lambda o: o != "obj_ari"
+    env.frames(3)
+    main = [n for n in env.anchor.nodes if n["z"] == 900][0]
+    assert main["pos"][1] <= -14, main["pos"]
+    env.interp.builtins["instance_exists"] = lambda o: True
+    env.frames(3)
+    main = [n for n in env.anchor.nodes if n["z"] == 900 and not n["freed"]][0]
+    back = [n for n in env.anchor.nodes if n["z"] == 901 and not n["freed"]][0]
+    assert main["pos"][1] == -4 and back["pos"] == (main["pos"][0] + 1, main["pos"][1] + 1), (main["pos"], back["pos"])
+    print("PASS: menu: in a world the badge reads the event layer's heartbeat and peer mask (Online hosting / joined), is never stale, "
+          "and sits above the title screen's copyright line")
+
+
 def test_badge_on_screen_is_robust():
     env = make()
     env.frames(5)
     assert shown(env) is not None
-    # the nodes: one coloured text and a black copy behind it, bottom right on the HUD layer, in the same text
+    # the nodes: one coloured text and a black copy behind it, bottom right on the Popup layer (above the HUD and the toolbar), in the same text
     mains = [n for n in env.anchor.nodes if n["z"] == 900]
     backs = [n for n in env.anchor.nodes if n["z"] == 901]
     assert len(mains) == len(backs) == 1 and backs[0]["text"] == mains[0]["text"] and backs[0]["color"] == 0
@@ -936,7 +995,7 @@ def e2e(launcher, helper, fake):
 ALL = [test_unavailable_launcher, test_host_flow, test_host_password_and_cancel, test_join_flow, test_join_password_and_room,
        test_typed_address_and_errors, test_cancel_and_timeouts, test_commands_are_queued_in_order, test_refresh_and_scan_failure, test_hostile_status_file,
        test_title_entered_stops_sessions, test_texts_and_keys, test_failure_never_reaches_the_game, test_badge,
-       test_badge_on_screen_is_robust]
+       test_badge_in_world, test_badge_on_screen_is_robust]
 
 if __name__ == "__main__":
     only = [n for n in os.environ.get("ONLY", "").split(",") if n]
