@@ -1,4 +1,4 @@
-# Mines sync: shared run and floors, monsters, rocks, chests and ladders
+# Mines sync: shared run and floors, monsters (health and movement), rocks, chests and ladders
 
 `mod/mistrimulti/gml/MistriMultiDungeon.gml`, on the event layer (`docs/EVENT-LAYER.md`). Tests: `tests/test_dungeon.py`
 (about 20 s, no ports) and `tests/mutate_dungeon.py`. Nothing in this document has run in the real game yet; the logic and
@@ -28,7 +28,7 @@ still has to be checked there. The Farm package leaves the mines out on purpose 
 | --- | --- |
 | Same layout for everyone on a floor | **Both.** A host-chosen run seed feeds the game's own generator (`random_set_seed` in `dungeon.room_build_begin`, per (run, floor)); the first game on a floor then reports what was actually built, the host keeps it as the **floor record**, and every later arrival reconciles with the record. The seed makes the reconciliation small; the record makes it correct when the generator is not deterministic (perks and the player's collection change what it rolls). |
 | Where the floor record lives | In the **host's memory** (not in the host's room): it works while the host is on another floor or at home. A guest may found a floor; the host stores and arbitrates. |
-| Movement of monsters | **Each game simulates the copy that chases its own player.** The AI cannot be shared (it reads `obj_ari`, and the host is often elsewhere); streaming one host-simulated copy would need all eleven species' state machines puppeted. Other players are not seen by the AI (limitation below). |
+| Movement of monsters | **One game per floor decides where they are** (the floor's authority: the host if it is on the floor, otherwise the lowest slot there). Its game runs the monsters' AI as ever and streams their place and animation in its peer frame at 10 Hz; every other game keeps its own copies, with their own AI running, and puts each one where the authority has it. A copy that is aggro on a follower's own player shows its own animation and strikes from where it is shown (section "Monster movement"). |
 | Health, death | **Host-owned.** Every hit is reported, the host adds them up, and a game's copy never dies by itself. |
 | Who is credited for a kill, drops, xp | **The killer: the player whose report takes the host's health to zero or below** (last hit, decided by the host in arrival order). That game's copy dies the normal way, so the drops, the essence, the combat xp, the kill count and the `monsters_killed` quest counters are that player's own, once. Every other game removes its copy without drops (`skip_destroy_logic`), but counts its share of the ladder score. Not pooled: the drops are physical items created in one game's room, and xp is a local stat. |
 | Rocks, ore, chests, forageables, dig sites | **Host-owned, like the Farm package's nodes.** A swing or press that would yield something is asked of the host first; one game gets the yield. Hit points are pooled. Anything else that disappears (a bomb, a sword on a pot) is reported afterwards and removed everywhere. |
@@ -36,7 +36,7 @@ still has to be checked there. The Farm package leaves the mines out on purpose 
 | Elevator, depth record | Personal. Taking the elevator starts at any floor of the run that is going on; the best depth stays in each player's own record. |
 | How long a run lives | Until nobody has been in the mines for 5 s, or the day changes. Floors keep their state meanwhile (leave and come back, other players arrive later). The next entry gets a new seed, a new itinerary and untouched floors, as in the game. |
 | Different floors | Independent: a record per (run, floor). Players on different floors never see each other (the mines' room key carries the run and floor, `mistrimulti_room_key()`). |
-| Not shared | Side rooms (treasure, ritual), the arena floor, the seal and boss rooms, fish and bugs, wave spawns and anything spawned after the floor was built. The game's own rules apply there. |
+| Not shared | Side rooms (treasure, ritual), fish and bugs, summons (the sap's children) and anything spawned after the floor was built. The game's own rules apply there. The arena floor **is** shared (below); the seal, priestess and Seridia rooms have nothing to share but keep the run alive. |
 
 ## The run
 
@@ -49,7 +49,7 @@ unseeded itinerary is replaced by `create_dungeon_itinerary(count)` run again un
 (with `has_seen_arena_level_today` forced to false for the call and restored). The runner's side rooms stay as they were
 (they depend on the player's perks and are the player's own).
 
-`dungeon.room_build_begin` (event): if the floor is shareable (no side room, not the arena, not a special room, the run is
+`dungeon.room_build_begin` (event): if the floor is shareable (no side room, not a special room, the run is
 known and the host is reachable), `random_set_seed(hash(run seed, "floor:" + floor))`. `dungeon.floor_built` calls `randomize()`,
 so the game's own randomness resumes before anything else rolls.
 
@@ -109,7 +109,84 @@ result to everybody: { hp } or { dead, k }
   hook reports what the copy actually lost, not what was thrown at it.
 - **Health shown elsewhere.** Every copy follows the host's health: when another player wounds the monster your copy's health
   drops (no flinch, no damage number), and it dies when the host says so.
-- Monsters spawned after the floor was captured (the arena's waves, summons) are not in the record and are not shared.
+- Monsters spawned after the floor was captured (summons such as the sap's children) are not in the record and are not shared.
+
+## Monster movement (authority and followers)
+
+Until this part the only thing shared about monsters was their health. Now where they are comes from one game per floor.
+
+```text
+authority game (host if on the floor, else lowest slot there)      every other game on the floor
+  species AI runs as in the game, chasing its own player             species AI also runs (its own player, its own timers)
+  every 6 ticks: dm.m = [ [spawn x, spawn y, x, y, dir,             every frame, monster.step_end:
+      fsm state, image index, hidden, z], ... ] (max 40)               x, y  = eased between the last two samples
+  peer frame field dm  ------------ helper, host relay ------------>   dir, sprite (from the state), frame = the authority's
+                                                                       ... unless the copy is aggro on this game's own player
+```
+
+- **Election, with no message**: every live game puts `dm = { t, k }` in its peer frame (`k` is the floor key `run:floor`, `t` a counter,
+  moving 10 times a second on the authority and once a second on the others). Every game computes the authority from the frames
+  it sees: the lowest slot among itself (if it is `live` on the floor) and the peers whose frame says the same `k`, whose frame is
+  active, and whose counter changed in the last 4 s. The host is slot 0, so it wins whenever it is on the floor; a game that is
+  still loading its record is not live and is never elected; a game whose frame froze is dropped after 4 s, a game that left
+  the floor stops sending `dm` and is dropped at once. When the elected slot changes, followers forget their targets and
+  the old authority's copies go back to their own AI for the moment.
+- **Why the peer frame and not events.** A position is worth nothing a second later, and the reliable event layer re-sends
+  everything not yet acknowledged, in order, and counts against the 512-event queue. The peer frame is the latest-wins snapshot
+  the helper already moves 20 times a second to every player (and the host relays to the other guests), so a lost sample
+  is replaced by the next one 100 ms later and nothing queues up. It only goes to games that read the frame; games on other
+  floors ignore `dm` (its `k` is not theirs).
+- **Budget.** At most 40 monsters per frame, 9 small integers each (about 40 bytes of JSON, 1.6 KB at most) on top of the
+  frame's other fields. `mistrimulti_events_encode` already drops queued events to keep the whole frame under 16 KB, so a big
+  `dm` costs event throughput, never a lost frame. A floor with more than 40 monsters rotates through them (each is sent
+  every other frame at 80 monsters, and so on). Followers that have not heard of a copy for 2 s let its own AI run again.
+- **Followers**: `monster.step_end` (the hook the health code already uses) sets `x` and `y` of the copy each frame to the point
+  between where it was when the sample arrived and the sample (taking as long as the previous gap, 3 to 12 ticks; a jump of
+  more than 96 pixels snaps). Unless `aggro` (the copy is awake for this game's player), it also takes the authority's facing,
+  the sprite of the authority's state (`config.sprite_catalogue[state][cardinal]`, never a raw asset id from the network),
+  the animation frame whenever the sprite changes or a sample arrives, and the hidden flag (a mite under ground).
+- **Damage to a follower**: the copy keeps its own AI, so when it is awake for the follower's player it winds up and strikes
+  with its own animation, from the place where it is shown, and the game's own tarball hurts that player. Nothing is sent. The
+  authority's player is hurt by the authority's copy. A follower standing next to a monster the authority is chasing across
+  the room therefore gets hit by a copy that is already next to it, with the normal wind-up.
+- **Not copied**: projectiles and effects (a spirit's shot, a bat's sonic boom, sap children) are created by the AI of whichever
+  game's copy fires them, so they appear where the firing copy's own AI decides. A follower's copy that is awake for the
+  follower's player fires at the follower's player.
+- **Death**: unchanged. A killed copy leaves `d.mons` and `d.ikeys`, so it is no longer moved; the killer's copy dies the
+  game's way where it stands.
+
+## The arena floor
+
+The arena (`DungeonImpl.Enemy`, a floor that appears at most once a day) is not a wave fight in this build: its monsters are
+placed by `build_dungeon_room` from the ImplEnemy chance tiles like the others (including the "mini boss" spawn tiles, which only
+pick ordinary monster species), and the scene `arena` only closes the ladder and the reward chest and dims the lights;
+`Game` runs `arena_end` when `instance_number(par_monster)` reaches 0. So it needs no special code: it is shared like any other floor
+(`MISTRIMULTI_DG_ARENA`, true; set it to false to leave the arena to each game). One record, shared health, one killer per monster
+(drops, xp and the kill count to that player), and since every other game removes its copy without drops, every game's last
+monster disappears together and `arena_end` runs on each game. The reward chest is a node of the record: the first player to
+open it gets what is inside (the chest is opened for the others), as with the other chests.
+
+## Boss, seal and priestess floors
+
+Read from the scripts (1.0.8):
+
+- **There is no boss monster.** `MonsterId` has the same ordinary species everywhere (bat, cat, clod, enchantern, mimic, mite,
+  rock stack, sap, shroom, spirit, ...). The "mini boss" is a spawn tile type that picks one of those. Boss health, one kill
+  and shared encounters therefore are the monster rules above.
+- **Floors 20, 40, 60, 80 (the water, earth, fire and ruins seals), 90 (the priestess's quarters) and 100 (Seridia's chamber)** are
+  fixed rooms with a tablet and an altar (`obj_seal_tablet`, `obj_seal_altar`), quest items and `MIST` cutscenes. They have no
+  `build_dungeon_room` pass (`is_special_dungeon_room`) and no monsters. Their state is the quest log, the story flags and
+  `SEAL_INVENTORIES`, none of it a property of the room (the Story and Progress packages own quests and the seals are part of
+  the host save). So there is nothing for the mines code to record or reconcile there, and the cutscenes remain each player's
+  own.
+- **What did need fixing**: a game inside such a room is not "on a floor", so the host forgot it, and 5 s later (the empty-mine
+  rule) the run ended: a player reading the tablet for a minute came out to a new run, `here` on the next floor answered `stale`,
+  and every floor below was unshared for that player. Now the game tells the host, with `here` and `sp: true`, that it is in a
+  special room of the run: the host keeps it in `at[]` (no floor record), the run lives while anyone is there, and leaving the
+  mines from the room (or going down) updates it. A restarted host is told again and adopts the run.
+- **Different floors**: the same rules as any floors. A player in a seal room and a player on the floor above are on different
+  floors; each sees only the ghosts that are in their own room (the seal rooms have their own location ids, so two players in
+  the same seal room see each other as in any other room).
 
 ## Nodes
 
@@ -155,6 +232,8 @@ keeps a ladder at its own place (rare; the record says where the others go).
 | `dg_act` (request) | any game -> host | `o`: `here`, `man`, `hit`, `pick`, `dig`, `use`, `gone`, `lad` plus `run`, `f` (floor) and the fields of the operation. The host's own game uses the same path. |
 | result of `dg_act` | host -> everyone | Small: `{ ok, o, run, f, v, ... }` (monster key and health or death and killer; node cell and hit points or removal; ladder place). Applied by every game that is live on that floor; kept by games that are waiting for their record. The requester's own part (the engine action) runs from its reply. |
 | `dg_snap` | host -> one game | A slice of the floor record: `{ run, f, i, n, nd, mo, h? }` |
+| peer frame `dm` | every live game, in its own frame (not an event) | `{ t, k }`, and on the authority `a: 1, m: [[sx, sy, x, y, dir, state, frame, hidden, z], ...]` (at most 40). Followers check the array length, every entry (9 whole numbers in range) and the floor key; entries naming no copy are ignored, and only the elected authority's `m` is read. |
+| `here` with `sp: true` | any game -> host (request) | `{ run, seed, f, sp: true, rj }`: this game is in a special room of the run (no record). |
 
 Every field is checked by type, whole numbers and range before use: run and seed 1 to 2^31, floor 0 to 1000, cells 0 to 4000,
 health 1 to 100000, damage 1 to 5000 per report, 50 entries per slice, known object and monster names only. The host answers
@@ -170,7 +249,7 @@ trust level as the rest of the player data).
 | `dungeon.room_build_begin`, `dungeon.floor_built` (events) | Seed the generator for the floor, then restore the game's randomness; start asking the host. |
 | `dungeon.ladder_spawn` (guard) | One ladder, in the record's place. |
 | `combat.damage` (filter) | Note the hit and cap what a copy can lose. |
-| `monster.step_end` (event) | Report the health a copy lost. Hot path: the first checks are a struct lookup and a comparison. |
+| `monster.step_end` (event) | Report the health a copy lost; on a follower, move the copy to the authority's place. Hot path: the first checks are a struct lookup and a comparison. |
 | `tool.targets` (filter) | Take pickaxe and shovel swings at shared rocks and dig sites out of the swing and ask the host. |
 | `object.interact` (override) | Claim chest and forageable presses. |
 | `game.new_day` (event) | The host starts a new run. |
@@ -235,15 +314,40 @@ MMAPI hook pages. In order of risk:
     `build_dungeon_room` pass and static grids.
 15. **Cost:** capture and reconcile loop over all `obj_node_renderer` and `par_monster` instances once per arrival; the scan loops
     over at most 800 registered nodes every 10 frames; `monster.step_end` does one string, one struct lookup and one comparison
-    per monster per frame. Measure in a big floor.
-16. JSON numbers survive `json_stringify` / `json_parse` as whole numbers; `typeof(true)` is `"bool"` after `json_parse`.
+    per monster per frame, plus (followers) a second lookup and a few multiplications. The authority builds up to 40 entries every
+    6 ticks. Measure in a big floor.
+16. **`mon.x` / `mon.y` can be written from `monster.step_end`** and stay (the species' own `step` moved them earlier in the frame,
+    `movement_and_collide` moves from the new place next frame; the damage receiver copies its parent's position in its own step, so
+    the hurtbox lags the picture by one frame). Species with their own movement code (the mite snaps to a 16 px grid, jumps to the
+    player in `Windup`, sap and bat use `z` and projectiles) are overridden the same way; the ones that move in `Windup`/`Attack`
+    are overridden back each frame.
+17. **`par_monster` fields**: `aggro` (set in `step_begin`), `dir`, `image_index`, `sprite_index`, `z`, `draw_y_offset`,
+    `fsm.current_state_id()`, `config.sprite_catalogue[state][cardinal]`, `get_cardinal()`, `set_state_sprite(reset, state)` and
+    `calculate_flipper()` exist as in `par_monster.gml`; `spr_nothing` is an asset a mod can name; `inst[$ "name"]` works on
+    instances.
+18. **The 16 KB frame has room.** `dm` is at most about 1.7 KB, added after the frame's other fields and before the events are
+    fitted. The helper relays guest frames to the other guests unchanged (new fields included), and `mistrimulti_read_peers` keeps
+    unknown fields in `r.peers[i]`.
+19. **`par_monster.step_end` runs 60 times a second** (game step), so followers move the copy every step; the easing uses `r.ticks`
+    (the mod's 60 Hz tick count), which advances at the same rate.
+20. **Arena**: `Game`'s check (`instance_number(par_monster) == 0` and `obj_ari.is_in_normal_state()`) fires `arena_end` on every game
+    once its last copy is gone; a late joiner into a cleared arena reaches that state at once; the ladder (`obj_dungeon_ladder_down`
+    exists from the start, closed by the scene) and the locked reward chest (a Breakable with a chest, in the record as a node)
+    survive the reconcile. Not read in detail: `MIST` scene `arena` and `arena_end` are data, not GML.
+21. **Special rooms**: `dungeon.room_build_begin` is emitted for them (`on_dungeon_enter` runs for every dungeon room) with
+    `is_special_dungeon_room(room())` true, and `DUNGEON_RUNNER` stays set while inside and is `undefined` after
+    `on_dungeon_exit`, which is how leaving the mines from there is noticed.
+22. JSON numbers survive `json_stringify` / `json_parse` as whole numbers; `typeof(true)` is `"bool"` after `json_parse`.
 
 ## Known limitations
 
-- **Movement is not shared.** Each player sees their own copy of every monster, chasing them. A monster far from you on your
-  screen may be next to the other player on theirs. Other players are not targets for the AI. What is shared: health, death,
-  loot credit. To share movement the game would need a seam that lets the AI pick any player (a `monster.target` filter, with
-  the remote players' ghost positions) and a position stream; neither exists.
+- **Movement follows the authority's game, which simulates against the authority's player only.** The monsters chase the
+  authority's player; the other players are not targets of the AI, so a follower can run past a monster that never turns,
+  until it comes within the copy's aggro radius for the follower's own player (then the follower's copy wakes up and strikes
+  from where it is shown). Monsters that the authority's player is far from are idle in the authority's game and so idle
+  everywhere, unless a follower walks up to them. Projectiles are not shared (see above).
+- **Switching authority** (the host arrives on or leaves the floor, the authority leaves or freezes) moves the copies to the
+  new authority's places: a copy that is far away eases or snaps (96 pixels) to its place.
 - **Hit feedback**: when someone else wounds a monster you see its health change (damage numbers only for your own hits) and
   it does not flinch.
 - **The lethal blow lands one round trip late** (0.1 to 0.4 s; up to 50 ms more for the host). The monster stays at 1 health
@@ -255,15 +359,13 @@ MMAPI hook pages. In order of risk:
   presses above.** Pots, bombs and anything the hooks do not gate can be taken by two games in the same instant and pay twice.
 - **Window before "live"**: during the first round trip on a floor the game plays by its own rules (a monster may die locally
   and then come back from the record; a rock may be mined locally and then reappear).
-- **Seal rooms and bosses** (floors 20, 40, 60, 80, 90, 100; `rm_*_seal`, the priestess and Seridia rooms) are static special
-  rooms with scripted encounters (`MIST` scenes). They are not covered: each player plays them alone. A shared boss needs the
-  same treatment as a monster plus hooks into the scene scripts, which the catalog does not offer.
-- **The arena floor** (waves of monsters from a scene) and **side rooms** (treasure and ritual rooms, depending on perks) are
-  per player.
+- **Seal, priestess and Seridia rooms** have no encounter to share (see "Boss, seal and priestess floors"): each player's tablet
+  donations, altar items and cutscenes are their own, and the tablets' offerings are not shared. Only the run is kept alive.
+- **Side rooms** (treasure and ritual rooms, depending on perks) are per player.
 - **Fish and bugs** in the mines are per player.
 - **Perks that affect combat** (`GenerousInDefeat`, `Treasured`, damage perks) work for the player who owns them, on their own
   copy; the host's accounting uses the damage reported, not the host's perks.
-- **Damage taken** from monsters is local: your copy hurts you, not the other player.
+- **Damage taken** from monsters is local: the copy that is awake for your player, where you see it, hurts you; the authority's copy hurts the authority's player.
 - A hostile guest can report any damage up to 5000 per hit and claim any node on its floor. Reach and tool ownership are not
   checked.
 - Items dropped in the mines are not shared (they stay in the game that dropped them); see the Drops note above.
@@ -288,9 +390,17 @@ generator draws from the same `random_set_seed` the GML sets, so a missing or wr
 | unshared floors, different rooms | Side rooms, the arena, an unknown run, a lost host and a different GameMaker room leave the floor to the game |
 | hostile input | Two dozen forged and malformed requests, slices and results; no change, no errors; off-floor, absurd and fractional hits refused |
 | loss matrix | 15-25 % loss, 10-30 % duplication, a partition: every kill and every drop set exactly once, the same floor everywhere |
+| followers move with the authority | Three games under 5 % loss: the host (on the floor) is the authority everywhere; the monsters it walks end up within 8 pixels in the other two, with the authority's sprite and facing; the followers' own AI never moves a copy; frames stay under 16 KB |
+| authority election | Guests only: the lowest slot streams; the host arrives and takes over; the host leaves; the next one leaves; a game still loading its record is never the authority |
+| follower keeps local threats | A follower's player next to a copy: the copy faces and shows its own animation, strikes from where it is shown, stays on the authority's track; the other copies follow; the authority's player is not hurt |
+| stream budget and rotation | A floor of more than 40 monsters: a frame carries at most 40, rotation brings every monster along, inside the frame limit |
+| silent authority, hostile streams | 16 malformed entries and 8 malformed frames from the authority, a non-authority's claims: nothing moves, no errors; a partitioned authority is replaced within 5 s |
+| kills while following | A follower, another follower and the authority kill under 8 % loss and duplication: exactly one drop set per monster while copies are being moved |
+| arena floor | `DungeonImpl.Enemy` floors are a shared record; every monster killed once; the floor empties on every game |
+| special rooms | Players inside a seal room keep the run for 12 s (longer than the empty-mine time), then go down and share the next floor; leaving the mines from a seal room is noticed; a restarted host adopts the run of a guest that is inside one |
 
-`python3 tests/mutate_dungeon.py` breaks the GML in 21 ways (a copy that may die by itself, a remote kill that pays, nobody credited,
-no seeding, no reconcile, no replay of results, a run that never ends, unchecked ranges, ...) and fails if any test still passes.
+`python3 tests/mutate_dungeon.py` breaks the GML in 38 ways (a copy that may die by itself, a remote kill that pays, nobody credited,
+no seeding, no reconcile, no replay of results, a run that never ends, unchecked ranges, followers that do not move, a host that is not preferred, a frozen authority that is never replaced, an unbounded or non-rotating stream, an unshared arena, special rooms that are not announced, ...) and fails if any test still passes.
 
 The tests cannot show that GameMaker runs the GML like the interpreter, that the hooks behave as assumed above, or the frame time.
 
@@ -320,8 +430,21 @@ Two instances (host and guest), the same save, both with a few perks different i
     restart stay dead.
 14. Kill the guest's network for 15 s mid-fight; restore: the floor is brought up to date; with the host unreachable for longer
     the monsters become killable again.
-15. Floors 20, 40 (seal rooms), the arena floor, a treasure side room (with the perk): each player plays them alone and nothing
-    breaks.
-16. Frame time in a floor with many nodes during arrival and during a fight with 6 monsters.
-17. Fail-soft: break a call on purpose with the debug agent; after 40 errors the feature switches itself off and the mines play
+15. Same floor, host and guest, a few monsters awake: walk the guest to one monster that is chasing the host. On the guest's screen the
+    monster moves and animates about where the host sees it (a 0.1 s lag is normal); when the guest stands close, the monster turns,
+    winds up and strikes at the guest from where it is; the guest's hit takes health off for both. The
+    debug agent function `mistrimulti.dungeon` shows `au` (the authority slot: 0 while the host is on the floor) and `fol` (copies being followed).
+16. Different order: the guest goes down first (it is then the authority), the host arrives later (the host takes over within a
+    second; monsters do not teleport more than a few steps). The host leaves again, the guest streams once more. Kill the guest's
+    game with the host on the floor: the host is alone, the monsters keep going.
+17. A cave with many monsters (the arena, or a big floor): no visible stutter on the guest, no "update too large" notice (F8).
+18. Seal rooms (floors 20 and 40 need a deep run; use the elevator or the debug jump), the priestess's quarters and Seridia's chamber:
+    stand in the room for a minute in both games, read the tablet in one; take the ladder down together; the next floor is shared
+    (same layout, `my_run` equal on both). Leave the mines from inside the room and come back later: a new run.
+19. The arena floor (it appears once a day; the mines menu or the log shows it): both players enter, fight, kill the monsters; each
+    monster is killed once, the last one ends the fight on both screens (ladder opens, chest unlocks); only one player gets the
+    chest's content. If this misbehaves, set `MISTRIMULTI_DG_ARENA` to false in `MistriMultiDungeon.gml` to return to separate arenas.
+20. A treasure side room (with the perk): each player plays it alone and nothing breaks.
+21. Frame time in a floor with many nodes during arrival and during a fight with 6 monsters.
+22. Fail-soft: break a call on purpose with the debug agent; after 40 errors the feature switches itself off and the mines play
     as in the game.

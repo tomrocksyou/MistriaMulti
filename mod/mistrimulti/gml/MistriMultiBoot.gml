@@ -229,6 +229,7 @@ function mistrimulti_tick() {
             if (ma != undefined) { frame.ma = ma; break; }
         }
         frame.name = string(ARI.name);
+        mistrimulti_dungeon_frame(frame);
     }
     // The event layer adds as many queued events as fit within the helper's 16 KB frame. A game takes
     // part in events only while a world is loaded: on the title screen it would never acknowledge them.
