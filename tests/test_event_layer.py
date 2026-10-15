@@ -35,6 +35,7 @@ class Ledger:
         self.blobs_sent = {}       # blob key -> {"sha", "target", "stream", "slot"}
         self.blobs_seen = {}       # (receiver stream, blob key) -> count
         self.peer_events = []      # (receiver slot, peer slot, joined)
+        self.joined_at = {}        # (sender stream, peer stream) -> clock ms when the sender last saw that peer join
         self.born = {}             # stream -> simulated ms when its feature first ran
         self.wrong = []            # misdeliveries
 
@@ -88,6 +89,8 @@ class Feature:
 
     def on_peer(self, slot, joined, stream):
         self.ledger.peer_events.append((self.slot, slot, joined))
+        if joined:
+            self.ledger.joined_at[(self.stream(), stream)] = self.game.world.clock.ms
 
     def on_count(self, sender, data, ctx):
         assert self.slot == 0, "on_request ran on a guest"
@@ -264,7 +267,10 @@ def check_blobs(world, ledger, complete=True):
             if not wanted:
                 assert count == 0, f"blob {key} delivered to {stream}, which it was not meant for"
             elif complete and info["stream"] in live.values() and info["at"] >= ledger.born.get(stream, 0) + JOIN_MS \
+                    and info["at"] >= ledger.joined_at.get((info["stream"], stream), 0) \
                     and not any(isinstance(x, tuple) for x in ledger.pings_seen.get((stream, info["stream"]), [])):
+                # Events sent before the receiver became a participant of the sender are not delivered to it
+                # (docs/EVENT-LAYER.md, Participants): after a host restart a slow reconnect can take longer than JOIN_MS.
                 assert count == 1, f"blob {key} was not delivered to {stream}"
 
 
