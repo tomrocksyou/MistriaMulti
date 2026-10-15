@@ -13,12 +13,12 @@ Issues and bug reports are welcome. Your solo saves are kept separate and backed
 You need:
 - Fields of Mistria on Steam
 - [MOMI](https://github.com/Garethp/Mods-of-Mistria-Installer/releases) (the mod installer)
-- [Tailscale](https://tailscale.com/download), so you and your friends can reach each other (not needed on the same home network)
+- [Tailscale](https://tailscale.com/download), or Radmin VPN, or Hamachi so you and your friends can reach each other (not needed on the same home network)
 
 Then grab the latest download from **Releases** (on the right).
 
 **Windows**
-1. Unzip `MistriaMulti-<version>-Windows.zip` somewhere you'll keep it, like Documents.
+1. Unzip `MistriaMulti-<version>-Windows.zip` somewhere you'll keep it, like Documents or your desktop.
 2. With the game closed, run `Install-Mod.bat`.
 3. In MOMI, tick MistriaMulti and click Install.
 4. Open `MistriMulti.exe`, click **Steam setup...**, and paste the line into the game's Launch Options in Steam
@@ -27,7 +27,7 @@ Then grab the latest download from **Releases** (on the right).
 **Linux / Steam Deck**
 1. Unpack `MistriaMulti-<version>-Linux.tar.gz` (Steam Deck: in Desktop Mode).
 2. Close Steam and run `./install.sh` in that folder.
-3. In MOMI, tick MistriaMulti and click Install.
+3. In MOMI, tick MistriaMulti and click Install. (MOMI might try to find a .exe automatically in the selection box, i had that at least, just remove it and you should see the normal executable) 
 
 ## Playing
 
