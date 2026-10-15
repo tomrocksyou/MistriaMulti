@@ -1,0 +1,6 @@
+name = "mmprobe_saves"
+author = "MistriaMulti"
+version = "0.0.2"
+minInstallerVersion = "0.16.5"
+manifestVersion = 1
+requires_hooks = ["game.title_entered"]

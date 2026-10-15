@@ -22,6 +22,37 @@
    syscall argument, and SYSCALL clobbers RCX and R11. This is different from the
    normal System V userspace function-call convention.
 
+## Authentication
+
+`helper/include/auth.inc` holds the join handshake, HMAC-SHA256 (built on `linux/sha256.inc`, which both helpers include), the
+key store, the deny list, the token buckets and the guest state machine; `receive_fragment` in `core.inc` verifies a tag before it touches
+any state. Start with `host_proof` (host) and `guest_challenge` (guest), and compare them with `tests/mmauth.py`, which is the same
+protocol in a few dozen lines of Python. `docs/SECURITY.md` explains the design.
+
+## The Linux launcher and manager
+
+`linux/launcher.asm` and `linux/manager.asm` are the Linux twins of `launcher/launcher.asm` and the manager window; they use the
+same routine convention (`abi.inc`) over raw syscalls. The pieces:
+
+- `linux/sys.inc`: syscall wrappers (`sys_*` return -errno), the bounded string builder (`pb_start` / `pb_str` / `pb_int` /
+  `pb_end`), files and directories, UTC time stamps, `spawn` (fork + `PR_SET_PDEATHSIG` + dup2 + execve / PATH search).
+- `common/textutil.inc`: validators and parsers shared with the Windows build (`v_ipv4`, `v_room`, `a2i`, `wf_valid_name`...).
+- `linux/config.inc`: where the game keeps its files, and `launcher.cfg` reading (strict validation) and writing.
+- `linux/sha256.inc`: SHA-256 (the Windows build asks bcrypt). Follow `sha_block`: the big sigmas are written as nested rotates
+  to fit in three temporary registers.
+- `linux/net.inc`: the world download client, interface and Tailscale scan, discovery query.
+- `common/hmac.inc`, `common/worldauth.inc`, `common/worldserve.inc`: the authenticated world transfer shared by both systems
+  (HMAC-SHA256 on each program's own `sha256_raw`; the challenge and response, client half in `worldauth.inc`, host half in
+  `worldserve.inc`; the key comes from the helper's `world_<slot>.key`, see `docs/PROTOCOL.md`).
+
+## The in-game menu supervisor
+
+`linux/menu.inc` and `launcher/menu.inc` (Windows twin) are the part of the launchers that answers the game's Host / Join menu
+(`docs/SYNC-MENU.md`). Read `sv_poll` first: it runs about four times a second from the launcher's game-waiting loop
+(`disc_serve`), reads and deletes `menu/cmd.txt` (`sv_read_cmd`), validates it (`sv_valid_common`, `v_ipv4`) and calls `sv_host`,
+`sv_join`, `sv_scan_now` or `sess_stop`; `sv_join_step` watches the helper's own `status.json` for the host's WELCOME and then
+downloads the world; `sv_status_write` publishes `menu/status.json`. Standby is `menu_init`: it opens nothing.
+
 ## Memory and performance
 
 `helper/steam_windows.asm` and `helper/steam_linux.asm` load the installed game's

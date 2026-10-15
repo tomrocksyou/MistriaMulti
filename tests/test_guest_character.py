@@ -1,6 +1,6 @@
 """Verify a real, running guest's saved character and remote-player opacity.
 
-Requires MMAPI debug enabled before launching Join.bat, a loaded test world,
+Requires MMAPI debug enabled before launching Play.bat, a loaded test world,
 and a connected host. --reopen also exercises the automatic creator/reload
 path; press Continue in the game when the test asks.
 """

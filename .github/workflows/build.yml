@@ -6,14 +6,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y nasm binutils
+      - run: python3 scripts/lint-asm.py .
       - run: sh scripts/build-linux.sh
       - run: python3 tests/test_transport.py build/mistrimulti-helper-linux
       - run: python3 tests/test_packet_faults.py build/mistrimulti-helper-linux
+      - name: Launcher and manager, natively on Linux with a fake game
+        run: python3 tests/test_launcher_linux.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux build/mistrimulti-manager
+      - run: python3 tests/test_world_linux.py build/mistrimulti-manager
+      - name: install.sh against a fake HOME and fake Steam tree
+        run: sh -n install.sh && python3 tests/test_install_linux.py
+      - run: python3 tests/test_event_layer.py
+      - run: python3 tests/test_event_features.py
+      - run: python3 tests/test_containers.py
+      - run: python3 tests/test_ranch.py
+      - run: python3 tests/test_progress.py
+      - run: python3 tests/test_farm_sync.py
+      - run: python3 tests/test_guestsave.py
+      - run: python3 tests/test_wallet.py
+      - run: python3 tests/test_dungeon.py
+      - run: python3 tests/test_story.py
+      - run: python3 tests/test_trust_gml.py
+      - name: In-game Host / Join menu (GML against a fake launcher, then end to end with the real Linux launcher and helper)
+        run: python3 tests/test_menu.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux
+      - run: python3 tests/test_event_bridge.py build/mistrimulti-helper-linux
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-linux-x64
           path: |
             build/mistrimulti-helper-linux
+            build/mistrimulti-launcher
+            build/mistrimulti-manager
             build/mistrimulti-steam-id-linux
             LICENSE
             CONTACT.md
@@ -39,3 +61,38 @@ jobs:
             build/mistrimulti-steam-id.exe
             LICENSE
             CONTACT.md
+  updater:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb xauth
+      - name: Prepare the Wine prefix (Wine will not create one directly in a /tmp it does not own)
+        run: mkdir -p /tmp/wp && WINEPREFIX=/tmp/wp WINEDEBUG=-all xvfb-run -a /usr/lib/wine/wine64 wineboot --init && WINEPREFIX=/tmp/wp wineserver -w
+      - name: Release list is current
+        run: sh scripts/make-release.sh && git diff --exit-code release/latest.txt
+      - run: python3 scripts/lint-asm.py .
+      - run: sh scripts/build-updater.sh
+      - run: sh scripts/build-launcher.sh
+      - run: python3 tests/test_updater.py build/MistriMulti.exe build/fakegame.exe
+      - run: python3 tests/test_world.py build/MistriMulti.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mistrimulti-manager
+          path: build/MistriMulti.exe
+  launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y nasm lld llvm wine64 xvfb xauth
+      - name: Prepare the Wine prefix (Wine will not create one directly in a /tmp it does not own)
+        run: mkdir -p /tmp/wp && WINEPREFIX=/tmp/wp WINEDEBUG=-all xvfb-run -a /usr/lib/wine/wine64 wineboot --init && WINEPREFIX=/tmp/wp wineserver -w
+      - run: python3 scripts/lint-asm.py .
+      - run: sh scripts/build-launcher.sh
+      - run: sh scripts/build-updater.sh
+      - run: sh scripts/build-helper.sh
+      - run: python3 tests/test_launcher.py build/MistriMultiLauncher.exe build/mistrimulti-helper.exe build/fakegame.exe build/MistriMulti.exe
+      - run: python3 tests/test_event_bridge.py build/mistrimulti-helper.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mistrimulti-launcher
+          path: build/MistriMultiLauncher.exe

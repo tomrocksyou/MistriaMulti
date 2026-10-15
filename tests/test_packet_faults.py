@@ -8,10 +8,12 @@ import struct
 import subprocess
 import tempfile
 import time
+import mmauth
 from test_transport import available_port, read_json, wait_until
 
 HEADER = struct.Struct("<4sHHIIIIIHHII")
 CODE = 0xA1B2C3D4
+KEY = {}    # the session key negotiated with the helper under test (the test plays the host)
 
 
 def checksum(data):
@@ -23,9 +25,29 @@ def checksum(data):
 
 def packets(data, seq, epoch=100):
     body = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()
-    count = (len(body) + 1151) // 1152
-    return [HEADER.pack(b"MSMP", 1, 0, 0, seq, CODE, checksum(body), len(body), i, count, epoch, 0)
-            + body[i * 1152:(i + 1) * 1152] for i in range(count)]
+    return mmauth.split_snapshot(KEY["sk"], 1, 0, seq, CODE, body, epoch)
+
+
+def handshake(host, address):
+    """Plays the host's half of the join handshake against the helper under test."""
+    player = mmauth.Host(CODE)
+    deadline = time.monotonic() + 8
+    host.settimeout(0.5)
+    while time.monotonic() < deadline:
+        try:
+            packet, source = host.recvfrom(2048)
+        except socket.timeout:
+            continue
+        if packet[4:5] == b"\x01":
+            host.sendto(player.challenge(packet, source, int(time.monotonic() * 1000)), source)
+        elif packet[4:5] == b"\x03":
+            reply, slot = player.proof(packet, source, int(time.monotonic() * 1000))
+            host.sendto(reply, source)
+            if slot is not None:
+                KEY["sk"] = player.sessions[source][1]
+                host.settimeout(None)
+                return source
+    raise AssertionError("the helper never completed the handshake")
 
 
 def main():
@@ -46,6 +68,7 @@ def main():
             process = subprocess.Popen(command, **kwargs)
             try:
                 wait_until(lambda: (bridge / "status.json").exists(), label="helper startup")
+                destination = handshake(host, destination)
                 output = bridge / "rx_0.json"
                 data = {"active": True, "value": "é日本", "payload": "a" * 8000}
                 fragments = packets(data, 5)
@@ -86,8 +109,12 @@ def main():
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as outsider:
                     for packet in packets({"value": "wrong-source"}, 8):
                         outsider.sendto(packet, destination)
-                invalid = HEADER.pack(b"MSMP", 1, 0, 0, 8, CODE, 0, 16385, 0, 15, 100, 0) + b"x"
-                host.sendto(invalid, destination)
+                invalid = HEADER.pack(b"MSMP", 2, 0, 0, 8, CODE, 0, 16385, 0, 15, 100, 0) + b"x"
+                host.sendto(invalid + mmauth.tag_data(KEY["sk"], 1, invalid), destination)
+                # Correctly signed but impossible: fragment index beyond the count, a zero length, a length over the limit.
+                for length, index, count in ((16385, 0, 15), (100, 5, 1), (1, 0, 1), (16384, 15, 15), (16384, 0, 16)):
+                    bad = HEADER.pack(b"MSMP", 2, 0, 0, 9, CODE, 0, length, index, count, 100, 0) + b"x" * 100
+                    host.sendto(bad + mmauth.tag_data(KEY["sk"], 1, bad), destination)
                 time.sleep(0.1)
                 assert read_json(output) == final
                 print("PASS: wrong source and oversized declared payloads are rejected")

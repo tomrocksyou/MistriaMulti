@@ -10,10 +10,9 @@ function mistrimulti_player_data_initialize() {
     r.player_last_checkpoint = 0;
     r.player_request = "";
     r.player_host_epoch = "";
-    r.player_incoming = undefined;
-    r.player_outgoing = [];
     r.player_sessions = array_create(8, undefined);
     r.player_error = "";
+    mistrimulti_progress_initialize();
 }
 
 function mistrimulti_player_capture() {
@@ -122,6 +121,7 @@ function mistrimulti_player_restore(data) {
     ARI.mana_max = int64(data.stats.mana_max);
     ARI.inventory.deserialize(data.inventory);
     ARI.armor.deserialize(data.armor);
+    mistrimulti_player_touch_inventory();
     ARI.held_item_index = 0;
     ARI.skill_xp = clone_value(data.xp);
     ARI.perks = clone_value(data.perks);
@@ -129,7 +129,7 @@ function mistrimulti_player_restore(data) {
     for (var i = 0; i < NpcId.LEN; i++) {
         var p = data.relations[i];
         var npc = NPCS[i];
-        npc.heart_points = p.hearts;
+        if (!mistrimulti_hearts_shared()) npc.heart_points = p.hearts;   // shared hearts: the host's value stays
         npc.known_gift_preferences = HashSetFromArray(p.preferences);
         npc.gifts_given = HashSetFromArray(p.gifts);
         var same_day = data.day == string(CALENDAR.time);
@@ -143,7 +143,7 @@ function mistrimulti_player_restore(data) {
     r.character_owner = ARI;
     r.character_pending = false;
     r.character_loaded = true;
-    r.player_ready = true;
+    mistrimulti_progress_core_ready();
     r.look_signature = "";
     return true;
 }
@@ -153,6 +153,7 @@ function mistrimulti_player_fresh() {
     ARI.inventory.deserialize(Inventory(10).serialize());
     var items = fiddle_get("misc/ari_stats/starting_inventory");
     for (var i = 0; i < array_length(items); i++) ARI.inventory.add(string_to_item_id(items[i]));
+    mistrimulti_player_touch_inventory();
     var armor = fiddle_get("misc/ari_stats/starting_armor");
     var tags = ["head", "chest", "legs", "boots", "accessory"];
     for (var i = 0; i < ArmorSlot.LEN; i++) {
@@ -177,7 +178,7 @@ function mistrimulti_player_fresh() {
     var spells = fiddle_get("misc/ari_stats/starting_spells");
     for (var i = 0; i < array_length(spells); i++) ARI.spells_learned[string_to_spell(spells[i])] = true;
     for (var i = 0; i < NpcId.LEN; i++) {
-        NPCS[i].heart_points = 0;
+        if (!mistrimulti_hearts_shared()) NPCS[i].heart_points = 0;
         NPCS[i].gift_flag = true;
         NPCS[i].talk_flag = true;
         NPCS[i].times_spoken_today = 0;
@@ -187,7 +188,7 @@ function mistrimulti_player_fresh() {
         NPCS[i].report_hearts();
     }
     for (var i = 0; i < NpcId.LEN; i++) NPCS[i].report_relationship();
-    r.player_ready = true;
+    mistrimulti_progress_core_ready();
 }
 
 function mistrimulti_player_path(uid) {
@@ -224,5 +225,14 @@ function mistrimulti_player_store(uid, revision, data) {
         r.player_error = "Player progress could not be saved on the host.";
         mmapi_warn_rate_limited("mistrimulti_player_save", "mistrimulti", r.player_error);
         return false;
+    }
+}
+
+// Inventory.deserialize sets the slots without counting an update, so the toolbar (an InventorySubscriber that redraws on
+// changed `updates`) kept showing the host's items after a guest's own inventory was restored. Count one update per slot.
+function mistrimulti_player_touch_inventory() {
+    var invs = [ARI.inventory, ARI.armor];
+    for (var k = 0; k < array_length(invs); k++) {
+        for (var i = 0; i < invs[k].size(); i++) invs[k].slot(i).updates += 1;
     }
 }
