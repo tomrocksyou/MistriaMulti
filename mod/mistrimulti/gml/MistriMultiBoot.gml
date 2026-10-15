@@ -97,6 +97,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.dungeon", mistrimulti_dungeon_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
+        mmapi_debug_register_fn("mistrimulti.unlock_mines", mistrimulti_devtools_unlock_mines, { mod_name: "mistrimulti" });
     }
     mmapi_log_info("mistrimulti", "MistriaMulti 0.3.9 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
@@ -458,6 +459,9 @@ function mistrimulti_register() {
     // Host: approve / refuse a player identity that needs approval. Guest: accept a changed host identity.
     mmapi_hotkey_register(mmapi_hotkey_vk_from_name("F7"), mistrimulti_trust_hotkey_approve);
     mmapi_hotkey_register_binding(mmapi_hotkey_binding_from_name("SHIFT+F7"), mistrimulti_trust_hotkey_refuse);
+    // Developer command, host only (docs/DEVTOOLS.md): unlock the mines.
+    var unlock_binding = mmapi_hotkey_binding_from_name("CONTROL+F6");
+    if (unlock_binding != undefined) mmapi_hotkey_register_binding(unlock_binding, mistrimulti_devtools_hotkey_unlock_mines);
     mistrimulti_ranch_register_hooks();
     mistrimulti_dungeon_register_hooks();
 }
