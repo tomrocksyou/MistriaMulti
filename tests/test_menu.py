@@ -509,7 +509,7 @@ def test_typed_address_and_errors():
     seqs = [c["seq"] for c in env.launcher.cmds]
     assert len(set(seqs)) == len(seqs) and len(seqs) >= 4, seqs
     # every error code has words (and an unknown one still says something)
-    for code in (1, 2, 3, 4, 5, 6, 7, 21, 22, 23, 24, 26, 41, 42, 43, 44, 45, 46, 99):
+    for code in (1, 2, 3, 4, 5, 6, 7, 21, 22, 23, 24, 26, 41, 42, 43, 44, 45, 46, 47, 99):
         text = env.interp.call("mistrimulti_menu_error_text", code)
         assert len(text) > 20 and "None" not in text, (code, text)
     assert "sleep in bed" in env.interp.call("mistrimulti_menu_error_text", 42)

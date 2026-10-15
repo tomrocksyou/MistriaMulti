@@ -20,6 +20,10 @@ import tempfile
 import threading
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mmauth
+import worldserver_cases
+
 launcher, helper, fake = (Path(a).resolve() for a in sys.argv[1:4])
 manager = Path(sys.argv[4]).resolve() if len(sys.argv) > 4 else None
 HELPER_NAME = "mistrimulti-helper-linux"
@@ -566,92 +570,18 @@ def test_scan_tailscale():
         sb.cleanup()
 
 
-def world_request(payload=None, timeout=10):
-    sock = socket.socket()
-    sock.settimeout(timeout)
-    try:
-        sock.connect(("127.0.0.1", 7775))
-        sock.sendall(payload if payload is not None else b"MSWQ\x01" + b"\x00" * 11)
-        got = b""
-        while True:
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            got += chunk
-        return got
-    except OSError:
-        return None
-    finally:
-        sock.close()
-
-
 def test_world_server():
-    sb = Sandbox()
-    try:
-        sb.mp.mkdir(parents=True)
-        old = os.urandom(50_000)
-        new = os.urandom(200_000)
-        (sb.mp / "game-1-autosave.sav").write_bytes(old)
-        (sb.mp / "game-2-autosave.sav").write_bytes(new)
-        (sb.mp / "game-3-autosave.old.sav").write_bytes(b"newest but not a valid save name")
-        (sb.mp / "notes.txt").write_bytes(b"x")
-        (sb.mp / "game-9-7.sav").mkdir()
-        os.utime(sb.mp / "game-1-autosave.sav", (1_700_000_000, 1_700_000_000))
-        os.utime(sb.mp / "game-2-autosave.sav", (1_700_000_100, 1_700_000_100))
-        os.utime(sb.mp / "game-3-autosave.old.sav", (1_700_000_200, 1_700_000_200))
-        os.utime(sb.mp / "game-9-7.sav", (1_700_000_300, 1_700_000_300))
-        sb.config("mode=host\r\nport=47881\r\n")
-        proc = sb.steam(["--slow"])
-        assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
-        got = None
-        for _ in range(20):
-            got = world_request()
-            if got:
-                break
-            time.sleep(0.3)
-        assert got and len(got) == 112 + len(new), (None if got is None else len(got))
-        hdr, body = got[:112], got[112:]
-        assert hdr[:4] == b"MSWR" and hdr[4] == 1 and hdr[5] == 0, hdr[:8]
-        assert int.from_bytes(hdr[8:12], "little") == len(new)
-        assert hdr[12:44] == hashlib.sha256(new).digest() and body == new
-        assert hdr[48:112].split(b"\x00")[0] == b"game-2-autosave.sav", hdr[48:80]
-        # bad requests get nothing
-        assert world_request(b"MSWQ\x09" + b"\x00" * 11) in (b"", None)
-        assert world_request(b"XXXX\x01" + b"\x00" * 11) in (b"", None)
-        assert world_request(b"short") in (b"", None)
-        # the host still serves after the junk
-        again = world_request()
-        assert again and again[112:] == new
-        # a client that asks for the world and hangs up without reading it (the launcher must survive the broken pipe)
-        for _ in range(3):
-            quitter = socket.socket()
-            quitter.connect(("127.0.0.1", 7775))
-            quitter.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")   # reset instead of a clean close
-            quitter.sendall(b"MSWQ\x01" + b"\x00" * 11)
-            quitter.close()
-        time.sleep(0.5)
-        again = world_request()
-        assert again and again[112:] == new, "the world server died after a client reset the connection"
-        assert proc.poll() is None, "the launcher died (SIGPIPE?)"
-        # a client that connects and says nothing does not block the game or later clients for long
-        silent = socket.socket()
-        silent.connect(("127.0.0.1", 7775))
-        t0 = time.time()
-        again = world_request(timeout=20)
-        silent.close()
-        assert again and again[112:] == new and time.time() - t0 < 10, time.time() - t0
-        # nothing to give: status 1
-        for f in sb.mp.iterdir():
-            if f.is_dir():
-                f.rmdir()
-            else:
-                f.unlink()
-        none = world_request()
-        assert none and len(none) == 112 and none[5] == 1, none[:8] if none else none
-        finish(proc)
-        print("world server: newest valid save is sent with a correct checksum, look-alike files ignored, junk requests dropped, status 1 when there is nothing")
-    finally:
-        sb.cleanup()
+    for case in (worldserver_cases.check_server, worldserver_cases.check_server_slow, worldserver_cases.check_server_junk):
+        sb = Sandbox()                     # each hosting session lives 12 seconds; the cases that wait for timeouts get their own
+        try:
+            sb.config("mode=host\r\nport=47881\r\n")
+            proc = sb.steam(["--slow"])
+            assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
+            case(sb.mp, sb.mod / "bridge_0", wait_for, True)
+            assert proc.poll() is None, "the launcher died (SIGPIPE?)"
+            finish(proc)
+        finally:
+            sb.cleanup()
 
 
 def test_world_round_trip():
@@ -666,10 +596,16 @@ def test_world_round_trip():
         assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
         dest = sb.root / "guest" / "saves"
         result = sb.root / "result.txt"
+        # the key the host's helper holds for guest 2 (here written by the test) and the guest's copy of it
+        wk = mmauth.world_key(os.urandom(32))
+        bridge = sb.root / "guest-bridge"
+        bridge.mkdir()
+        (sb.mod / "bridge_0" / "world_2.key").write_bytes(wk)
+        (bridge / "world_2.key").write_bytes(wk)
 
         def fetch():
-            subprocess.run([str(sb.bin / "mistrimulti-manager"), "--fetch", "127.0.0.1", str(dest), str(result)], env=sb.env(),
-                           timeout=60, check=True, capture_output=True)
+            subprocess.run([str(sb.bin / "mistrimulti-manager"), "--fetch", "127.0.0.1", str(dest), str(result), str(bridge), "2"],
+                           env=sb.env(), timeout=60, check=True, capture_output=True)
             return int(result.read_text())
         assert wait_for(lambda: fetch() in (0, 2), 10), "the world server never started"
         for n, size in enumerate((1, 63, 64, 65, 4096, 1_000_003, 5_000_000)):
@@ -691,8 +627,16 @@ def test_world_round_trip():
         for f in sb.mp.iterdir():
             f.unlink()
         assert fetch() == 2, "no world on the host is reported as such"
+        # a guest whose key the host does not have (or no key at all) gets nothing: code 7, no file
+        (sb.mp / "game-5-9.sav").write_bytes(b"secret world")
+        for f in list(dest.iterdir()):
+            f.unlink()
+        (bridge / "world_2.key").write_bytes(mmauth.world_key(os.urandom(32)))
+        assert fetch() == 7 and not list(dest.iterdir()), "a guest with the wrong key must get nothing"
+        (bridge / "world_2.key").unlink()
+        assert fetch() == 7 and not list(dest.iterdir()), "a guest without a key must get nothing"
         finish(proc)
-        print("world round trip: manager downloads what the launcher serves, byte for byte (7 sizes up to 5 MB)")
+        print("world round trip: manager downloads what the launcher serves, byte for byte (7 sizes up to 5 MB); wrong or missing key -> code 7, nothing written")
     finally:
         sb.cleanup()
 
@@ -701,51 +645,38 @@ def test_guest_refreshes_world():
     sb = Sandbox()
     try:
         data = os.urandom(120_000)
-        name = b"game-77-autosave.sav"
-        server = socket.socket()
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(("127.0.0.1", 7775))
-        server.listen(2)
-        server.settimeout(20)
-
-        def serve():
-            try:
-                conn, _ = server.accept()
-            except OSError:
-                return
-            with conn:
-                conn.recv(16)
-                h = bytearray(112)
-                h[0:4] = b"MSWR"
-                h[4] = 1
-                h[8:12] = len(data).to_bytes(4, "little")
-                h[12:44] = hashlib.sha256(data).digest()
-                h[48:48 + len(name)] = name
-                conn.sendall(bytes(h) + data)
-        t = threading.Thread(target=serve, daemon=True)
-        t.start()
+        # a scripted host answers the real guest helper's join handshake and then serves the world only to that session
+        host = worldserver_cases.JoinedHost(47891, data)
         sb.config("mode=join\r\nhost=127.0.0.1\r\nplayer=2\r\nport=47891\r\n")
         proc = sb.steam()
-        assert wait_for(lambda: (sb.mp / "game-77-autosave.sav").exists(), 20), "world was not downloaded at game start"
+        assert wait_for(lambda: (sb.mp / "game-77-autosave.sav").exists(), 25), "world was not downloaded at game start"
         assert (sb.mp / "game-77-autosave.sav").read_bytes() == data
+        assert host.served == 1 and host.refused == 0, (host.served, host.refused)
+        assert (sb.mod / "bridge_2" / "world_2.key").read_bytes() == mmauth.world_key(host.sk), "the guest helper publishes the session's world key"
         finish(proc)
-        server.close()
-        # an unreachable host must not delay or break the game start
+        host.close()
+        # a host that never completes the join (no helper session): the game still starts, nothing is downloaded
         sb2 = Sandbox()
         try:
-            sb2.config("mode=join\r\nhost=10.255.255.1\r\nplayer=2\r\nport=47891\r\n")
+            sb2.config("mode=join\r\nhost=127.0.0.1\r\nplayer=2\r\nport=47892\r\n")
             t0 = time.time()
             code = finish(sb2.steam(["--quick"]))
             assert code == 7 and sb2.ran() is not None
-            assert time.time() - t0 < 25, "an unreachable host delayed the game too long"
-            # a host that refuses the connection
-            (sb2.game / "ran.txt").unlink()
-            sb2.config("mode=join\r\nhost=127.0.0.1\r\nplayer=2\r\nport=47892\r\n")
-            code = finish(sb2.steam(["--quick"]))
-            assert code == 7 and sb2.ran() is not None
+            assert time.time() - t0 < 25, "a host that does not answer delayed the game too long"
+            assert not list(sb2.mp.glob("*.sav")) if sb2.mp.exists() else True
         finally:
             sb2.cleanup()
-        print("guest: the host's world is downloaded as the game starts; an unreachable host does not block the game")
+        # an unreachable host must not delay or break the game start
+        sb3 = Sandbox()
+        try:
+            sb3.config("mode=join\r\nhost=10.255.255.1\r\nplayer=2\r\nport=47891\r\n")
+            t0 = time.time()
+            code = finish(sb3.steam(["--quick"]))
+            assert code == 7 and sb3.ran() is not None
+            assert time.time() - t0 < 25, "an unreachable host delayed the game too long"
+        finally:
+            sb3.cleanup()
+        print("guest: after the join handshake the host's world is downloaded as the game starts (proof of the session key); a silent or unreachable host does not block the game")
     finally:
         sb.cleanup()
 
@@ -1076,7 +1007,9 @@ def test_manager_join():
         out, err, rc = run_manager(sb, ["join", "127.0.0.1", "--player", "4", "--room", "abcd1234"])
         assert rc == 0, (out, err)
         assert cfg.read_bytes() == b"mode=join\r\nhost=127.0.0.1\r\nport=7777\r\nplayer=4\r\nroom=abcd1234\r\n", cfg.read_bytes()
-        assert (sb.mp / "game-42-autosave.sav").read_bytes() == data and "was downloaded" in out and "Joining: 127.0.0.1" in out, out
+        # the manager has no helper session to prove, so it downloads nothing; the launcher fetches the world when the game starts
+        assert not sb.mp.exists() and host.requests == 0, "the manager must not ask for the world without a session"
+        assert "downloaded when the game starts" in out and "Joining: 127.0.0.1" in out, out
         # IP only: automatic player number (kept on the next run), default room
         out, err, rc = run_manager(sb, ["join", "127.0.0.1"])
         assert rc == 0, (out, err)
@@ -1100,13 +1033,13 @@ def test_manager_join():
         # the host has no world yet
         host.data = None
         out, err, rc = run_manager(sb, ["join", "127.0.0.1", "--player", "3"])
-        assert rc == 0 and "could not be downloaded yet" in out and "player=3" in cfg.read_text(), out
+        assert rc == 0 and "downloaded when the game starts" in out and "player=3" in cfg.read_text(), out
         host.close()
         host = None
         # nobody listening at all: the setup is still saved
         out, err, rc = run_manager(sb, ["join", "127.0.0.1", "--player", "5"])
-        assert rc == 0 and "could not be downloaded yet" in out and "player=5" in cfg.read_text()
-        print("manager join <ip>: setup saved identical to the Windows format, world downloaded, bad input refused, missing world reported")
+        assert rc == 0 and "downloaded when the game starts" in out and "player=5" in cfg.read_text()
+        print("manager join <ip>: setup saved identical to the Windows format, no world requested without a session, bad input refused")
     finally:
         if host:
             host.close()
@@ -1130,7 +1063,7 @@ def test_manager_join_interactive():
         assert "The room code must be 8 characters" in out, out
         text = cfg.read_text()
         assert "host=127.0.0.1" in text and "room=A1B2C3D4" in text and "port=7777" in text, text
-        assert (sb.mp / "game-42-autosave.sav").read_bytes() == data
+        assert not sb.mp.exists() and host.requests == 0
         # a wrong number, then R to scan again, then the number again
         cfg.unlink()
         out, err, rc = run_manager(sb, ["join"], "7\nR\n1\nabcd1234\n", **env)
@@ -1433,7 +1366,7 @@ def test_menu_host_and_stop():
             if reply:
                 break
         assert reply and reply[:4] == b"MSDR" and reply[5] == 2 and int.from_bytes(reply[6:8], "little") == 7777, reply and reply[:8]
-        assert world_request()[:4] == b"MSWR", "the world server must run while hosting"
+        assert worldserver_cases.probe()[:4] == b"MSWR", "the world server must run while hosting"
         # the password reached the helper (0600) and is nowhere else on disk
         auth = sb.mod / "bridge_0" / "auth.cfg"
         assert "pass=pa$$w0rd!" in auth.read_text() and stat.S_IMODE(auth.stat().st_mode) == 0o600

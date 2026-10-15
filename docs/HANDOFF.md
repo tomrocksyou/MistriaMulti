@@ -131,8 +131,9 @@ Everything above is written and **passes the stand-in test matrix**, but **almos
 3. Cosmetic: the "Continue your world / Start a new world" and some popup buttons overflow their button text; the missing badge on
    Debian is unexplained (new logging should say why); Windows leftover helper: a new session should stop an old helper first.
 4. Fix the red CI; then make the repo public-ready (releases flow in `docs/RELEASES.md` is untested because the repo is private).
-5. Known gaps: boss/seal mine floors, shared monster movement, world download on
-   TCP 7775 is not password protected (a follow-up was queued), story rewards for players who did not do the step.
+5. Known gaps: items on the ground and furniture pickup inside farm buildings; the world download on TCP 7775 now needs the
+   join session's key (`docs/PROTOCOL.md`, `docs/SECURITY.md`; not encrypted). Mines, interiors and story rewards are built
+   but untested in the real game.
 
 ## 8. Working style with helpers
 

@@ -873,8 +873,91 @@ def test_cookie_expiry(env):
     passed("a PROOF that waited longer than the cookie window (20 to 40 s) is ignored")
 
 
+def key_file(node, slot):
+    path = node.bridge / f"world_{slot}.key"
+    return path.read_bytes() if path.exists() else None
+
+
+def test_world_key(env):
+    """The helper publishes WK = HMAC(SK, "MMWORLD1") per authenticated session (the launcher's world server and download
+    client prove it, docs/PROTOCOL.md) and replaces it with 32 zero bytes the moment the session ends."""
+    # host side, with a password
+    host = Node(env, "host", 0, password="room-secret").start()
+    assert key_file(host, 1) is None, "no key before anyone joined"
+    stranger = new_wire(host, 1, password=b"wrong-guess")
+    assert stranger.join() == ("reject", mmauth.REJECT_AUTH)
+    time.sleep(0.5)
+    assert key_file(host, 1) is None, "a failed join leaves no key behind"
+    stranger.close()
+    friend = joined(host, 1, password=b"room-secret")
+    wait_until(lambda: key_file(host, 1) is not None, 5, "world key after the join")
+    assert key_file(host, 1) == mmauth.world_key(friend.guest.sk), "WK is derived from the join session key"
+    assert key_file(host, 2) is None
+    if not ON_WINDOWS and not env.wine:
+        assert (host.bridge / "world_1.key").stat().st_mode & 0o077 == 0, "the key file is private to the user"
+    first = key_file(host, 1)
+    # the same install joins again: a new session, a new key; the old one no longer matches
+    again = Wire(host.port, 1, install_key=friend.guest.ik, password=b"room-secret")
+    assert again.join() == "ok"
+    wait_until(lambda: key_file(host, 1) == mmauth.world_key(again.guest.sk), 5, "key replaced by the new session")
+    assert key_file(host, 1) != first
+    # a second player has its own key
+    other = joined(host, 2, password=b"room-secret")
+    wait_until(lambda: key_file(host, 2) == mmauth.world_key(other.guest.sk), 5, "second key")
+    assert key_file(host, 2) != key_file(host, 1)
+    host.stop()
+    for w in (friend, again, other):
+        w.close()
+    passed("host helper: a world key per authenticated session (HMAC of the session key), replaced on rejoin, none after a failed join")
+
+
+def test_world_key_wiped(env):
+    host = Node(env, "host", 0, deny="# bans\n").start()
+    friend = joined(host, 1)
+    wait_until(lambda: key_file(host, 1) == mmauth.world_key(friend.guest.sk), 5, "key after join")
+    host.deny_file.write_text(friend.guest.fp.hex() + "\n")
+    wait_until(lambda: key_file(host, 1) == bytes(32), 6, "key wiped when the player is kicked")
+    friend.close()
+    host.deny_file.write_text("")
+    time.sleep(1.5)
+    quiet = joined(host, 3)
+    wait_until(lambda: key_file(host, 3) == mmauth.world_key(quiet.guest.sk), 5, "key after the join")
+    quiet.close()                                      # goes silent: the host expires the slot after ten seconds
+    wait_until(lambda: key_file(host, 3) == bytes(32), 20, "key wiped when the session expires")
+    host.stop()
+    passed("host helper: the world key is wiped (32 zero bytes) when a player is kicked or expires")
+
+
+def test_guest_world_key(env):
+    fake = FakeHost()
+    guest = Node(env, "join", 2, host_port=fake.port).start()
+    assert fake.until("proof")
+    wait_until(lambda: guest.auth(0) and guest.auth(0)["state"] == 2, 6, "established")
+    assert key_file(guest, 2) == mmauth.world_key(fake.sk), "the guest helper publishes the same key under its own slot"
+    guest.stop()
+    fake.close()
+    # a host that fails to prove itself never gets the world key published
+    fake = FakeHost()
+    guest = Node(env, "join", 2, host_port=fake.port).start()
+    assert fake.until("proof-bad-welcome", 8, bad_welcome=True)
+    time.sleep(0.8)
+    assert key_file(guest, 2) in (None, bytes(32)), "an unauthenticated host gets no world key"
+    guest.stop()
+    fake.close()
+    # the session ends when the host goes silent: the key is wiped
+    fake = FakeHost()
+    guest = Node(env, "join", 2, host_port=fake.port).start()
+    assert fake.until("proof")
+    wait_until(lambda: key_file(guest, 2) == mmauth.world_key(fake.sk), 6, "key after the welcome")
+    time.sleep(7)
+    wait_until(lambda: key_file(guest, 2) == bytes(32), 6, "key wiped after the host went silent")
+    guest.stop()
+    fake.close()
+    passed("guest helper: world key published only after the host proved itself, wiped when the session ends")
+
+
 TESTS = [test_basic_join, test_no_handshake, test_hijack, test_password, test_replay_and_tamper, test_identity_keys,
-         test_cookie_expiry, test_deny, test_limits, test_fuzz, test_guest_join, test_guest_rejections, test_guest_resync, test_config]
+         test_cookie_expiry, test_deny, test_limits, test_fuzz, test_guest_join, test_guest_rejections, test_guest_resync, test_config, test_world_key, test_world_key_wiped, test_guest_world_key]
 
 
 def main():

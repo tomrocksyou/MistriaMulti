@@ -31,7 +31,7 @@
 %define ER_BADPASS 5
 %define ER_CONTROL 6
 %define ER_REJ_BASE 20                  ; + the helper's reject reason: 21 password, 22 banned, 23 slot busy, 24 full, 26 password needed
-%define ER_WORLD_BASE 40                ; + world_fetch result: 41 cannot connect, 42 host has no world, 43 bad reply, 44 checksum, 45 cannot write, 46 memory
+%define ER_WORLD_BASE 40                ; + world_fetch result: 41 cannot connect, 42 host has no world, 43 bad reply, 44 checksum, 45 cannot write, 46 memory, 47 refused (no joined session or wrong proof)
 
 section .data
 n_menudir db '/menu/x',0
@@ -570,6 +570,9 @@ FN sv_join_step
     lea r8, [s_mp_saves]
     call path2
     mov dword [wf_connect_ms], 3000
+    lea rcx, [bridge_dir]
+    mov edx, [cfg_player]
+    call world_use_session              ; the helper wrote this session's key before it reported the WELCOME
     mov ecx, r12d
     lea rdx, [p1]
     call world_fetch

@@ -670,6 +670,9 @@ FN sv_join_step
     lea r8, [local_app]
     call wsprintfW
     mov dword [wf_connect_ms], 3000
+    lea rcx, [bridge_dir]
+    mov edx, [cfg_player]
+    call world_use_session              ; the helper wrote this session's key before it reported the WELCOME
     mov ecx, r12d
     lea rdx, [p1]
     call world_fetch

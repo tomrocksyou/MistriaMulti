@@ -41,6 +41,9 @@ same routine convention (`abi.inc`) over raw syscalls. The pieces:
 - `linux/sha256.inc`: SHA-256 (the Windows build asks bcrypt). Follow `sha_block`: the big sigmas are written as nested rotates
   to fit in three temporary registers.
 - `linux/net.inc`: the world download client, interface and Tailscale scan, discovery query.
+- `common/hmac.inc`, `common/worldauth.inc`, `common/worldserve.inc`: the authenticated world transfer shared by both systems
+  (HMAC-SHA256 on each program's own `sha256_raw`; the challenge and response, client half in `worldauth.inc`, host half in
+  `worldserve.inc`; the key comes from the helper's `world_<slot>.key`, see `docs/PROTOCOL.md`).
 
 ## The in-game menu supervisor
 

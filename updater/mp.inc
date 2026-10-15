@@ -49,10 +49,7 @@ WSTR mp_s_command, "%command%"
 WSTR s_scan, "--scan"
 WSTR s_addrs, "--addrs"
 WSTR s_fetch, "--fetch"
-WSTR mp_f_mpsaves, "%s\FieldsOfMistria\multiplayer\saves"
-WSTR mp_s_download, "Downloading the host's world..."
-mp_t_world_ok: dw __utf16__(`\r\n\r\nThe host's world was downloaded. Choose Multiplayer on New Game to enter it.`), 0
-mp_t_world_no: dw __utf16__(`\r\n\r\nThe host's world could not be downloaded yet (is the host playing, and has it saved?). Press Join again later, or just start the game: it tries again when it starts.`), 0
+mp_t_world_later: dw __utf16__(`\r\n\r\nThe host's world is downloaded when the game starts, after the host has accepted you (it needs the host's password if there is one). Start the game from Steam and choose Multiplayer on New Game.`), 0
 WSTR s_join, "--join"
 mp_f_hostmsg: dw __utf16__(`You are set to host.\r\n\r\nTell your friends one of these addresses; they pick yours in the Join window or type it:\r\n\r\n`), 0
 mp_f_hostend: dw __utf16__(`\r\nThen start the game from Steam and choose Multiplayer on New Game or Load Game.`), 0
@@ -929,23 +926,6 @@ FN mp_finish_join
     call mp_save_join
     test eax, eax
     jz .nosave
-    lea rcx, [mp_s_download]
-    call mp_set_status
-    mov rcx, r12
-    call inet_addr
-    mov r13d, eax
-    lea rcx, [mp_e_local]
-    lea rdx, [wpath1]
-    mov r8d, 400
-    call GetEnvironmentVariableW
-    lea rcx, [wpath2]
-    lea rdx, [mp_f_mpsaves]
-    lea r8, [wpath1]
-    call wsprintfW
-    mov ecx, r13d
-    lea rdx, [wpath2]
-    call world_fetch
-    mov r14d, eax
     lea rcx, [mp_f_joinmsg]
     lea rdx, [mp_msg]
     call wcopy
@@ -961,11 +941,7 @@ FN mp_finish_join
     lea rdx, [wpath3]
     lea r8, [mp_msg]
     call join_wide
-    lea rdx, [mp_t_world_ok]
-    test r14d, r14d
-    jz .worldmsg
-    lea rdx, [mp_t_world_no]
-.worldmsg:
+    lea rdx, [mp_t_world_later]
     lea rcx, [mp_msg]
     lea r8, [mp_msg]
     call join_wide

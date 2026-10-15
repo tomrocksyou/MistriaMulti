@@ -174,6 +174,7 @@ function mistrimulti_menu_error_text(code) {
         case 44: return "The downloaded world was damaged on the way. Try again.";
         case 45: return "The downloaded world could not be saved on this computer. The disk may be full.";
         case 46: return "There is not enough memory to download the world.";
+        case 47: return "The host refused to send the world. Join again; if it keeps happening, both players should update MistriaMulti.";
     }
     return "Something went wrong (code " + string(code) + "). Try again.";
 }

@@ -193,6 +193,7 @@ section .text
 global start
 %include "winutil.inc"
 %include "world.inc"
+%include "worldserve.inc"
 %include "menu.inc"
 
 
@@ -806,7 +807,7 @@ FN prepare_bridge
     xor r12d, r12d
 .rxl:
     cmp r12d, 8
-    jae .d
+    jae .wk0
     lea rcx, [p2]
     lea rdx, [f_rx]
     mov r8d, r12d
@@ -820,6 +821,19 @@ FN prepare_bridge
     call DeleteFileW
     inc r12d
     jmp .rxl
+.wk0:                                   ; session keys of an earlier run (world_<slot>.key) must not outlive it
+    xor r12d, r12d
+.wk:
+    cmp r12d, 8
+    jae .d
+    lea rcx, [p1]
+    lea rdx, [bridge_dir]
+    mov r8d, r12d
+    call wf_key_path
+    lea rcx, [p1]
+    call DeleteFileW
+    inc r12d
+    jmp .wk
 .d:
 END_FN
 
@@ -1034,10 +1048,38 @@ FN join_refresh_world
     lea r8, [local_app]
     call wsprintfW
     mov dword [wf_connect_ms], 1500
+    lea rcx, [bridge_dir]
+    mov edx, [cfg_player]
+    call world_use_session
+    call GetTickCount64                 ; the world is released only to a joined player: wait for the helper's WELCOME
+    add rax, 5000
+    mov r13, rax
+.wait:
+    mov rcx, [wf_keypath]
+    call wa_load_key
+    test eax, eax
+    jnz .go
+    call GetTickCount64
+    cmp rax, r13
+    jae .d
+    mov ecx, 150
+    call Sleep
+    jmp .wait
+.go:
     mov ecx, r12d
     lea rdx, [p1]
     call world_fetch
 .d:
+END_FN
+
+; Host side of the world server: ecx = slot of the guest -> eax 1 with its session key in wa_key (worldauth.inc)
+FN wf_key_for_slot
+    mov r8d, ecx
+    lea rcx, [wf_path2]
+    lea rdx, [bridge_dir]
+    call wf_key_path
+    lea rcx, [wf_path2]
+    call wa_load_key
 END_FN
 
 FN start_helper
@@ -1346,22 +1388,15 @@ FN world_serve
     lea r9, [ws_timeout]
     mov qword [rsp+32], 4
     call setsockopt
-    lea rcx, [wf_req]
-    mov edx, 16
-    mov r8d, 3000
-    call wf_recv_exact
+    call wa_serve_auth                 ; nothing is read from disk or sent before the client proved its join session
     test eax, eax
     jz .close
-    cmp dword [wf_req], 'MSWQ'
-    jne .close
-    cmp byte [wf_req+4], 1
-    jne .close
     lea rdi, [wf_hdr]
     xor eax, eax
-    mov ecx, 112
+    mov ecx, 144
     rep stosb
     mov dword [wf_hdr], 'MSWR'
-    mov byte [wf_hdr+4], 1
+    mov byte [wf_hdr+4], 2
     xor r12d, r12d                     ; file buffer
     call world_find_newest
     test eax, eax
@@ -1392,8 +1427,9 @@ FN world_serve
     lea rdi, [wf_hdr+48]
     mov ecx, 63
     rep movsb
+    call wa_sign_header
     lea rcx, [wf_hdr]
-    mov edx, 112
+    mov edx, 144
     call wf_send_all
     test eax, eax
     jz .free
@@ -1411,8 +1447,9 @@ FN world_serve
     rep stosb
     mov byte [wf_hdr+5], 2
 .sendhdr:
+    call wa_sign_header
     lea rcx, [wf_hdr]
-    mov edx, 112
+    mov edx, 144
     call wf_send_all
 .free:
     test r12, r12

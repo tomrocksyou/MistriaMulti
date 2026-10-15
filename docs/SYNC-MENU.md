@@ -55,7 +55,7 @@ had not been run"). Now:
   starts the game. `launcher.log` says "Waiting for Host or Join in the in-game Multiplayer menu".
 - **Nothing is hosted or joined, no helper runs, no port is open.** The discovery answer (UDP 7776) is needed only by a host, so
   it is **not** opened in standby: a player who only joins never answers scans, and nobody can download a world from a computer
-  that did not choose to host (the world server, TCP 7775, has no password: `docs/PROTOCOL.md`). Both open when Host starts and
+  that did not choose to host (the world server, TCP 7775, answers only a player whose join the helper authenticated: `docs/PROTOCOL.md`). Both open when Host starts and
   close when it stops or the game ends.
 - **A valid `launcher.cfg` still works** (older setups, `mistrimulti-manager host|join`, `--configure`): that role starts by
   itself as before, and the menu shows it as running. Menu commands replace it for the session, ignoring `launcher.cfg`
@@ -123,7 +123,7 @@ Rewritten after every change and at least once a second:
 | 23 | the player number is already used on the host (the launcher picks another one on the next try) |
 | 24 | the host's game is full |
 | 26 | the host needs a password and none was sent |
-| 41..46 | world download: 41 cannot connect (port 7775), 42 the host has no saved world yet, 43 invalid reply, 44 checksum mismatch, 45 cannot write, 46 out of memory |
+| 41..47 | world download: 41 cannot connect (port 7775), 42 the host has no saved world yet, 43 invalid reply, 44 checksum mismatch, 45 cannot write, 46 out of memory, 47 refused (no joined session, wrong proof, or a host from an older release) |
 
 (21..26 are `20 +` the helper's reject reason in its `status.json`; 40.. are `40 +` the `world_fetch` result.)
 
@@ -137,7 +137,7 @@ Rewritten after every change and at least once a second:
   write `auth.cfg` and `control.json` (`mode:join`); start the helper (`join <port+player> <player> <room> <bridge> <ip> <port>`);
   state `joining`. The launcher then watches the helper's own `status.json`: `auth == 2` (the host's authenticated WELCOME) ->
   state `downloading`, download the world into `multiplayer/saves` (the existing TCP client: size and SHA-256 checked, `.part` file
-  renamed), state `ready`. A reject reason or 12 s without a WELCOME ends the session with an error. **The password is
+  renamed; the download first proves the helper's session key, `docs/PROTOCOL.md`), state `ready`. A reject reason or 12 s without a WELCOME ends the session with an error. **The password is
   therefore checked before anything is downloaded.**
 - **scan**: state `scanning`; the host scan of the manager (broadcast on every local network plus the Tailscale peer list).
   Linux runs `mp_scan` in the launcher; Windows runs `MistriMulti.exe --scan <file>` as a child process (the same code as the manager window). `scan += 1`, hosts published.
@@ -199,8 +199,8 @@ The real-game test showed no badge at all: the mod runtime has no `draw_*` funct
 
 ## Security notes
 
-- Standby opens nothing. Hosting opens UDP 7776 (answers 64-byte queries with 64 bytes), TCP 7775 (world, unauthenticated: use a
-  private network) and the helper's UDP game port, only while hosting.
+- Standby opens nothing. Hosting opens UDP 7776 (answers 64-byte queries with 64 bytes), TCP 7775 (world, released only to an authenticated
+  join session; not encrypted) and the helper's UDP game port, only while hosting.
 - The mod only sends validated values; the launcher validates again. A newline in a password cannot add a key (rejected by the
   mod; the launcher's `v_pass` rejects control characters and spaces).
 - The command file is deleted after reading; a password lives only in the helper's `auth.cfg` (0600 on Linux, per-user data

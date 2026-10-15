@@ -1,8 +1,9 @@
 ; Networking shared by the Linux launcher and manager: addresses, the world download client (protocol: docs/PROTOCOL.md)
 ; and the host scan (broadcast on every local network plus the Tailscale peer list). Raw syscalls, no libc.
-;   client -> host   16 bytes: "MSWQ", version 1, 11 zero bytes
-;   host -> client   112-byte header: "MSWR", version 1, status (0 ok, 1 no world, 2 cannot send),
-;                    file length u32 @8, SHA-256 @12 (32 bytes), file name @48 (64 bytes, NUL padded); then the file bytes
+;   client and host first run the challenge and response of worldauth.inc (proof of the join session's key), then
+;   host -> client   144-byte header: "MSWR", version 2, status (0 ok, 1 no world, 2 cannot send, 3 refused),
+;                    file length u32 @8, SHA-256 @12 (32 bytes), file name @48 (64 bytes, NUL padded), tag @112 (32 bytes);
+;                    then the file bytes
 
 %define WF_PORT_NET 0x5F1E              ; TCP 7775 in network byte order
 %define WF_MAX_FILE 209715200           ; 200 MB
@@ -10,8 +11,9 @@
 
 section .bss
 wf_sock resq 1
-wf_hdr resb 128
-wf_req resb 16
+wf_hdr resb 160
+wf_req resb 64
+wf_keybuf resb 1100
 wf_sa resb 16
 wf_pfd resb 8
 wf_one resd 1
@@ -53,6 +55,8 @@ s_ts_status db 'status',0
 s_ts_json db '--json',0
 s_scan_extra db 'MISTRIMULTI_SCAN_EXTRA',0
 s_part db '.part',0
+s_wkey1 db '/world_',0
+s_wkey2 db '.key',0
 s_slash db '/',0
 align 8
 
@@ -206,13 +210,56 @@ FN fill_sockaddr                ; rcx destination (16 bytes), edx port in networ
 END_FN
 
 ; ---------------- world download ----------------
-; ecx = host IPv4 (network order), rdx = destination folder. Downloads the host's world into that folder.
-; Returns 0 ok, 1 cannot connect, 2 host has no world to give, 3 invalid reply, 4 checksum mismatch, 5 cannot write, 6 out of memory
+FN wf_random                    ; rcx buffer, edx count (<= 256) -> eax 1
+    call random_bytes
+    mov eax, 1
+END_FN
+
+FN wf_key_path                  ; rcx output (1100 bytes), rdx bridge folder, r8d slot: the key file the helper writes for a join session
+    mov r12, rdx
+    mov r13d, r8d
+    mov edx, 1100
+    call pb_start
+    mov rcx, r12
+    call pb_str
+    lea rcx, [s_wkey1]
+    call pb_str
+    mov ecx, r13d
+    call pb_int
+    lea rcx, [s_wkey2]
+    call pb_str
+    call pb_end
+END_FN
+
+FN world_use_session            ; rcx bridge folder, edx this computer's slot (1-7): the download proves the helper's join session in that folder
+    mov [wf_slot], edx
+    mov r8d, edx
+    mov rdx, rcx
+    lea rcx, [wf_keybuf]
+    call wf_key_path
+    cmp eax, -1
+    je .d
+    lea rax, [wf_keybuf]
+    mov [wf_keypath], rax
+.d:
+END_FN
+
+; ecx = host IPv4 (network order), rdx = destination folder. Downloads the host's world into that folder; needs
+; world_use_session first (the host releases the world only to a joined player).
+; Returns 0 ok, 1 cannot connect, 2 host has no world to give, 3 invalid reply, 4 checksum mismatch, 5 cannot write, 6 out of memory,
+; 7 refused (no joined session, wrong proof, or a host that does not speak the authenticated protocol)
 FN world_fetch
     mov r12d, ecx
     mov r13, rdx
     xor r15d, r15d                     ; memory block
     xor ebx, ebx                       ; result: a socket may not exist yet
+    mov qword [wf_sock], 0
+    mov rcx, [wf_keypath]
+    test rcx, rcx
+    jz .refused
+    call wa_load_key
+    test eax, eax
+    jz .refused
     cmp dword [wf_connect_ms], 0
     jne .have_ms
     mov dword [wf_connect_ms], 3000
@@ -260,27 +307,24 @@ FN world_fetch
     cmp dword [wf_digest], 0
     jne .noconn
 .connected:
-    lea rdi, [wf_req]
-    xor eax, eax
-    mov ecx, 16
-    rep stosb
-    mov dword [wf_req], 'MSWQ'
-    mov byte [wf_req+4], 1
-    lea rcx, [wf_req]
-    mov edx, 16
-    call wf_send_all
+    call wa_client_hello
     test eax, eax
-    jz .noconn
+    jz .refused
     lea rcx, [wf_hdr]
-    mov edx, 112
+    mov edx, 144
     mov r8d, 5000
     call wf_recv_exact
     test eax, eax
-    jz .bad
+    jz .refused
     cmp dword [wf_hdr], 'MSWR'
-    jne .bad
-    cmp byte [wf_hdr+4], 1
-    jne .bad
+    jne .refused
+    cmp byte [wf_hdr+4], 2
+    jne .refused
+    cmp byte [wf_hdr+5], 3
+    je .refused
+    call wa_check_header               ; nothing below is believed unless the host proved the session key too
+    test eax, eax
+    jz .refused
     movzx eax, byte [wf_hdr+5]
     test eax, eax
     jz .status_ok
@@ -368,6 +412,9 @@ FN world_fetch
     jmp .close
 .nomem:
     mov r14d, 6
+    jmp .close
+.refused:
+    mov r14d, 7
     jmp .close
 .bad:
     mov r14d, 3
@@ -790,3 +837,5 @@ FN mp_scan
     call sys_close
 .d:
 END_FN
+
+%include "worldauth.inc"
