@@ -36,7 +36,8 @@ carried yet is, for the guest, a copy of the host's value** (see [Known gaps](#k
 | name, birthday, pronouns, selected preset (appearance) | personal | core `character` | identity |
 | other saved presets (`presets`) | personal | not yet | outfit loadouts; the guest sees the host's list |
 | farm_name | world | host save | the farm has one name; character creation keeps it locked |
-| gold, essence, renown, health, stamina, mana, free_baths | personal | core `stats` | |
+| gold, essence, health, stamina, mana, free_baths | personal | core `stats` | gold is mirrored from the shared pool (`docs/SYNC-WALLET.md`) |
+| renown (town rank) | **world** | host's total; core `stats.renown` mirrors what this game has applied | one rank for everyone (`docs/SYNC-RENOWN.md`) |
 | inventory, armor | personal | core | a tool upgrade replaces the tool by a different item, so upgrades travel with the inventory |
 | skill_xp, perks, spells_learned | personal | core | |
 | status_effects, invulnerable_hits, ancient_inspiration_time, end_of_day_status | personal, transient | not carried | timed buffs and sleep-flow state; they end with the session |
@@ -53,7 +54,8 @@ carried yet is, for the guest, a copy of the host's value** (see [Known gaps](#k
 | seen_cosmetics, cosmetic_unlocks | personal | progress `cosmetics.outfits/seen` | |
 | animal_variant_unlocks, animal_cosmetic_unlocks, pet_cosmetic_sets_unlocked, pet_skin_unlocks | personal | progress `cosmetics` | what the player may adopt or place; the animals themselves are world |
 | song_unlocks, song_overrides, dyn_song_overrides, bell_sound | personal | progress `cosmetics` | jukebox and bell settings |
-| renown_reward_inventory, pending_renown_entries | personal | progress `misc.renown_rewards/renown` | renown is personal |
+| renown_reward_inventory | personal | progress `misc.renown_rewards` | every player gets the reward of each rank level from their own game, into their own renown chest |
+| pending_renown_entries | personal queue | progress `misc.renown` | this player's own queued gains, drained into the shared total at the day rollover; the "carrier" entries that bring a game up to the total are derived and never stored (`docs/SYNC-RENOWN.md`) |
 | quest_artifacts, crown_cooldown | personal | progress `misc` | per-player quest scores |
 | date_history, date_unlocks, festival_date_partner | personal | progress `romance` | |
 | wedding_date, proposal_date, disable_break_ups(_letters), pending_child, children | personal | progress `romance` | see [Relationships](#relationships-and-romance) |

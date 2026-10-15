@@ -4,7 +4,7 @@ Things that are wanted or might be nice, in no particular order. Nothing here is
 
 - **Shared or separate money.** Gold is one shared pool for everyone in a hosted world. When separate houses exist, make shared vs
   separate money a host option. Until then it stays shared.
-- **Town rank (renown).** Planned to become shared like gold (one farm-wide rank), instead of personal to each player.
+- **Town rank (renown).** Done: one farm-wide rank, owned by the host like the gold pool (`docs/SYNC-RENOWN.md`; still to be checked in the game).
 - **Separate houses.** Shelved for now: the door placed the player wrongly.
 - **Tree hit animations.** Show the tree shaking when the other player hits it (today it simply disappears).
 - **Map.** Update the other players' markers live while the map is open.
