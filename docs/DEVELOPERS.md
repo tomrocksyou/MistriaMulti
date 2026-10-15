@@ -210,7 +210,7 @@ Linting the already patched live archive reports duplicate seam markers.
 
 ## License and dependencies
 
-Noncommercial use, modification and redistribution are allowed under `LICENSE`.
+The project is in the public domain (the Unlicense in `LICENSE`): any use, modification and redistribution is allowed.
 Commercial use of any part, including sale or incorporation into a commercial product
 or service, requires prior written permission. Requests are considered individually;
 see `CONTACT.md`.

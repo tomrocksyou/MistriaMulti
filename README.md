@@ -37,4 +37,4 @@ More help: [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md). Technical stuff: [docs/DE
 
 ## License
 
-Free to use, mod and share, just not commercially without asking first (see `LICENSE` and `CONTACT.md`).
+Public domain (the Unlicense, see `LICENSE`): free to use, change, share and sell for any purpose, no permission needed.

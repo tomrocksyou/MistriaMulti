@@ -1,9 +1,7 @@
-# Commercial permission
+# Use of MistriMulti
 
-For permission to use any part of MistriaMulti commercially, email
-[derpydude89756@gmail.com](mailto:derpydude89756@gmail.com).
+MistriMulti is released into the public domain (see `LICENSE`). You do not need to ask anyone for permission to use,
+change, share or sell any part of it.
 
-Describe the parts you want to reuse, the intended product or service, and how
-it will be sold or monetized. Requests are considered individually. Sending a
-request does not grant permission; obtain explicit written permission before
-commercial use.
+MistriMulti is a fan-made mod and is not affiliated with the makers of Fields of Mistria. The game itself, its
+scripts and its art belong to its makers and are not part of this project.
