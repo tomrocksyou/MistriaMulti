@@ -120,6 +120,8 @@ dropped by the sender if its target leaves (expires) or restarts.
 var id = mistrimulti_event_request("chest_take", { chest: key, slot: 3, count: 5 });   // undefined = try later
 ```
 
+A guest can only ask once it has seen the host's stream (`mistrimulti_event_request` returns `undefined` before that), so every request is bound to one host session and a restarted host never applies it again.
+
 On a guest, the request is queued as a `~q` event to the host and remembered as outstanding. On the host, it goes
 through the same code path locally. The host:
 

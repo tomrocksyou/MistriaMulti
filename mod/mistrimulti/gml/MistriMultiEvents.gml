@@ -96,7 +96,12 @@ function mistrimulti_event_request(kind, data) {
         array_push(ev.local, json_parse(json_stringify(d)));
     } else {
         if (array_length(ev.pending_ids) >= MISTRIMULTI_EV_PENDING_LIMIT) return undefined;
-        if (!__mistrimulti_ev_push("~q", d, 0, ev.host_stream)) return undefined;
+        // A request is bound to the host session it is made in. Until this guest has seen the host's stream it
+        // could not say which session that is, and a request without it would also be applied by a later host
+        // session (exactly-once across a host restart).
+        var host = __mistrimulti_ev_stream_of(0);
+        if (host == "" || host != ev.host_stream) return undefined;
+        if (!__mistrimulti_ev_push("~q", d, 0, host)) return undefined;
         ev.pending[$ rid] = json_parse(json_stringify(d));
         array_push(ev.pending_ids, rid);
     }
