@@ -4,6 +4,10 @@ A Fields of Mistria multiplayer mod. One person hosts their farm, friends join i
 
 Made for fun to play with friends, so expect the odd bug.
 
+**Early test version.** It has been played by two people over Tailscale (movement, clock and sleep, farming, chests, shipping bin, gold,
+leaving and rejoining), but plenty of it, such as the mines, animals and the building interiors, has not been tried in the real game yet.
+Issues and bug reports are welcome. Your solo saves are kept separate and backed up before every launch.
+
 ## Setup
 
 You need:
