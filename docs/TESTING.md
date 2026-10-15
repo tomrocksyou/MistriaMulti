@@ -299,6 +299,8 @@ by host and guest, three players taking one step, world and private cutscenes, l
 flight, a cutscene holding only its own game, 100 steps through a full send queue, hostile input, the villagers' day plan).
 `python3 tests/mutate_story.py` breaks the GML in 20 ways and fails if any test still passes. See `docs/SYNC-STORY.md`.
 
+`python3 tests/test_maplive.py` (seconds) runs the real map-marker GML against a model of the game's MapMenu: live marker updates, rebuild only on change, other locations, closing, hostile peers. The remote hit shake is `test_hit_shake` in `tests/test_farm_sync.py`. See `docs/SYNC-MAPLIVE.md`.
+
 ## Transport checks
 
 From the project folder on Windows:

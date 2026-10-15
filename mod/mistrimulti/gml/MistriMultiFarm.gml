@@ -422,8 +422,9 @@ function mistrimulti_farm_clear(ls, id, x, y) {
 }
 
 // Makes the grid hold the node described by rec. fresh: take only the object and place from rec and leave the
-// state to the game's own defaults (a new planting). Returns the node, or undefined when it does not fit.
-function mistrimulti_farm_apply(ls, rec, fresh) {
+// state to the game's own defaults (a new planting). shake: this is another player's live hit, so a tree, stump or rock
+// that lost hitpoints and still stands shakes as it does under the hit. Returns the node, or undefined when it does not fit.
+function mistrimulti_farm_apply(ls, rec, fresh, shake=false) {
     var f = mistrimulti_farm_state();
     try {
         var id = mistrimulti_farm_check(ls, rec);
@@ -437,6 +438,7 @@ function mistrimulti_farm_apply(ls, rec, fresh) {
         var same = node != undefined && node.object_id == id
             && (cat != ObjectCategory.Furniture || node.cardinal_index == v[0]);
         var before = same ? mistrimulti_farm_signature(node) : 0;
+        var hp = same ? node[$ "hitpoints"] : undefined;
         if (!same) {
             if (node != undefined) mistrimulti_farm_erase(ls, ni);
             mistrimulti_farm_clear(ls, id, rec[1], rec[2]);
@@ -451,11 +453,29 @@ function mistrimulti_farm_apply(ls, rec, fresh) {
         }
         if (!fresh) mistrimulti_farm_set_values(ls.grid, node, cat, v);
         if (!same || mistrimulti_farm_signature(node) != before) mistrimulti_farm_redraw(ls, node);
+        if (shake && same) mistrimulti_farm_hit_shake(ls, node, cat, hp);
         mistrimulti_farm_refresh(ls, ni);
         return node;
     } catch (e) {
         mistrimulti_farm_fail(f, e);
         return undefined;
+    }
+}
+
+// The hit animation of chop_node / pick_node (the node's own shake, see traumatize in NodeRendererUtils.gml) for a hit
+// somebody else made: no sound, camera shake, debris or drops, those belong to the player who swung. A hit that fells or
+// breaks the node removes it, as before (the falling tree and the break effects are spawned by chop_node / pick_node).
+function mistrimulti_farm_hit_shake(ls, node, cat, hp_before) {
+    var hp = node[$ "hitpoints"];
+    if (!is_real(hp_before) || !is_real(hp) || hp >= hp_before || hp <= 0 || !mistrimulti_farm_viewing(ls)) return;
+    var renderer = node[$ "renderer"];
+    if (renderer == undefined || !instance_exists(renderer)) return;
+    try {
+        if (cat == ObjectCategory.Tree) rot_traumatize(renderer, fiddle_get("tool_fx/chop").damaged.tree[node.stage].node_trauma);
+        else if (cat == ObjectCategory.Stump) traumatize(renderer, fiddle_get("tool_fx/chop").damaged.node_trauma);
+        else if (cat == ObjectCategory.Rock) traumatize(renderer, fiddle_get("tool_fx/pick").damaged.node_trauma);
+    } catch (e) {
+        mmapi_warn_rate_limited("mistrimulti_farm_shake", "mistrimulti", "Hit animation failed: " + string(e));
     }
 }
 
@@ -473,7 +493,7 @@ function mistrimulti_farm_apply_change(data) {
     }
     var n = data[$ "n"];
     if (is_array(n)) {
-        for (var j = 0; j < min(array_length(n), 64); j++) mistrimulti_farm_apply(ls, n[j], false);
+        for (var j = 0; j < min(array_length(n), 64); j++) mistrimulti_farm_apply(ls, n[j], false, true);
     }
 }
 
@@ -1167,6 +1187,7 @@ function mistrimulti_farm_op_tool(f, ls, peer, data, res) {
     var cat = object_id_to_object_category(node.object_id);
     var anchor = mistrimulti_farm_slot(ls, node.object_id, node.top_left_x, node.top_left_y);
     res.p = mistrimulti_farm_record(node);
+    var hp_was = node[$ "hitpoints"]; // the host's copy shakes under a guest's hit too (state-only otherwise)
     if (data.a == "chop" && cat == ObjectCategory.Tree) {
         var trunk = data.x >= node.top_left_x + 2 && data.x <= node.top_left_x + 3 && data.y >= node.top_left_y + 2 && data.y <= node.top_left_y + 3;
         if (!trunk || proto.quality + modifier < node.prototype.minimum_quality) {
@@ -1175,6 +1196,7 @@ function mistrimulti_farm_op_tool(f, ls, peer, data, res) {
         }
         node.hitpoints -= min(damage, node.hitpoints);
         if (node.hitpoints <= 0) mistrimulti_farm_fell(f, ls, res, node);
+        else mistrimulti_farm_hit_shake(ls, node, cat, hp_was);
     } else if (data.a == "chop" && cat == ObjectCategory.Stump) {
         if (proto.quality + modifier < node.prototype.minimum_quality) {
             mistrimulti_farm_touch(f, ls, res, anchor);
@@ -1182,6 +1204,7 @@ function mistrimulti_farm_op_tool(f, ls, peer, data, res) {
         }
         node.hitpoints -= min(damage, node.hitpoints);
         if (node.hitpoints <= 0) erase_object_node_by_parent(grid, node);
+        else mistrimulti_farm_hit_shake(ls, node, cat, hp_was);
     } else if (data.a == "pick" && cat == ObjectCategory.Rock) {
         if (proto.quality != QualityId.LEN - 1 && proto.quality + modifier < node.prototype.minimum_quality) {
             mistrimulti_farm_touch(f, ls, res, anchor);
@@ -1189,6 +1212,7 @@ function mistrimulti_farm_op_tool(f, ls, peer, data, res) {
         }
         node.hitpoints -= min(damage, node.hitpoints);
         if (node.hitpoints <= 0) erase_object_node_by_parent(grid, node);
+        else mistrimulti_farm_hit_shake(ls, node, cat, hp_was);
     } else if ((data.a == "pick" || data.a == "dig") && node.object_id == ObjectId.DigSite) {
         erase_object_node_by_parent(grid, node);
         grid.write_node(node.top_left_x, node.top_left_y, ObjectId.DigSiteDestroyed);
