@@ -27,6 +27,8 @@ real game (the stand-in tests could not catch them; keep them in mind for every 
   MMAPI); use it as reference only, never commit it. Villagers: same area, a few seconds apart (by design: plan + room only).
 - Earlier user requests: guest clock
   jumps to world time when more than 5 game minutes behind (0.2.8, was 30).
+- 0.3.1: new-world options popup (Hearts: own (Recommended) / shared), `MistriMultiHearts.gml`; popup buttons widened to
+  the popup width (`mistrimulti_widen_choices`). Next planned: separate visitable houses as a world option (big, experimental).
 - Next: walk the `docs/SYNC-*.md` checklists in the real game (clock first), then the badge.
 
 ## 1. What this is and what the user wants

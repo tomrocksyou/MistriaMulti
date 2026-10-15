@@ -137,6 +137,14 @@ two consequences that are by design:
 derived from the records (the host's own relationships and every stored core record), so the personal data and the world
 fact can only differ for the moment between a change and the next checkpoint.
 
+**Shared hearts (world option, 0.3.1).** When the host starts a new world they choose *Hearts with villagers*: each
+player's own (the default, recommended) or shared by everyone. With shared hearts the host's villagers hold the one value
+per villager; a guest's gain (the game's `npc.heart_points` filter) is sent to the host (`heart_add`), added once and
+broadcast (`hearts`), and a guest's own record no longer restores hearts. Relationship status, dates, marriage and heart
+events stay per player, and the exclusivity below still applies. Options are stored in `worlds/<world>/options.json` on the
+host and sent in the host's frame (`o`). Code: `MistriMultiHearts.gml`; tests: `test_event_features.py`
+(`test_shared_hearts`, `test_own_hearts`). A heart level set directly by a cutscene in a guest's game is not shared.
+
 **Exclusivity (decided).** A villager can be romantically involved with **one player at a time**; friendship and "best friend"
 stay open to everyone.
 

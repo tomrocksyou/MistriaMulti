@@ -45,12 +45,17 @@ class Grid:
         return (self.struct["node_terrain_ground_kind"][i], self.struct["node_terrain_is_watered"][i])
 
 
+NPCS_LEN = 4
+
+
 class FeatureNode(GmlNode):
-    extra_files = ("MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml", "MistriMultiProgress.gml")
+    extra_files = ("MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml", "MistriMultiProgress.gml", "MistriMultiHearts.gml")
 
     def builtins(self):
         self.grid = Grid()
         self.store = {}            # uid -> {"revision", "data"} (host's player records)
+        self.dings = []            # heart level-up animations shown
+        self.reports = []          # report_hearts calls
         self.calls = []
         mist = gml.GStruct(is_running=lambda: False)
         return {
@@ -68,7 +73,17 @@ class FeatureNode(GmlNode):
             "mistrimulti_player_restore": lambda data: self.calls.append(("restore", json.loads(gml.to_json(data)))) or True,
             "mistrimulti_player_capture": lambda: gml.GStruct(captured=True),
             "mistrimulti_player_fresh": self.player_fresh,
+            "NPCS": gml.GArray([self.make_npc(i) for i in range(NPCS_LEN)]), "NpcId": gml.GStruct(LEN=NPCS_LEN),
+            "Menu": gml.GStruct(Dingaling=7),
+            "ANCHOR": gml.GStruct(get_menu=lambda m: gml.GStruct(
+                create_heart_dingaling=lambda i, old: self.dings.append((i, old)))),
         }
+
+    def make_npc(self, i):
+        npc = gml.GStruct(id=i, heart_points=0)
+        npc["heart_level"] = lambda: int(npc["heart_points"] // 100)
+        npc["report_hearts"] = lambda: self.reports.append(i)
+        return npc
 
     def player_store(self, uid, revision, data):
         self.store[uid] = {"revision": revision, "data": json.loads(gml.to_json(data))}
@@ -685,6 +700,88 @@ def test_clock_untrusted_input():
     print("PASS: clock: malformed or forged clock, vote, weather, report and sleep data is ignored")
 
 
+class HeartsDriver(Driver):
+    def __init__(self, game, options):
+        super().__init__(game)
+        self.options = options
+        self.node.rt["enabled"] = True
+        self.node.interp.call("mistrimulti_hearts_register_events")
+        if self.node.rt["mode"] == "host":
+            self.node.rt["world_opts"] = self.node.data(options)
+
+    def frame(self):
+        f = super().frame()
+        if self.node.rt["mode"] == "host":
+            f["o"] = self.options
+        return f
+
+    def tick(self, now):
+        super().tick(now)
+        if self.node.rt["mode"] == "host":
+            self.node.interp.call("mistrimulti_hearts_tick")
+
+
+def gain(node, npc, amount):
+    """What Npc.add_heart_points does: run the npc.heart_points filter, then add what it returns (undefined: unchanged)."""
+    target = node.interp.builtins["NPCS"][npc]
+    result = node.call("mistrimulti_hearts_filter", amount, target)
+    added = amount if result is None else result
+    target["heart_points"] += max(added, 0)
+    return result
+
+
+def hearts(node):
+    return [n["heart_points"] for n in node.interp.builtins["NPCS"]]
+
+
+def test_shared_hearts():
+    world = World(31, {i: FeatureNode for i in range(3)}, loss=0.05, jitter=40)
+    for game in world.games.values():
+        game.feature = HeartsDriver(game, {"v": 1, "hearts": "shared"})
+    host, guest, other = (world.games[i].node for i in range(3))
+    world.run(4000)
+    # A guest's gift is not applied locally: the host adds it once and every game takes the host's value.
+    assert gain(guest, 1, 150) == 0 and hearts(guest)[1] == 0
+    world.run(3000)
+    assert hearts(host)[1] == 150 and hearts(guest)[1] == 150 and hearts(other)[1] == 150, (hearts(host), hearts(guest), hearts(other))
+    assert (1, 0) in guest.dings and (1, 0) in other.dings, "a heart level gained shows on every guest"
+    # The host's own gain reaches the guests.
+    assert gain(host, 2, 220) is None
+    world.run(3000)
+    assert hearts(guest)[2] == 220 and hearts(other)[2] == 220
+    # Two guests at once under loss: both gains count, exactly once.
+    gain(guest, 0, 100)
+    gain(other, 0, 60)
+    world.run(4000)
+    assert hearts(host)[0] == 160 and hearts(guest)[0] == 160 and hearts(other)[0] == 160, (hearts(host), hearts(guest))
+    # Forged requests change nothing.
+    before = hearts(host)
+    for bad in ({"n": 9, "a": 10}, {"n": -1, "a": 10}, {"n": 1, "a": -50}, {"n": 1, "a": 999999}, {"n": 1.5, "a": 10}, {"a": 10}):
+        guest.call("mistrimulti_event_request", "heart_add", bad)
+    world.run(3000)
+    assert hearts(host) == before and hearts(guest) == before, (hearts(host), before)
+    # Hostile hearts events from a guest are ignored.
+    guest.call("mistrimulti_event_emit", "hearts", {"p": [9999] * NPCS_LEN})
+    world.run(2000)
+    assert hearts(other) == before and hearts(host) == before
+    print("PASS: shared hearts: a guest's gain is applied once by the host and reaches everyone (two at once under loss); "
+          "the host's own gains are sent; forged requests and events are ignored")
+
+
+def test_own_hearts():
+    world = World(32, {i: FeatureNode for i in range(2)}, loss=0.05, jitter=40)
+    for game in world.games.values():
+        game.feature = HeartsDriver(game, {"v": 1, "hearts": "own"})
+    host, guest = (world.games[i].node for i in range(2))
+    world.run(4000)
+    assert gain(guest, 1, 150) is None and hearts(guest)[1] == 150
+    gain(host, 1, 40)
+    guest.call("mistrimulti_event_request", "heart_add", {"n": 1, "a": 10})
+    world.run(3000)
+    assert hearts(host)[1] == 40 and hearts(guest)[1] == 150, (hearts(host), hearts(guest))
+    print("PASS: own hearts (the default): every player keeps their own hearts, the host ignores heart requests")
+
+
 if __name__ == "__main__":
     test_terrain()
     test_player_records()
@@ -693,3 +790,5 @@ if __name__ == "__main__":
     test_sleep_disconnect_and_late_join()
     test_sleep_timeout_and_host_restart()
     test_clock_untrusted_input()
+    test_shared_hearts()
+    test_own_hearts()

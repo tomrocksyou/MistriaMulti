@@ -129,7 +129,7 @@ function mistrimulti_player_restore(data) {
     for (var i = 0; i < NpcId.LEN; i++) {
         var p = data.relations[i];
         var npc = NPCS[i];
-        npc.heart_points = p.hearts;
+        if (!mistrimulti_hearts_shared()) npc.heart_points = p.hearts;   // shared hearts: the host's value stays
         npc.known_gift_preferences = HashSetFromArray(p.preferences);
         npc.gifts_given = HashSetFromArray(p.gifts);
         var same_day = data.day == string(CALENDAR.time);
@@ -178,7 +178,7 @@ function mistrimulti_player_fresh() {
     var spells = fiddle_get("misc/ari_stats/starting_spells");
     for (var i = 0; i < array_length(spells); i++) ARI.spells_learned[string_to_spell(spells[i])] = true;
     for (var i = 0; i < NpcId.LEN; i++) {
-        NPCS[i].heart_points = 0;
+        if (!mistrimulti_hearts_shared()) NPCS[i].heart_points = 0;
         NPCS[i].gift_flag = true;
         NPCS[i].talk_flag = true;
         NPCS[i].times_spoken_today = 0;

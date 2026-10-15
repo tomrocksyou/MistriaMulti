@@ -299,6 +299,7 @@ function mistrimulti_menu_ui_host() {
     mcp.option(mistrimulti_menu_t("Start hosting"), mistrimulti_menu_host_go, []);
     mcp.option(mistrimulti_menu_t(f.pass == "" ? "Set a password (optional)" : "Change the password"), mistrimulti_menu_ask, ["host_pass"]);
     mcp.option(mistrimulti_menu_t("Back"), mistrimulti_menu_back, []);
+    mistrimulti_widen_choices(mcp);
 }
 
 function mistrimulti_menu_ui_wait() {
@@ -352,6 +353,7 @@ function mistrimulti_menu_ui_list() {
     mcp.option(mistrimulti_menu_t("Type an address"), mistrimulti_menu_ask, ["ip"]);
     mcp.option(mistrimulti_menu_t("Refresh"), mistrimulti_menu_scan, []);
     mcp.option(mistrimulti_menu_t("Cancel"), mistrimulti_menu_cancel, []);
+    mistrimulti_widen_choices(mcp);
 }
 
 function mistrimulti_menu_ui_error() {

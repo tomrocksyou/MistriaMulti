@@ -98,7 +98,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.story", mistrimulti_story_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriaMulti 0.3.0 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriaMulti 0.3.1 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -106,6 +106,7 @@ function mistrimulti_initialize() {
 function mistrimulti_register_events() {
     mistrimulti_event_register("look", { on_event: mistrimulti_look_event, on_peer: mistrimulti_look_peer });
     mistrimulti_terrain_register_events();
+    mistrimulti_hearts_register_events();
     mistrimulti_farm_register_events();
     mistrimulti_player_register_events();
     mistrimulti_clock_register_events();
@@ -130,7 +131,7 @@ function mistrimulti_tick() {
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
     // The Host / Join menu and the badge's watchdog work on the title screen too, before any multiplayer world exists.
-    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); }
+    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); mistrimulti_savespace_tick(); }
     catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
     // Multiplayer starts only after the player picked the multiplayer save space.
     if (!r.initialized && !__mistrimulti_savespace().active) return;
@@ -206,11 +207,13 @@ function mistrimulti_tick() {
         mistrimulti_dungeon_tick();
         mistrimulti_farm_tick();
         mistrimulti_wallet_tick();
+        mistrimulti_hearts_tick();
         mistrimulti_story_tick();
     } else {
         mistrimulti_remove_ghosts();
     }
     var frame = { v: 2, epoch: r.epoch, id: r.id, uid: r.uid, active: active, world: r.world_key };
+    if (r.mode == "host" && is_struct(r[$ "world_opts"])) frame.o = r.world_opts;   // world options for the guests
     if (active) {
         var ari = instance_find(obj_ari, 0);
         frame.room = mistrimulti_room_key();
@@ -438,6 +441,7 @@ function mistrimulti_register() {
     mmapi_on("save.game_saving", mistrimulti_wallet_game_saving);
     mmapi_on("save.game_loaded", mistrimulti_wallet_game_loaded);
     mmapi_filter("player.gold_delta", mistrimulti_wallet_gold_delta);
+    mmapi_filter("npc.heart_points", mistrimulti_hearts_filter);
     mmapi_guard("dialogue.romance_prompt_guard", mistrimulti_romance_prompt_guard);
     mmapi_on("game.title_entered", mistrimulti_title_entered);
     mmapi_on("ui.menu_opened", mistrimulti_menu_opened);
@@ -455,5 +459,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.3.0");
+mmapi_mod_declare("mistrimulti", "0.3.1");
 mistrimulti_register();

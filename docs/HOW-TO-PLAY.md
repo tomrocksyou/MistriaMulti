@@ -36,6 +36,8 @@ Start the game from Steam as usual.
 - **Host:** New Game (or Load Game) > **Multiplayer** > **Host a game** > **Start hosting** (you can set a password first).
   The game shows your addresses: give your friends the one that starts with `100.` (Tailscale). Press **Start playing**.
   Sleep once (save) before friends join: they get your world as of your last save.
+  When you start a **new** world you also choose how hearts with villagers work: each player's own (recommended) or shared.
+  Dating and marriage are always per player, and two players can't date or marry the same villager.
 - **Join:** New Game > **Multiplayer** > **Join a game**. Pick the host from the list, or choose **Type an address** and type
   the host's `100.` address. Type the password if asked. The host's world downloads and opens.
 

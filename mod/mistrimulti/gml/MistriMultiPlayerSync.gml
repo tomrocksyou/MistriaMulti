@@ -45,6 +45,7 @@ function mistrimulti_player_data_tick() {
             directory_create(r.world_path + "/players");
             save_text_file(r.world_path + "/world.json", json_stringify({ v: 1,
                 world: r.world_key, game_id: Game.unique_identifier, host: r.uid }));
+            r.world_opts = mistrimulti_world_options_load(r.world_path);
             // Restore the loaded save's committed records and rebuild the one-partner registry before anyone is admitted.
             mistrimulti_progress_host_session();
             r.player_ready = true;

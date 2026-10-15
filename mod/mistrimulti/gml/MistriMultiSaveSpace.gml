@@ -91,6 +91,17 @@ function mistrimulti_savespace_try_set(multiplayer) {
     }
 }
 
+// The game's choice buttons are 97 px wide, too narrow for labels like "Continue your world": use the popup's width.
+function mistrimulti_widen_choices(mcp) {
+    try {
+        var w = mcp.popup.backplate.get_width() - 16;
+        if (!is_real(w) || w <= 97) return;
+        for (var i = 0; i < mcp.buttons.count(); i++) mcp.buttons.get(i).set_width(w);
+    } catch (e) {
+        mmapi_warn_rate_limited("mistrimulti_widen", "mistrimulti", "Could not widen the popup buttons: " + string(e));
+    }
+}
+
 // Text arguments are local keys; pass literal text through mistrimulti_menu_t().
 function mistrimulti_savespace_popup(title_key, body_key) {
     var popup = popup_creator(title_key, body_key);
@@ -106,6 +117,7 @@ function mistrimulti_savespace_choose(kind, arg) {
     var mcp = new MultipleChoicePopup("mistrimulti/choose_mode");
     mcp.option("mistrimulti/singleplayer", mistrimulti_savespace_chosen, [kind, false, arg]);
     mcp.option("mistrimulti/multiplayer", mistrimulti_savespace_chosen, [kind, true, arg]);
+    mistrimulti_widen_choices(mcp);
 }
 
 function mistrimulti_savespace_chosen(kind, multiplayer, arg) {
@@ -163,17 +175,54 @@ function mistrimulti_savespace_enter_multiplayer(new_state) {
         s.orig_enter_game(LoadState.Load(world));
         return;
     }
-    if (world == undefined) { s.orig_enter_game(new_state); return; }
+    if (world == undefined) { mistrimulti_world_options_ask(new_state); return; }
     var mcp = new MultipleChoicePopup("mistrimulti/host_world");
     mcp.option("mistrimulti/continue_world", mistrimulti_savespace_host_choice, [true, new_state]);
     mcp.option("mistrimulti/new_world", mistrimulti_savespace_host_choice, [false, new_state]);
+    mistrimulti_widen_choices(mcp);
 }
 
 function mistrimulti_savespace_host_choice(continue_world, new_state) {
     var s = __mistrimulti_savespace();
     var world = mistrimulti_savespace_newest_world();
     if (continue_world && world != undefined) s.orig_enter_game(LoadState.Load(world));
-    else s.orig_enter_game(new_state);
+    else mistrimulti_savespace_later(mistrimulti_world_options_ask, new_state);   // after this popup has closed
+}
+
+// ---- New world options (MistriMultiHearts.gml stores and applies them) ------------------------------------------
+
+function mistrimulti_world_options_ask(new_state) {
+    mistrimulti_world_options_pending(mistrimulti_world_options_default());
+    var mcp = new MultipleChoicePopup("mistrimulti/opt_hearts_title");
+    mcp.option("mistrimulti/opt_hearts_own", mistrimulti_world_options_hearts, ["own", new_state]);
+    mcp.option("mistrimulti/opt_hearts_shared", mistrimulti_world_options_hearts, ["shared", new_state]);
+    mistrimulti_widen_choices(mcp);
+}
+
+function mistrimulti_world_options_hearts(choice, new_state) {
+    var s = __mistrimulti_savespace();
+    var opts = mistrimulti_world_options_pending() ?? mistrimulti_world_options_default();
+    opts.hearts = choice;
+    mistrimulti_world_options_pending(opts);
+    mmapi_log_info("mistrimulti", "New world options: " + json_stringify(opts));
+    s.orig_enter_game(new_state);
+}
+
+// Runs fn(arg) a few frames later, once the popup that asked for it has finished closing.
+function mistrimulti_savespace_later(fn, arg) {
+    __mistrimulti_savespace().later = { fn: fn, arg: arg, frames: 12 };
+}
+
+// Every mod tick (the title screen too).
+function mistrimulti_savespace_tick() {
+    var s = __mistrimulti_savespace();
+    var l = s[$ "later"];
+    if (!is_struct(l)) return;
+    l.frames--;
+    if (l.frames > 0) return;
+    s.later = undefined;
+    try { l.fn(l.arg); }
+    catch (e) { mmapi_log_error("mistrimulti", "New world popup failed: " + string(e)); s.orig_enter_game(l.arg); }
 }
 
 // Wrapper installed over TitleMenu.enter_game. New Game asks first; Continue / Load keep the current space.
@@ -235,6 +284,9 @@ function mistrimulti_local_missing(value, ctx) {
         case "mistrimulti/host_world": return "Multiplayer world";
         case "mistrimulti/continue_world": return "Continue your world";
         case "mistrimulti/new_world": return "Start a new world";
+        case "mistrimulti/opt_hearts_title": return "Hearts with villagers";
+        case "mistrimulti/opt_hearts_own": return "Each player's own (Recommended)";
+        case "mistrimulti/opt_hearts_shared": return "Shared by everyone";
         case "mistrimulti/no_world_title": return "No world to join yet";
         case "mistrimulti/no_world_body": return "The host's world was not found on this computer. Choose Multiplayer and Join a game again.";
         case "mistrimulti/offline_title": return "Multiplayer is offline";
