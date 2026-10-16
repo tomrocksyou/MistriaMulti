@@ -67,6 +67,7 @@ function mistrimulti_player_data_tick() {
             r.player_error = "Waiting for the hosted world.";
             return;
         }
+        if (r[$ "world_mismatch"] == true) { r.player_ready = false; r.player_error = "The host plays another world."; return; }   // MistriMultiMenu.gml
         var expected = string_replace_all(host[$ "uid"] ?? "", ":", "_") + "_";
         if (!mistrimulti_valid_uid(host[$ "uid"]) || string_length(host.world) > 80
             || string_copy(host.world, 1, string_length(expected)) != expected) return;

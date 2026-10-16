@@ -100,6 +100,7 @@ being torn down. So:
 | lost | no host frames: the host's game or helper died, the network is down, or this guest's own helper stopped. The helper expires a silent peer after 10 s | 20 s (so about 30 s after the host's last frame); a notice "Connection to the host lost. Waiting..." after 4 s | message, then title |
 | closed | the host's goodbye frame: it went back to its title screen | 3 s | message, then title |
 | restarted | the host's world epoch or world key changed: it reloaded or started another world | 2 s | message, then title |
+| wrongworld | the host plays another world than the one this guest loaded (`r.world_mismatch`, set by `MistriMultiMenu.gml` from the world key's id and `Game.unique_identifier`); the character is never handed to such a host | 2 s | message ("The host is playing a different world than the one you downloaded ..."), then title; `docs/SYNC-MENU.md`, "Which world does a guest get?" |
 
 A return of the host inside its grace period (a short outage) cancels the state; nothing happens. A guest cannot tell "the host
 died" from "my own connection died"; both show as `lost`.

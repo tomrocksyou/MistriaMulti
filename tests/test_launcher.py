@@ -399,6 +399,19 @@ def test_world_server():
             sb.cleanup()
 
 
+def test_world_info():
+    """The world info extension against the real Windows launcher (cases shared with the Linux test): the host's menu\\world.txt."""
+    sb = Sandbox()
+    try:
+        sb.config("mode=host\r\nport=47883\r\n")
+        proc = sb.steam(["--slow"])
+        assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists(), 30)
+        worldserver_cases.check_world_info(sb.mp, sb.mod / "bridge_0", sb.mod / "menu" / "world.txt", wait_for, False)
+        finish(proc)
+    finally:
+        sb.cleanup()
+
+
 def test_guest_refreshes_world():
     sb = Sandbox()
     try:
@@ -798,12 +811,14 @@ def test_menu_join():
         assert st["state"] == "ready" and st["session"] == "join" and st["err"] == 0, st
         assert (sb.mp / "game-77-autosave.sav").read_bytes() == data, "world not downloaded intact"
         assert server.served == [json.loads((sb.mod / "control.json").read_text())["id"]] and not server.refused, (server.served, server.refused)
+        assert (st["hw"], st["hf"], st["dw"]) == (0, 0, 77), ("a host without world info: nothing claimed, the downloaded world's id is reported", st)
         ctl = json.loads((sb.mod / "control.json").read_text())
         assert ctl["enabled"] is True and ctl["mode"] == "join" and 1 <= ctl["id"] <= 7, ctl
         assert wait_for(lambda: json.loads((sb.mod / f"bridge_{ctl['id']}" / "status.json").read_text())["auth"] == 2, 30), "guest helper not authenticated"
         seq = menu_cmd(sb, cmd="stop")
         st = menu_wait(sb, seq, ("idle",))
         assert st["session"] == "none" and json.loads((sb.mod / "control.json").read_text())["enabled"] is False
+        assert (st["hw"], st["hf"], st["dw"]) == (0, 0, 0), st
         finish(proc)
         print("menu join: a missing or wrong password is refused before any download, the right one joins and downloads the world; stop leaves")
     finally:
@@ -815,6 +830,67 @@ def test_menu_join():
                 host_helper.kill()
         if server:
             server.close()
+        sb.cleanup()
+
+
+def test_menu_join_world_info():
+    """The Windows guest reads the host's signed world info (byte 6, u32 at 44) and reports it next to the world that arrived; a host
+    whose current world is not saved (status 4) is error 48 and nothing is downloaded."""
+    for kwargs, check in (
+            ({"status": 0, "info_flags": 3, "host_world": 4242}, lambda st, sb: (st["state"], st["hw"], st["hf"], st["dw"]) == ("ready", 4242, 3, 77)),
+            ({"status": 4, "info_flags": 1, "host_world": 5151}, lambda st, sb: (st["state"], st["err"], st["hw"], st["hf"], st["dw"]) == ("error", 48, 5151, 1, 0)
+             and not (sb.mp.exists() and list(sb.mp.iterdir())))):
+        sb = Sandbox()
+        host_helper = server = None
+        try:
+            hostdir = sb.root / "hostbridge"
+            hostdir.mkdir()
+            server = worldserver_cases.KeyFileWorldServer(hostdir, os.urandom(5000), **kwargs)
+            exe = str(sb.bin / "mistrimulti-helper.exe")
+            host_helper = subprocess.Popen(([exe] if on_windows else ["xvfb-run", "-a", WINE, exe]) + ["host", "7777", "0", "4d495354", wpath(hostdir)],
+                                           env=sb.env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert wait_for(lambda: (hostdir / "status.json").exists(), 30), "the host helper did not start"
+            proc = start_menu_game(sb)
+            st = menu_wait(sb, menu_cmd(sb, cmd="join", host="127.0.0.1"), ("error", "ready"), 60)
+            assert check(st, sb), (kwargs, st)
+            finish(proc)
+        finally:
+            if host_helper:
+                (hostdir / "stop.flag").write_bytes(b"stop")
+                try:
+                    host_helper.communicate(timeout=20)
+                except Exception:
+                    host_helper.kill()
+            if server:
+                server.close()
+            sb.cleanup()
+    print("menu join world info: the host's signed world info is reported (hw/hf/dw); an unsaved host world is error 48 and writes nothing")
+
+
+def test_menu_world_note_lifetime():
+    """menu\\world.txt (the mod's note about the world the host plays) belongs to a session: a new session and a stop delete it, and so does
+    the start of the launcher; while it exists a host without that world's save says so in its discovery answer (flags 4, not 8)."""
+    sb = Sandbox()
+    try:
+        note = sb.mod / "menu" / "world.txt"
+        (sb.mod / "menu").mkdir()
+        note.write_text("id=5\n")                                  # left over from an earlier run
+        proc = start_menu_game(sb)
+        assert not note.exists(), "the launcher forgets a note of an earlier run"
+        seq = menu_cmd(sb, cmd="host")
+        menu_wait(sb, seq, ("hosting",))
+        note.write_text("id=5\n")
+        assert wait_for(lambda: worldserver_cases.query_flags() == 4, 8), worldserver_cases.query_flags()
+        seq = menu_cmd(sb, cmd="host")                              # a new session
+        menu_wait(sb, seq, ("hosting",))
+        assert not note.exists()
+        note.write_text("id=5\n")
+        seq = menu_cmd(sb, cmd="stop")
+        menu_wait(sb, seq, ("idle",))
+        assert not note.exists()
+        finish(proc)
+        print("menu world note: a note of an earlier run, a new session and stop all delete it; the discovery flags follow it")
+    finally:
         sb.cleanup()
 
 
@@ -894,8 +970,8 @@ def test_menu_overrides_launcher_cfg():
 
 
 ALL = [test_host, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune, test_configure, test_fuzz,
-       test_discovery_responder, test_scan, test_world_server, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password,
-       test_menu_standby, test_menu_host_and_stop, test_menu_scan_and_addresses, test_menu_join, test_menu_command_validation,
+       test_discovery_responder, test_scan, test_world_server, test_world_info, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password,
+       test_menu_standby, test_menu_host_and_stop, test_menu_scan_and_addresses, test_menu_join, test_menu_join_world_info, test_menu_world_note_lifetime, test_menu_command_validation,
        test_menu_helper_missing, test_menu_overrides_launcher_cfg]
 only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_password runs just those
 for fn in ALL:

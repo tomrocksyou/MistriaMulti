@@ -10,6 +10,7 @@ function __mistrimulti_savespace() {
         global.__mistrimulti_savespace = {
             solo_dir: undefined, active: false, title_menu: undefined,
             orig_enter_game: undefined, orig_transition_to: undefined, choosing: false, error: "", entry: "",
+            choose_popup: undefined, new_world: false,
         };
     }
     return global.__mistrimulti_savespace;
@@ -111,20 +112,47 @@ function mistrimulti_savespace_popup(title_key, body_key) {
     popup.spawn();
 }
 
+// True while the Singleplayer / Multiplayer question or the Host / Join flow is really on screen. The flag alone is never trusted: a popup
+// the game closes by itself (Escape, a click outside it) never calls a button, so a flag nobody clears would leave New Game dead until
+// the game is restarted. A flag without a live popup or flow is cleared here (and a flow left without anything on screen is reset).
+function mistrimulti_savespace_choosing_live() {
+    var s = __mistrimulti_savespace();
+    if (!s.choosing) return false;
+    var p = s.choose_popup;
+    if (p != undefined && p[$ "close_requested"] != true) return true;
+    if (p == undefined && mistrimulti_menu_flow_alive()) return true;
+    s.choosing = false;
+    s.choose_popup = undefined;
+    try { mistrimulti_menu_reset(true); }
+    catch (e) { mmapi_log_error("mistrimulti", "Menu reset failed: " + string(e)); }
+    mmapi_log_info("mistrimulti", "The Singleplayer / Multiplayer choice was closed without an answer: New Game works again.");
+    return false;
+}
+
 // kind: "new" continues entering a new game, "load" opens the Load menu.
 function mistrimulti_savespace_choose(kind, arg) {
     var s = __mistrimulti_savespace();
-    if (s.choosing) return;
+    if (mistrimulti_savespace_choosing_live()) return;
     s.choosing = true;
-    var mcp = new MultipleChoicePopup("mistrimulti/choose_mode");
-    mcp.option("mistrimulti/singleplayer", mistrimulti_savespace_chosen, [kind, false, arg]);
-    mcp.option("mistrimulti/multiplayer", mistrimulti_savespace_chosen, [kind, true, arg]);
-    mistrimulti_widen_choices(mcp);
+    try {
+        var mcp = new MultipleChoicePopup("mistrimulti/choose_mode");
+        s.choose_popup = mcp.popup;
+        mcp.option("mistrimulti/singleplayer", mistrimulti_savespace_chosen, [kind, false, arg]);
+        mcp.option("mistrimulti/multiplayer", mistrimulti_savespace_chosen, [kind, true, arg]);
+        mistrimulti_widen_choices(mcp);
+    } catch (e) {
+        s.choosing = false;
+        s.choose_popup = undefined;
+        mmapi_log_error("mistrimulti", "The Singleplayer / Multiplayer question failed: " + string(e));
+        if (kind == "new") s.orig_enter_game(arg);
+        else s.orig_transition_to(Menu.Load);
+    }
 }
 
 function mistrimulti_savespace_chosen(kind, multiplayer, arg) {
     var s = __mistrimulti_savespace();
     s.choosing = false;
+    s.choose_popup = undefined;
     if (multiplayer && !mistrimulti_game_supported()) { mistrimulti_savespace_popup("mistrimulti/offline_title", "mistrimulti/offline_version_body"); return; }
     if (multiplayer) {
         // Host a game / Join a game; the flow calls mistrimulti_savespace_enter when the player starts playing.
@@ -205,6 +233,7 @@ function mistrimulti_world_options_ask(new_state) {
 function mistrimulti_world_options_hearts(choice, new_state) {
     var s = __mistrimulti_savespace();
     var opts = mistrimulti_world_options_pending() ?? mistrimulti_world_options_default();
+    s.new_world = true;   // the host starts a NEW world: MistriMultiMenu.gml saves it early so friends can join it
     opts.hearts = choice;
     mistrimulti_world_options_pending(opts);
     mmapi_log_info("mistrimulti", "New world options: " + json_stringify(opts));
@@ -219,6 +248,7 @@ function mistrimulti_savespace_later(fn, arg) {
 // Every mod tick (the title screen too).
 function mistrimulti_savespace_tick() {
     var s = __mistrimulti_savespace();
+    if (s.choosing) mistrimulti_savespace_choosing_live();
     var l = s[$ "later"];
     if (!is_struct(l)) return;
     l.frames--;
@@ -241,7 +271,7 @@ function mistrimulti_title_enter_game(load_state) {
 function mistrimulti_title_transition_to(target) {
     var s = __mistrimulti_savespace();
     try {
-        if (target == Menu.Load && !s.choosing) { mistrimulti_savespace_choose("load", undefined); return; }
+        if (target == Menu.Load && !mistrimulti_savespace_choosing_live()) { mistrimulti_savespace_choose("load", undefined); return; }
     } catch (e) { mmapi_log_error("mistrimulti", "transition_to wrapper failed: " + string(e)); }
     s.orig_transition_to(target);
 }
@@ -268,6 +298,8 @@ function mistrimulti_menu_opened(ctx) {
 function mistrimulti_title_entered(ctx) {
     var s = __mistrimulti_savespace();
     s.choosing = false;
+    s.choose_popup = undefined;
+    s.new_world = false;
     s.mode = "";
     s.entry = "";
     var rt = __mistrimulti_runtime();

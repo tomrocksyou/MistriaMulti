@@ -96,14 +96,17 @@ The event layer does not change the helper's UDP protocol.
 The in-game Host / Join menu talks to the launcher through two files in the same data folder as the bridge, so no network port is
 involved: the mod writes `menu/cmd.txt` (`key=value` lines: `seq`, `cmd` = host | join | scan | stop, `host`, `port`, `password`,
 `room`; the launcher deletes it after reading) and the launcher publishes `menu/status.json` (heartbeat, last `seq`, state, error
-code, addresses, scan results). `docs/SYNC-MENU.md` has the complete format, the state machine and the error codes.
+code, addresses, scan results, and after a join the host's current world). `docs/SYNC-MENU.md` has the complete format, the state machine and
+the error codes. A host's mod also writes `menu/world.txt` (`id=<game id>`, the world it plays now); see "World info" below.
 
 ## Host discovery (UDP 7776)
 
 While a host plays (never in standby: a computer that has not chosen to host does not answer), the launcher (`MistriMultiLauncher.exe` on Windows, `mistrimulti-launcher` on Linux; identical wire behaviour) answers discovery queries on UDP port 7776 (the game traffic itself uses the separate
 port from `launcher.cfg`, 7777 by default). A query is exactly 64 bytes: `MSDQ`, version byte `1`, 59 zero bytes. The reply
 is exactly 64 bytes: `MSDR`, version `1`, flags (bit 0 = the host uses a custom room code, bit 1 = it needs a room password), game port (u16 little-endian),
-computer name (32 bytes, NUL padded), 24 zero bytes. Anything else is ignored, and the reply is never larger than the
+computer name (32 bytes, NUL padded), 24 zero bytes. **World info (added after 0.4.5, backward compatible, versions stay 1):** flags bit 2 = the host
+named the world it plays now, bit 3 = a save of that world exists (so a friend can download it); both are 0 from a host that predates this
+or whose game has not loaded a world yet. Anything else is ignored, and the reply is never larger than the
 query, so the responder cannot amplify traffic. Players scan with a broadcast query on every local network plus a unicast
 query to each Tailscale peer (Windows: `tailscale.exe status --json` from Program Files; Linux: the `tailscale` command found on `PATH`,
 or `$MISTRIMULTI_TAILSCALE`). Discovery gives no authentication: it only tells a friend where to connect. Flag bit 1 says the host needs a room password. On Linux the computer name
@@ -135,7 +138,7 @@ short, long or all-zero file means "no session". The launcher deletes all `world
 | 1 REQUEST | guest | 64 | `MSWQ`, version `2`, slot (1-7) at offset 5, zero to 16, guest nonce `cn` @16, 32 zero bytes |
 | 2 CHALLENGE | host | 32 | `MSWC`, version `2`, status `0`, zero to 16, host nonce `hn` @16 (fresh for every connection) |
 | 3 PROOF | guest | 48 | `MSWP`, version `2`, zero to 16, tag @16 = `HMAC(WK, "MMWORLDQ1" \| slot byte \| cn \| hn)` (32 bytes, not truncated) |
-| 4 HEADER | host | 144 | `MSWR`, version `2`, status (0 ok, 1 no world yet, 2 cannot send, 3 refused) at offset 5, file length (u32, at most 200 MB) @8, SHA-256 of the file @12, file name @48 (64 bytes, NUL padded), tag @112 = `HMAC(WK, "MMWORLDR1" \| slot byte \| cn \| hn \| header bytes 0..111)` |
+| 4 HEADER | host | 144 | `MSWR`, version `2`, status (0 ok, 1 no world yet, 2 cannot send, 3 refused, **4 the host's current world is not saved**) at offset 5, **world info flags @6**, file length (u32, at most 200 MB) @8, SHA-256 of the file @12, **host world id (u32) @44**, file name @48 (64 bytes, NUL padded), tag @112 = `HMAC(WK, "MMWORLDR1" \| slot byte \| cn \| hn \| header bytes 0..111)` |
 | 5 DATA | host | length | the file, only after status 0 |
 
 - The host answers a REQUEST with a CHALLENGE for any slot number, even one without a session, and decides only after the PROOF
@@ -156,7 +159,26 @@ short, long or all-zero file means "no session". The launcher deletes all `world
   The HMAC is built on each program's own SHA-256 (`common/hmac.inc`: bcrypt on Windows, `linux/sha256.inc` on Linux).
 - Client result codes: 0 ok, 1 cannot connect, 2 the host has no world yet, 3 invalid reply, 4 checksum mismatch, 5 cannot
   write, 6 out of memory, 7 refused (no joined session, wrong proof, unsigned or edited reply, or a host that does not speak
-  this protocol; the menu shows code 47).
+  this protocol; the menu shows code 47), 8 the host plays a world it has not saved (status 4; the menu shows code 48).
+
+### World info (which world does the host play?)
+
+A guest used to get "the newest save in the host's multiplayer folder", which is the wrong world when the host started a NEW world
+and has not saved it yet. The extension is backward compatible: it lives in bytes that were zero (and are covered by the header tag),
+and the version numbers stay as they are.
+
+- **The host's mod** (`MistriMultiMenu.gml`) writes `<mod data>/menu/world.txt` = `id=<Game.unique_identifier>` once its world is loaded
+  (a game id: 1..2147483647; it is also the number in every save name `game-<id>-...sav` and the suffix of the mod's world key).
+  The launcher reads it for each world request and discovery query, and deletes it at launcher start and whenever a session
+  starts or stops. No file (or one that does not parse) = the old behaviour: the newest save, no world info.
+- **Header with a note:** only saves whose name carries that id count (the newest of them, automatic or manual). Byte 6: bit 0 = the host named a
+  world, bit 1 = that world has a save; bytes 44..47 = the id. No save of that world: status **4**, no file, flags `1`, the id.
+  Without a note bytes 6 and 44..47 stay zero.
+- **Guest:** the signed header is checked first (an unsigned or edited header is refused as before), then the launcher reports
+  `hw` (host world id, 0 = not told), `hf` (flags) and `dw` (the id in the name of the file that was downloaded) in
+  `menu/status.json`. The mod enters only when `hw == 0`, `dw == 0` or `hw == dw`. Status 4 is menu error 48.
+- **Discovery:** flags bit 2 / bit 3 as above (the launcher looks at the disk at most once a second). The scan result's `flags` passes them on
+  unchanged, so the host list can show "[new world, not saved]" before anyone joins.
 - **When the clients ask.** The in-game menu downloads right after the helper reports the host's WELCOME. A launcher started
   with a `launcher.cfg` join waits up to 5 s for the helper's key file and then refreshes the world as the game starts. The
   managers' *join* only saves `launcher.cfg` (they have no helper session to prove), and say so. The test hook

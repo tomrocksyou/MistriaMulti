@@ -209,6 +209,8 @@ function mistrimulti_guestsave_watch_host(g) {
             g.host_world = host.world;
             state = "ok";
         } else state = (host.epoch == g.host_epoch && host.world == g.host_world) ? "ok" : "restarted";
+        // The host plays another world than the one this game downloaded (MistriMultiMenu.gml sets r.world_mismatch): never stay in it.
+        if (state != "closed" && r[$ "world_mismatch"] == true) state = "wrongworld";
     }
     if (g.host_epoch == "") return;   // the host has never been seen in this session: the guest is simply waiting for it
     var now = get_timer();
@@ -251,7 +253,7 @@ function mistrimulti_guestsave_leave(reason) {
     mmapi_log_flush("mistrimulti");
     try {
         var popup = popup_creator("mistrimulti/guest_gone_title",
-            reason == "lost" ? "mistrimulti/guest_lost_body" : "mistrimulti/guest_closed_body");
+            reason == "lost" ? "mistrimulti/guest_lost_body" : (reason == "wrongworld" ? "mistrimulti/guest_wrong_body" : "mistrimulti/guest_closed_body"));
         popup.create_button("misc_local/return_to_main_menu", mistrimulti_guestsave_exit);
         popup.spawn();
     } catch (e) {
@@ -368,6 +370,7 @@ function mistrimulti_guestsave_local_missing(value, ctx) {
     switch (ctx.key) {
         case "mistrimulti/guest_gone_title": return "Disconnected from the host";
         case "mistrimulti/guest_lost_body": return "The connection to the host was lost. Your character was saved on the host's computer a few seconds ago, and nothing was saved here. Join again from MistriaMulti to continue.";
+        case "mistrimulti/guest_wrong_body": return "The host is playing a different world than the one you downloaded (it may have started a new world that is not saved yet). Your character was not changed. Ask the host to sleep or save once, then join again.";
         case "mistrimulti/guest_closed_body": return "The host closed or restarted the world. Your character stays on the host's computer. Join again from MistriaMulti to continue.";
     }
     return undefined;

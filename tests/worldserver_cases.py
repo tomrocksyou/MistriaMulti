@@ -375,9 +375,10 @@ class KeyFileWorldServer:
     """A world server in front of a REAL host helper: it holds no key of its own and reads `<bridge>/world_<slot>.key` that the
     helper wrote for each authenticated guest, exactly as the real launcher does."""
 
-    def __init__(self, bridge, data, name=b"game-77-autosave.sav"):
+    def __init__(self, bridge, data, name=b"game-77-autosave.sav", status=0, info_flags=0, host_world=0):
         import threading
         self.bridge, self.data, self.name = bridge, data, name
+        self.status, self.info_flags, self.host_world = status, info_flags, host_world      # what the header says (the world info extension)
         self.tcp = socket.socket()
         self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.tcp.bind(ADDRESS)
@@ -407,8 +408,11 @@ class KeyFileWorldServer:
                 try:
                     host = mmauth.WorldHost(conn, self.key_for)
                     if host.handshake():
-                        host.reply(mmauth.world_header(0, self.data, name=self.name))
-                        conn.sendall(self.data)
+                        if self.status == 0:
+                            host.reply(mmauth.world_header(0, self.data, name=self.name, info_flags=self.info_flags, host_world=self.host_world))
+                            conn.sendall(self.data)
+                        else:
+                            host.reply(mmauth.world_header(self.status, info_flags=self.info_flags, host_world=self.host_world))
                         self.served.append(host.slot)
                     else:
                         host.refuse()
@@ -420,3 +424,58 @@ class KeyFileWorldServer:
         self.stop = True
         self.thread.join(timeout=3)
         self.tcp.close()
+
+
+def query_flags(port=7776):
+    """The discovery answer's flags byte of the host on this computer, or None."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(1.0)
+    try:
+        sock.sendto(b"MSDQ\x01" + b"\x00" * 59, ("127.0.0.1", port))
+        reply = sock.recvfrom(256)[0]
+        return reply[5] if len(reply) == 64 and reply[:4] == b"MSDR" else None
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
+def check_world_info(mp, bridge, note, wait_for, linux):
+    """The world info extension (docs/PROTOCOL.md, "World info"): `note` is the host's menu/world.txt, written by the mod. Without it the
+    server behaves as before (newest save, no info). With it only that world's saves count, the signed header names the world and says
+    whether it is saved (byte 6, u32 at 44), a world that was never saved gets a signed status 4, and discovery says the same in flags
+    bits 2 and 3."""
+    new, wk2, wk6 = prepare(mp, bridge, linux)                      # game-1 (older), game-2 (newest), look-alikes
+    (mp / "game-1-5.sav").write_bytes(b"one-five " * 50)
+    os.utime(mp / "game-1-5.sav", (1_700_000_050, 1_700_000_050))   # a manual save of world 1, newer than its autosave
+
+    def header():
+        challenge, answer, cnonce = download(2, wk2)
+        assert answer is not None and len(challenge or b"") == 32 and len(answer) >= 144, answer
+        assert answer[112:144] == mmauth.world_reply_tag(wk2, 2, cnonce, challenge[16:32], answer[:112]), "the world info must be signed"
+        return answer[5], answer[6], int.from_bytes(answer[44:48], "little"), answer[48:112].split(b"\x00")[0], answer[144:]
+
+    assert wait_for(lambda: served(new, wk2), 10), "the world server never served"
+    note.unlink(missing_ok=True)
+    assert header() == (0, 0, 0, b"game-2-autosave.sav", new), "no world.txt: the newest save, no world info (the old behaviour)"
+    assert wait_for(lambda: query_flags() == 0, 5), query_flags()
+    note.write_text("id=1\n")
+    status, flags, hid, name, body = header()
+    assert (status, flags, hid, name, body) == (0, 3, 1, b"game-1-5.sav", b"one-five " * 50), (status, flags, hid, name)
+    assert wait_for(lambda: query_flags() == 12, 5), ("discovery: a named, saved world is flags 4 + 8", query_flags())
+    note.write_text("id=424242\n")                                   # the host plays a world it never saved
+    assert wait_for(lambda: header()[:3] == (4, 1, 424242), 5), header()[:3]
+    status, flags, hid, name, body = header()
+    assert body == b"" and name == b"", "an unsaved world sends no file, not even someone else's"
+    assert wait_for(lambda: query_flags() == 4, 5), ("discovery: a named, unsaved world is flags 4", query_flags())
+    note.write_text("id=2\n")
+    assert wait_for(lambda: header() == (0, 3, 2, b"game-2-autosave.sav", new), 5), header()[:4]
+    for junk in (b"id=abc", b"id=0\n", b"id=99999999999\n", b"id=2147483648\n", b"xx id=2\n", b"", b"id=-3", b"id=" + b"9" * 500, bytes(range(1, 60))):
+        note.write_bytes(junk)
+        assert header() == (0, 0, 0, b"game-2-autosave.sav", new), ("unusable note -> the old behaviour", junk[:20], header()[:4])
+    note.write_text("id=2 trailing words\n")
+    assert header()[:3] == (0, 3, 2), "the id is the digits after id="
+    note.unlink()
+    assert header()[:3] == (0, 0, 0)
+    print("world info: no note = newest save; a note limits the server to that world's newest save (manual or auto) and signs its id and saved flag; "
+          "an unsaved world gets a signed status 4 and no file; discovery flags 4/8; junk notes change nothing")
