@@ -42,6 +42,8 @@ Start the game from Steam like normal, then New Game (or Load Game) > **Multipla
 
 Your singleplayer saves stay separate. Press F8 to see if you're connected.
 
+The title screen shows your MistriaMulti version bottom left; when a newer release exists an **Update** button appears next to it (the daily check can be switched off, see [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md)).
+
 More help: [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md). Technical stuff: [docs/DEVELOPERS.md](docs/DEVELOPERS.md).
 
 ## License

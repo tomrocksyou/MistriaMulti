@@ -6,7 +6,7 @@ What it cannot tell: that the real nodes render, where they land on screen, or t
 in-game checklist)."""
 from gml_subset import GStruct, GmlError
 
-ALIGN = GStruct(LeftIn=0, RightIn=1, Center=2, TopIn=3, BottomIn=4, Middle=5)
+ALIGN = GStruct(LeftIn=0, RightIn=1, Center=2, TopIn=3, BottomIn=4, Middle=5, RightOut=6, LeftOut=7)
 LAYERS = GStruct(WorldSpace=0, Hud=1, Standard=2, ScreenFader=3, AboveFader=4, Popup=5)
 
 
@@ -16,6 +16,7 @@ class FakeAnchor:
         self.interp = interp            # the interpreter whose ANCHOR builtin is replaced by `rebuild`
         self.nodes = []
         self.broken = False
+        self.broken_nine = False
         self.struct = None
         self.rebuild()
 
@@ -24,17 +25,27 @@ class FakeAnchor:
         for n in self.nodes:
             n["freed"] = n["freed"] or free
             n["stale"] = True               # belongs to the old ANCHOR: no longer drawn either way
-        fields = dict(screen_canvas=GStruct(freed=False), text=self.text, wrap_for_local=lambda t: t,
+        fields = dict(screen_canvas=GStruct(freed=False), text=self.text, nine_slice=self.nine_slice, wrap_for_local=lambda t: t,
                       get_text_font=lambda: 0, popup_is_open=lambda: False)
         fields.update(self.extras)
         self.struct = GStruct(**fields)
         if self.interp is not None:
             self.interp.builtins["ANCHOR"] = self.struct
 
-    def text(self, parent, z, layer):
+    def text(self, parent, z=None, layer=None):
         if self.broken:
             raise GmlError("ANCHOR.text failed")
-        node = GStruct(freed=False, stale=False, text="", color=16777215, alpha=1, x=0, y=0, z=z, layer=layer, align=None)
+        return self.make(parent, z, layer, "text")
+
+    def nine_slice(self, parent, z=None, layer=None):
+        """The game's button: a nine-slice sprite node with a size, a tap callback and an enabled flag."""
+        if self.broken_nine:
+            raise GmlError("ANCHOR.nine_slice failed")
+        return self.make(parent, z, layer, "nine_slice")
+
+    def make(self, parent, z, layer, kind):
+        node = GStruct(freed=False, stale=False, text="", color=16777215, alpha=1, x=0, y=0, z=z, layer=layer, align=None,
+                       kind=kind, parent=parent, enabled=True, size=None, sprites=None, tap=None)
 
         def setter(field, make=lambda *a: a[0]):
             def f(*a):
@@ -46,6 +57,11 @@ class FakeAnchor:
         node["set_alpha"] = setter("alpha")
         node["set_align"] = setter("align", lambda h, v: (h, v))
         node["set_xy"] = setter("pos", lambda x, y: (x, y))
+        node["set_x"] = setter("x")
+        node["set_size"] = setter("size", lambda w, h: (w, h))
+        node["set_sprites_from_key"] = setter("sprites")
+        node["set_enabled"] = setter("enabled")
+        node["set_tap_callback"] = setter("tap")
         self.nodes.append(node)
         return node
 

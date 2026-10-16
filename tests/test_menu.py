@@ -26,7 +26,7 @@ from gml_subset import GStruct, GArray
 
 ROOT = Path(__file__).resolve().parent.parent
 GML_DIR = ROOT / "mod/mistrimulti/gml"
-FILES = ("MistriMultiSaveSpace.gml", "MistriMultiStatus.gml", "MistriMultiMenu.gml", "MistriMultiHudText.gml")
+FILES = ("MistriMultiSaveSpace.gml", "MistriMultiStatus.gml", "MistriMultiMenu.gml", "MistriMultiHudText.gml", "MistriMultiUpdateUI.gml")
 MOD = "mod"                       # stands for mmapi_mod_data_dir("mistrimulti")
 FRAME_US = 16667
 

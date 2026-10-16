@@ -138,7 +138,7 @@ function mistrimulti_tick() {
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
     // The Host / Join menu and the badge's watchdog work on the title screen too, before any multiplayer world exists.
-    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); mistrimulti_badge_tick(); mistrimulti_savespace_tick(); }
+    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); mistrimulti_badge_tick(); mistrimulti_updateui_tick(); mistrimulti_savespace_tick(); }
     catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
     // Multiplayer starts only after the player picked the multiplayer save space.
     if (!r.initialized && !__mistrimulti_savespace().active) return;
@@ -368,7 +368,7 @@ function mistrimulti_show_status() {
         mistrimulti_netstatus_refresh();
         var shown = mistrimulti_status_text().text;
         var reason = n.why != "" ? n.why : __mistrimulti_menu().why;
-        create_notification(ANCHOR.wrap_for_local(shown + (reason != "" ? " (" + reason + ")" : "")));
+        create_notification(ANCHOR.wrap_for_local(shown + (reason != "" ? " (" + reason + ")" : "") + mistrimulti_update_note()));
         return;
     }
     var count = 0;
@@ -379,6 +379,7 @@ function mistrimulti_show_status() {
     if (r.mode == "join" && r.player_revision > r.player_saved_revision) text += " | Saving player progress";
     var trust = mistrimulti_trust_status_text();
     if (trust != "") text += " | " + trust;
+    text += mistrimulti_update_note();
     create_notification(ANCHOR.wrap_for_local(text));
 }
 

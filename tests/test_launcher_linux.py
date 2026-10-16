@@ -1293,7 +1293,7 @@ def menu_wait(sb, seq, states=("idle", "hosting", "ready", "error", "stopped"), 
 def long_game(sb):
     """A game that keeps running for two minutes (the test game ends after 12 s at most; joins that wait for a timeout take longer)."""
     game = sb.game / "FieldsOfMistria"
-    game.write_text("#!/bin/sh\nsleep 120\n")
+    game.write_text("#!/bin/sh\nexec /bin/sleep 120\n")
     game.chmod(0o755)
 
 
@@ -1695,6 +1695,456 @@ def test_menu_overrides_launcher_cfg():
         sb.cleanup()
 
 
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# The title screen's Update button: cmd=update runs the update program, cmd=update_cancel stops it, and the daily release check
+# (common/updatecore.inc, docs/SYNC-UPDATE.md). The update program is a stand-in script that behaves as the manager's
+# `update --result <file>` does (key=value lines, state / version / message / error, exit 0 on done or needs_momi).
+STUB = r"""#!/bin/sh
+dir=$(dirname "$0")
+echo "$$ $*" >> "$dir/upd_runs.txt"
+echo $$ > "$dir/upd_pid.txt"
+res="$3"
+put() { printf '%b' "$1" > "$res.t"; mv "$res.t" "$res"; }
+case "$MM_STUB" in
+  ok)  put 'state=checking\n'; sleep 1.1; put 'state=downloading\nversion=0.4.7\nmessage=Downloading 0.4.7\n'; sleep 1.1
+       put 'state=installing\nversion=0.4.7\n'; sleep 1.1; put 'state=done\nversion=0.4.7\nmessage=Installed\n'; exit 0;;
+  momi) put 'state=downloading\nversion=0.4.7\n'; sleep 1.1; put 'state=needs_momi\nversion=0.4.7\nmessage=Press Install in MOMI\n'; exit 0;;
+  fail) put 'state=checking\n'; sleep 1.1; put 'state=failed\nmessage=No internet connection\nerror=5\n'; exit 3;;
+  crash) sleep 1.1; exit 9;;
+  silent) sleep 1.1; exit 0;;
+  nonzero_done) put 'state=done\nversion=0.4.7\n'; exit 2;;
+  hang) put 'state=downloading\nversion=0.4.7\n'; exec sleep 600;;
+  install_hang) put 'state=installing\nversion=0.4.7\n'; exec sleep 600;;
+  hostile) put 'state=exploding\nmessage=x\n'; sleep 1.1
+       put 'state=failed\nversion=../../evil\nmessage=Say "hi" \\ there\0001\0376 end\nerror=77777\n'; exit 1;;
+  longmsg) put "state=failed\nmessage=$(printf 'A%.0s' $(seq 1 300))\nerror=12\n"; exit 1;;
+esac
+"""
+
+
+def stub_manager(sb):
+    path = sb.bin / "mistrimulti-manager"
+    path.write_text(STUB)
+    path.chmod(0o755)
+    return path
+
+
+def upd_runs(sb):
+    p = sb.bin / "upd_runs.txt"
+    return p.read_text().splitlines() if p.exists() else []
+
+
+def upd_collect(sb, until, secs=25):
+    """Polls status.json and returns the list of distinct update states seen, until `until(st)` holds."""
+    seen = []
+
+    def go():
+        st = menu_status(sb)
+        if not seen or seen[-1] != st["us"]:
+            seen.append(st["us"])
+        return until(st)
+
+    assert wait_for(go, secs), ("update never reached the wanted state", seen, menu_status(sb))
+    return seen
+
+
+def start_update_game(sb, scenario="ok", **env):
+    stub_manager(sb)
+    long_game(sb)
+    return start_menu_game(sb, MM_STUB=scenario, **env)
+
+
+def test_update_run_ok():
+    sb = Sandbox()
+    try:
+        proc = start_update_game(sb, "ok")
+        st = menu_status(sb)
+        assert st["us"] == "none" and st["ur"] == 0 and st["ue"] == 0 and st["uv"] == "" and st["um"] == "" and st["update"] == "none", st
+        seq = menu_cmd(sb, cmd="update")
+        seen = upd_collect(sb, lambda s: s["us"] == "done")
+        for want in ("checking", "downloading", "installing", "done"):
+            assert want in seen, (want, seen)
+        st = menu_status(sb)
+        assert st["seq"] == seq and st["ur"] == 1 and st["uv"] == "0.4.7" and st["ue"] == 0 and st["um"] == "Installed", st
+        assert st["state"] == "idle" and st["session"] == "none", "the update must not touch the session state"
+        runs = upd_runs(sb)
+        assert len(runs) == 1 and runs[0].split(" ", 1)[1] == f"update --result {sb.mod / 'menu' / 'update.txt'}", runs
+        # a finished update is final: pressing again changes nothing
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("idle",))
+        time.sleep(0.5)
+        assert len(upd_runs(sb)) == 1 and menu_status(sb)["us"] == "done"
+        assert proc.poll() is None, "the game must keep running during an update"
+        proc.terminate()
+        print("update run: checking, downloading, installing, done relayed with version and message; one program started with the result file; the session state untouched")
+    finally:
+        sb.cleanup()
+
+
+def test_update_needs_momi_and_failures():
+    sb = Sandbox()
+    try:
+        proc = start_update_game(sb, "momi")
+        menu_cmd(sb, cmd="update")
+        upd_collect(sb, lambda s: s["us"] == "needs_momi")
+        st = menu_status(sb)
+        assert st["uv"] == "0.4.7" and st["um"] == "Press Install in MOMI" and st["ue"] == 0, st
+        proc.terminate()
+    finally:
+        sb.cleanup()
+    # (scenario, expected error code, expected message): a failure the program describes, and the ones it does not
+    cases = [("fail", 5, "No internet connection"), ("crash", 64, ""), ("silent", 63, ""), ("nonzero_done", 64, ""),
+             ("hostile", 64, "Say 'hi' / there end"), ("longmsg", 12, "A" * 90)]
+    for scenario, err, msg in cases:
+        sb = Sandbox()
+        try:
+            proc = start_update_game(sb, scenario)
+            menu_cmd(sb, cmd="update")
+            seen = upd_collect(sb, lambda s: s["us"] == "failed")
+            st = menu_status(sb)
+            assert "exploding" not in seen, seen
+            assert st["ue"] == err and st["um"] == msg and st["uv"] == ("0.4.7" if scenario == "nonzero_done" else ""), (scenario, st)
+            json.loads((sb.mod / "menu" / "status.json").read_text())      # valid JSON whatever the program wrote
+            # trying again is allowed after a failure: a second run
+            menu_cmd(sb, cmd="update")
+            assert wait_for(lambda: len(upd_runs(sb)) == 2, 10), (scenario, upd_runs(sb))
+            assert menu_status(sb)["ur"] == 2
+            proc.terminate()
+        finally:
+            sb.cleanup()
+    print("update failures: described, silent and crashing programs, a failure exit outranking 'done', hostile and oversized messages cleaned, retry allowed")
+
+
+def test_update_one_at_a_time_busy_and_cancel():
+    sb = Sandbox()
+    try:
+        proc = start_update_game(sb, "hang")
+        menu_cmd(sb, cmd="update")
+        upd_collect(sb, lambda s: s["us"] == "downloading")
+        pid = int((sb.bin / "upd_pid.txt").read_text())
+        # a second `update` while one runs starts nothing
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("idle",))
+        time.sleep(0.6)
+        assert len(upd_runs(sb)) == 1 and menu_status(sb)["ur"] == 1
+        # cancel: the program is killed, the state goes back to none, a new run can start
+        seq = menu_cmd(sb, cmd="update_cancel")
+        menu_wait(sb, seq, ("idle",))
+        assert menu_status(sb)["us"] == "none"
+        assert wait_for(lambda: not Path(f"/proc/{pid}").exists(), 5), "the update program still runs"
+        menu_cmd(sb, cmd="update")
+        assert wait_for(lambda: len(upd_runs(sb)) == 2, 10)
+        assert menu_status(sb)["ur"] == 2
+        proc.terminate()
+    finally:
+        sb.cleanup()
+    sb = Sandbox()
+    try:
+        proc = start_update_game(sb, "install_hang")
+        menu_cmd(sb, cmd="update")
+        upd_collect(sb, lambda s: s["us"] == "installing")
+        pid = int((sb.bin / "upd_pid.txt").read_text())
+        menu_wait(sb, menu_cmd(sb, cmd="update_cancel"), ("idle",))
+        time.sleep(0.8)
+        assert menu_status(sb)["us"] == "installing" and Path(f"/proc/{pid}").exists(), "an installation must not be cut off half way"
+        proc.terminate()
+        os.kill(pid, 9)
+    finally:
+        sb.cleanup()
+    sb = Sandbox()
+    try:
+        proc = start_update_game(sb, "hang")
+        menu_wait(sb, menu_cmd(sb, cmd="update_cancel"), ("idle",))                 # nothing running
+        assert menu_status(sb)["us"] == "none" and upd_runs(sb) == []
+        # not while hosting or joining
+        menu_wait(sb, menu_cmd(sb, cmd="host"), ("hosting",))
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("hosting",))
+        st = menu_status(sb)
+        assert st["us"] == "failed" and st["ue"] == 61 and st["ur"] == 1 and st["state"] == "hosting", st
+        assert upd_runs(sb) == [], "no update program while hosting"
+        menu_wait(sb, menu_cmd(sb, cmd="stop"), ("idle",))
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("idle",))
+        assert wait_for(lambda: len(upd_runs(sb)) == 1, 10) and menu_status(sb)["ur"] == 2
+        proc.terminate()
+    finally:
+        sb.cleanup()
+    print("update: one program at a time, cancel kills it (but not an installation), refused with code 61 while hosting")
+
+
+def test_update_timeout_and_missing_program():
+    sb = Sandbox()
+    try:
+        proc = start_update_game(sb, "hang", MISTRIMULTI_UPDATE_TIMEOUT_MS="2500")
+        menu_cmd(sb, cmd="update")
+        upd_collect(sb, lambda s: s["us"] == "failed", 20)
+        st = menu_status(sb)
+        assert st["ue"] == 66, st
+        pid = int((sb.bin / "upd_pid.txt").read_text())
+        assert wait_for(lambda: not Path(f"/proc/{pid}").exists(), 5), "a timed out program must be killed"
+        proc.terminate()
+    finally:
+        sb.cleanup()
+    sb = Sandbox()
+    try:
+        long_game(sb)
+        (sb.bin / "mistrimulti-manager").unlink(missing_ok=True)   # no mistrimulti-manager at all
+        proc = start_menu_game(sb)
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("idle",))
+        st = menu_status(sb)
+        assert st["us"] == "failed" and st["ue"] == 62 and st["state"] == "idle", st
+        proc.terminate()
+    finally:
+        sb.cleanup()
+    print("update: a hung program is killed at the time limit (66), a missing program is reported (62)")
+
+
+# ----- the release check -----
+import http.server
+import socketserver
+
+
+class ReleaseServer:
+    """A fake release server: serves any path with `body` (after `delay` seconds, with `status`) and counts requests."""
+
+    def __init__(self, body=b"version 0.4.7\n", delay=0, status=200):
+        outer = self
+        self.body, self.delay, self.status, self.hits = body, delay, status, 0
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                outer.hits += 1
+                if outer.delay:
+                    time.sleep(outer.delay)
+                try:
+                    self.send_response(outer.status)
+                    self.send_header("Content-Length", str(len(outer.body)))
+                    self.end_headers()
+                    self.wfile.write(outer.body)
+                except OSError:
+                    pass
+
+            def log_message(self, *a):
+                pass
+
+        class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+        self.httpd = S(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/latest.txt"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def install_manifest(sb, version="0.4.6"):
+    d = sb.game / "mods" / "mistrimulti"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "manifest.toml").write_text(f'name = "MistriaMulti"\nauthor = "MistriaMulti"\nversion = "{version}"\nminInstallerVersion = "0.16.5"\n')
+
+
+def check_file(sb):
+    p = sb.mod / "update_check.txt"
+    return dict(l.split("=", 1) for l in p.read_text().splitlines() if "=" in l) if p.exists() else None
+
+
+def run_check(sb, url, **env):
+    """Starts a long game with the release check pointed at `url`."""
+    long_game(sb)
+    return start_menu_game(sb, MISTRIMULTI_RELEASE_URL=url, **env)
+
+
+def stop_game(proc):
+    proc.terminate()
+    try:
+        proc.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def test_release_check():
+    sb = Sandbox()
+    srv = ReleaseServer()
+    try:
+        install_manifest(sb, "0.4.6")
+        proc = run_check(sb, srv.url)
+        assert wait_for(lambda: menu_status(sb)["update"] == "0.4.7", 12), menu_status(sb)
+        c = check_file(sb)
+        assert c and c["ok"] == "1" and c["latest"] == "0.4.7" and abs(int(c["checked"]) - time.time()) < 60, c
+        assert srv.hits == 1
+        stop_game(proc)
+        # a second start within a day: no request, the remembered answer is still published
+        proc = run_check(sb, srv.url)
+        assert wait_for(lambda: menu_status(sb)["update"] == "0.4.7", 6), menu_status(sb)
+        time.sleep(1.5)
+        assert srv.hits == 1, "checked twice within a day"
+        stop_game(proc)
+        # a day later: asked again, and a newer answer replaces the old one
+        (sb.mod / "update_check.txt").write_text(f"checked={int(time.time()) - 86401}\nok=1\nlatest=0.4.7\n")
+        srv.body = b"# a comment\n\nversion 0.5.0\nabc mod/mistrimulti/manifest.toml\nend 1\n"
+        proc = run_check(sb, srv.url)
+        assert wait_for(lambda: menu_status(sb)["update"] == "0.5.0", 12), menu_status(sb)
+        assert srv.hits == 2 and check_file(sb)["latest"] == "0.5.0"
+        stop_game(proc)
+        # the installed version is the latest, or newer: nothing to offer
+        for version in ("0.5.0", "0.5.1", "0.6"):
+            install_manifest(sb, version)
+            (sb.mod / "update_check.txt").write_text(f"checked={int(time.time()) - 90000}\nok=1\nlatest=0.4.7\n")
+            proc = run_check(sb, srv.url)
+            assert wait_for(lambda: check_file(sb)["latest"] == "0.5.0" and int(check_file(sb)["checked"]) > time.time() - 60, 12)
+            time.sleep(1.2)
+            assert menu_status(sb)["update"] == "none", (version, menu_status(sb))
+            stop_game(proc)
+        print("release check: newer release published, remembered for a day (no second request), asked again after a day, equal / older: none")
+    finally:
+        srv.close()
+        sb.cleanup()
+
+
+def test_release_check_never_delays_or_breaks_the_game():
+    sb = Sandbox()
+    slow = ReleaseServer(delay=30)
+    try:
+        install_manifest(sb)
+        t0 = time.monotonic()
+        proc = sb.steam(["--slow"], env=sb.env(MISTRIMULTI_RELEASE_URL=slow.url))
+        assert wait_for(lambda: sb.ran() is not None, 5), "the game must start at once"
+        assert time.monotonic() - t0 < 3, "the release check delayed the game"
+        # the slow server is given up on within the timeout; the answer stays none; the retry is in three hours
+        assert wait_for(lambda: check_file(sb) is not None, 15), "the check never ended"
+        c = check_file(sb)
+        assert c["ok"] == "0" and menu_status(sb)["update"] == "none", (c, menu_status(sb))
+        finish(proc)
+    finally:
+        slow.close()
+        sb.cleanup()
+    cases = {
+        "garbage": ReleaseServer(body=b"<html>nope</html>"),
+        "evil version": ReleaseServer(body=b"version ../../etc\n"),
+        "not first": ReleaseServer(body=b"hello\nversion 9.9.9\n"),
+        "http error": ReleaseServer(status=404, body=b"version 9.9.9\n"),
+        "huge": ReleaseServer(body=b"version 9.9.9\n" + b"x" * 200000),
+        "empty": ReleaseServer(body=b""),
+    }
+    try:
+        for name, srv in cases.items():
+            sb = Sandbox()
+            try:
+                install_manifest(sb)
+                proc = run_check(sb, srv.url)
+                assert wait_for(lambda: check_file(sb) is not None, 12), (name, "no check ran")
+                time.sleep(1.2)
+                st = menu_status(sb)
+                assert st["update"] == "none" and check_file(sb)["ok"] == "0", (name, st, check_file(sb))
+                assert st["state"] == "idle" and proc.poll() is None
+                stop_game(proc)
+            finally:
+                sb.cleanup()
+    finally:
+        for srv in cases.values():
+            srv.close()
+    # nothing listens at all / no curl
+    sb = Sandbox()
+    try:
+        install_manifest(sb)
+        proc = run_check(sb, "http://127.0.0.1:9/latest.txt")
+        assert wait_for(lambda: check_file(sb) is not None, 12)
+        assert check_file(sb)["ok"] == "0" and menu_status(sb)["update"] == "none"
+        stop_game(proc)
+    finally:
+        sb.cleanup()
+    sb = Sandbox()
+    try:
+        install_manifest(sb)
+        proc = run_check(sb, "http://127.0.0.1:9/latest.txt", PATH="/nonexistent")
+        assert wait_for(lambda: check_file(sb) is not None, 12)
+        assert menu_status(sb)["update"] == "none" and proc.poll() is None
+        stop_game(proc)
+    finally:
+        sb.cleanup()
+    print("release check: never delays the game (slow server), and a wrong, hostile, oversized, missing or unreachable answer or a missing curl is silent")
+
+
+def test_release_check_needs_manifest_and_honours_opt_out():
+    sb = Sandbox()
+    srv = ReleaseServer()
+    try:
+        proc = run_check(sb, srv.url)                                   # no manifest.toml: the installed version is unknown
+        assert wait_for(lambda: check_file(sb) is not None, 12)
+        time.sleep(1.2)
+        assert menu_status(sb)["update"] == "none", menu_status(sb)
+        stop_game(proc)
+    finally:
+        sb.cleanup()
+    for text in ("check=off\n", "check=OFF\r\n", "# my choice\ncheck=no\n", "check=0", "check=false\n"):
+        sb = Sandbox()
+        try:
+            install_manifest(sb)
+            (sb.mod / "update.cfg").write_text(text)
+            before = srv.hits
+            proc = run_check(sb, srv.url)
+            time.sleep(3)
+            assert srv.hits == before, f"{text!r}: the check ran although it was turned off"
+            assert menu_status(sb)["update"] == "none" and check_file(sb) is None
+            stop_game(proc)
+        finally:
+            sb.cleanup()
+    sb = Sandbox()                                                      # any other value leaves it on
+    try:
+        install_manifest(sb)
+        (sb.mod / "update.cfg").write_text("check=on\n")
+        proc = run_check(sb, srv.url)
+        assert wait_for(lambda: menu_status(sb)["update"] == "0.4.7", 12)
+        stop_game(proc)
+    finally:
+        srv.close()
+        sb.cleanup()
+    print("release check: unknown installed version means no offer; update.cfg check=off (any case, no, 0, false) stops every request")
+
+
+def test_release_check_retry_rules():
+    srv = ReleaseServer()
+    try:
+        now = int(time.time())
+        for label, text, asks in (
+                ("failed an hour ago", f"checked={now - 3600}\nok=0\n", False),
+                ("failed four hours ago", f"checked={now - 4 * 3600}\nok=0\n", True),
+                ("succeeded 23 hours ago", f"checked={now - 23 * 3600}\nok=1\nlatest=0.4.6\n", False),
+                ("a stamp from the future", f"checked={now + 99999}\nok=1\nlatest=0.4.6\n", True),
+                ("junk stamp", "checked=abc\nok=1\n", True),
+                ("negative stamp", "checked=-5\nok=1\n", True),
+                ("empty file", "", True)):
+            sb = Sandbox()
+            try:
+                install_manifest(sb)
+                (sb.mod / "update_check.txt").write_text(text)
+                before = srv.hits
+                proc = run_check(sb, srv.url)
+                time.sleep(3)
+                assert (srv.hits > before) == asks, (label, srv.hits - before)
+                stop_game(proc)
+            finally:
+                sb.cleanup()
+    finally:
+        srv.close()
+    print("release check: once a day after a success, three hours after a failure; a stamp from the future or junk is not trusted")
+
+
+def test_update_command_fuzz():
+    sb = Sandbox()
+    try:
+        proc = start_update_game(sb, "ok")
+        for cmd in ("update ", "UPDATE", "updates", "update_cancelx", "update\tx", "Update", ""):
+            menu_wait(sb, menu_cmd(sb, cmd=cmd), ("idle",))
+        time.sleep(0.4)
+        assert upd_runs(sb) == [] and menu_status(sb)["us"] == "none"
+        menu_wait(sb, menu_cmd(sb, cmd="update", host="999.9.9.9", password="a b", port="x", room="zz"), ("idle",))
+        assert wait_for(lambda: len(upd_runs(sb)) == 1, 10), "the other fields of an update command do not matter"
+        stop_game(proc)
+    finally:
+        sb.cleanup()
+    print("update command: only the exact word starts it; other fields are ignored")
+
+
 ALL = [test_host, test_time_stamps, test_helper_args, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune,
        test_configure, test_fuzz, test_discovery_responder, test_scan, test_scan_tailscale, test_world_server,
        test_world_info, test_world_round_trip, test_guest_refreshes_world, test_helper_dies_with_launcher, test_steam_probe_and_identity,
@@ -1702,7 +2152,10 @@ ALL = [test_host, test_time_stamps, test_helper_args, test_join_and_identity_reu
        test_manager_host_and_steam_setup, test_manager_join, test_manager_join_interactive, test_manager_save_solo,
        test_password, test_manager_password,
        test_menu_standby, test_menu_host_and_stop, test_menu_helper_arguments, test_menu_scan_and_join, test_menu_join_failures, test_menu_world_note_and_join,
-       test_menu_command_validation, test_menu_helper_missing, test_menu_overrides_launcher_cfg]
+       test_menu_command_validation, test_menu_helper_missing, test_menu_overrides_launcher_cfg,
+       test_update_run_ok, test_update_needs_momi_and_failures, test_update_one_at_a_time_busy_and_cancel, test_update_timeout_and_missing_program,
+       test_release_check, test_release_check_never_delays_or_breaks_the_game, test_release_check_needs_manifest_and_honours_opt_out,
+       test_release_check_retry_rules, test_update_command_fuzz]
 only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_host,test_fuzz runs just those
 for fn in ALL:
     if not only or fn.__name__ in only:

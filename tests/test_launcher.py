@@ -22,6 +22,8 @@ on_windows = os.name == "nt"
 WINE = "/usr/lib/wine/wine64"
 launcher, helper, fake = (Path(a).resolve() for a in sys.argv[1:4])
 updater_exe = Path(sys.argv[4]).resolve() if len(sys.argv) > 4 else None
+fake_update = Path(sys.argv[5]).resolve() if len(sys.argv) > 5 else None     # build/fakeupdate.exe (the update tests)
+fake_curl = Path(sys.argv[6]).resolve() if len(sys.argv) > 6 else None       # build/fakecurl.exe (put in the prefix's System32 as curl.exe)
 
 
 def wpath(p):
@@ -969,12 +971,222 @@ def test_menu_overrides_launcher_cfg():
         sb.cleanup()
 
 
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# The title screen's Update button (docs/SYNC-UPDATE.md): cmd=update runs  MistriMulti.exe --update <result file>  next to the
+# launcher, cmd=update_cancel stops it, and the daily release check reads <game>\mods\mistrimulti\manifest.toml. The update
+# program is build/fakeupdate.exe (tests/fakegame/fakeupdate.asm): it writes the text of fakeupdate.cfg to the result file, sleeps
+# and exits. There is no curl.exe in a Wine prefix, so the release check is tested through its remembered answer (update_check.txt)
+# and its silent failure; the network part is tested with the Linux launcher (tests/test_launcher_linux.py).
+# NOTE: these tests were written without being able to run Wine; the Linux twins in test_launcher_linux.py were run.
+def install_fake_update(sb, cfg):
+    if fake_update is None:
+        raise SystemExit("update tests need build/fakeupdate.exe as the fifth argument")
+    shutil.copy(fake_update, sb.bin / "MistriMulti.exe")
+    (sb.bin / "fakeupdate.cfg").write_bytes(cfg.encode())
+
+
+def upd_wait(sb, us, secs=40):
+    got = []
+
+    def done():
+        got.append(menu_status(sb))
+        return got[-1]["us"] == us
+
+    assert wait_for(done, secs), ("update never reached", us, got[-1] if got else None)
+    return got[-1]
+
+
+def test_update_run():
+    sb = Sandbox()
+    try:
+        install_fake_update(sb, "0 1500\nstate=done\nversion=0.4.7\nmessage=Installed\n")
+        proc = start_menu_game(sb)
+        st = menu_status(sb)
+        assert st["us"] == "none" and st["ur"] == 0 and st["update"] == "none" and st["ue"] == 0, st
+        seq = menu_cmd(sb, cmd="update")
+        st = upd_wait(sb, "done")
+        assert st["seq"] == seq and st["ur"] == 1 and st["uv"] == "0.4.7" and st["um"] == "Installed" and st["ue"] == 0, st
+        assert st["state"] == "idle" and st["session"] == "none"
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("idle",))                    # final: nothing happens
+        assert menu_status(sb)["ur"] == 1
+        finish(proc)
+        print("update run (Windows): MistriMulti.exe --update <file> started, state / version / message relayed, final states are final")
+    finally:
+        sb.cleanup()
+
+
+def test_update_failures_and_momi():
+    for cfg, us, err, msg in (("3 800\nstate=failed\nmessage=No internet connection\nerror=5\n", "failed", 5, "No internet connection"),
+                              ("9 600\n", "failed", 64, ""), ("0 600\n", "failed", 63, ""),
+                              ("2 600\nstate=done\nversion=0.4.7\n", "failed", 64, ""),
+                              ("0 800\nstate=needs_momi\nversion=0.4.7\nmessage=Press Install in MOMI\n", "needs_momi", 0, "Press Install in MOMI"),
+                              ("1 800\nstate=failed\nmessage=Say \"hi\" \\ there\nerror=77777\n", "failed", 64, "Say 'hi' / there")):
+        sb = Sandbox()
+        try:
+            install_fake_update(sb, cfg)
+            proc = start_menu_game(sb)
+            menu_cmd(sb, cmd="update")
+            st = upd_wait(sb, us)
+            assert st["ue"] == err and st["um"] == msg, (cfg, st)
+            json.loads((sb.mod / "menu" / "status.json").read_text())
+            finish(proc)
+        finally:
+            sb.cleanup()
+    print("update failures (Windows): described, silent and failing programs, a failure exit outranking 'done', needs_momi, cleaned messages")
+
+
+def test_update_cancel_timeout_busy_missing():
+    sb = Sandbox()
+    try:
+        install_fake_update(sb, "0 600000\nstate=downloading\nversion=0.4.7\n")
+        proc = start_menu_game(sb)
+        menu_cmd(sb, cmd="update")
+        upd_wait(sb, "downloading")
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("idle",))
+        assert menu_status(sb)["ur"] == 1, "a second update while one runs must start nothing"
+        menu_wait(sb, menu_cmd(sb, cmd="update_cancel"), ("idle",))
+        assert menu_status(sb)["us"] == "none"
+        menu_cmd(sb, cmd="update")
+        upd_wait(sb, "downloading")
+        assert menu_status(sb)["ur"] == 2
+        menu_wait(sb, menu_cmd(sb, cmd="update_cancel"), ("idle",))      # (the program is not tied to the launcher: stop it so Wine can end)
+        finish(proc)
+    finally:
+        sb.cleanup()
+    sb = Sandbox()
+    try:
+        install_fake_update(sb, "0 600000\nstate=downloading\nversion=0.4.7\n")
+        proc = start_menu_game(sb, env=dict(sb.env(), MISTRIMULTI_UPDATE_TIMEOUT_MS="2500"))
+        menu_cmd(sb, cmd="update")
+        st = upd_wait(sb, "failed", 30)
+        assert st["ue"] == 66, st
+        finish(proc)
+    finally:
+        sb.cleanup()
+    sb = Sandbox()
+    try:
+        install_fake_update(sb, "0 600000\nstate=downloading\n")
+        proc = start_menu_game(sb)
+        menu_wait(sb, menu_cmd(sb, cmd="host"), ("hosting",))
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("hosting",))
+        st = menu_status(sb)
+        assert st["us"] == "failed" and st["ue"] == 61 and st["state"] == "hosting", st
+        finish(proc)
+    finally:
+        sb.cleanup()
+    sb = Sandbox()
+    try:
+        proc = start_menu_game(sb)
+        (sb.bin / "MistriMulti.exe").unlink(missing_ok=True)
+        menu_wait(sb, menu_cmd(sb, cmd="update"), ("idle",))
+        st = menu_status(sb)
+        assert st["us"] == "failed" and st["ue"] == 62, st
+        for cmd in ("update ", "UPDATE", "updates", "update_cancelx", "Update"):
+            menu_wait(sb, menu_cmd(sb, cmd=cmd), ("idle", "error"))
+        assert menu_status(sb)["ur"] == 1
+        finish(proc)
+    finally:
+        sb.cleanup()
+    print("update (Windows): one at a time, cancel, time limit (66), busy while hosting (61), program missing (62), only the exact command words")
+
+
+def write_manifest(sb, version="0.4.6"):
+    d = sb.game / "mods" / "mistrimulti"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "manifest.toml").write_text(f'name = "MistriaMulti"\nversion = "{version}"\n')
+
+
+def test_release_check_cache():
+    now = int(time.time())
+    for label, files, want in (("fresh answer, newer", {"update_check.txt": f"checked={now - 600}\nok=1\nlatest=0.4.7\n"}, "0.4.7"),
+                               ("fresh answer, equal", {"update_check.txt": f"checked={now - 600}\nok=1\nlatest=0.4.6\n"}, "none"),
+                               ("opted out", {"update_check.txt": f"checked={now - 600}\nok=1\nlatest=0.4.7\n", "update.cfg": "check=off\r\n"}, "none"),
+                               ("no manifest", {"update_check.txt": f"checked={now - 600}\nok=1\nlatest=0.4.7\n", "NOMANIFEST": ""}, "none")):
+        sb = Sandbox()
+        try:
+            if "NOMANIFEST" not in files:
+                write_manifest(sb)
+            for name, text in files.items():
+                if name != "NOMANIFEST":
+                    (sb.mod / name).write_text(text)
+            proc = start_menu_game(sb)
+            assert wait_for(lambda: menu_status(sb)["update"] == want and (want != "none" or time.sleep(1.5) is None), 30), (label, menu_status(sb))
+            finish(proc)
+        finally:
+            sb.cleanup()
+    # a stale answer and no curl.exe: the try fails silently, is remembered as failed, and the game is not delayed
+    sb = Sandbox()
+    try:
+        write_manifest(sb)
+        (sb.mod / "update_check.txt").write_text(f"checked={now - 200000}\nok=1\nlatest=0.4.6\n")
+        t0 = time.monotonic()
+        proc = sb.steam(["--slow"])
+        assert wait_for(lambda: sb.ran() is not None, 10) and time.monotonic() - t0 < 10
+        time.sleep(3)                                              # (no curl.exe in a Wine prefix: no request is made, the old stamp stays)
+        assert menu_status(sb)["update"] == "none" and "checked=" in (sb.mod / "update_check.txt").read_text()
+        finish(proc)
+    finally:
+        sb.cleanup()
+    print("release check (Windows): remembered answer published, opt-out and missing manifest respected, a missing curl.exe is silent and the game is not delayed")
+
+
+
+def test_release_check_with_curl():
+    """The launcher runs %SystemRoot%\\System32\\curl.exe (here build/fakecurl.exe, which writes "version 0.4.7" to the -o file and its own command line to <file>.args)."""
+    sys32 = Path(os.environ.get("WINEPREFIX", "/tmp/wp")) / "drive_c" / "windows" / "system32"
+    curl = sys32 / "curl.exe"
+    shutil.copy(fake_curl, curl)
+    try:
+        now = int(time.time())
+        sb = Sandbox()
+        try:
+            write_manifest(sb)
+            (sb.mod / "update_check.txt").write_text(f"checked={now - 200000}\nok=1\nlatest=0.4.6\n")
+            proc = start_menu_game(sb)
+            assert wait_for(lambda: menu_status(sb)["update"] == "0.4.7", 40), menu_status(sb)
+            args = (sb.mod / "menu" / "latest.dl.args").read_bytes().decode("utf-16-le")
+            for part in ("curl.exe", "-fsSL", "--max-time 5", "--connect-timeout 3", "--max-filesize 65536", "--proto =https", "--proto-redir =https",
+                         'latest.dl"', "https://github.com/tomrocksyou/MistriaMulti/releases/latest/download/latest.txt"):
+                assert part in args, (part, args)
+            stamp = dict(l.split("=", 1) for l in (sb.mod / "update_check.txt").read_text().splitlines() if "=" in l)
+            assert stamp["ok"] == "1" and stamp["latest"] == "0.4.7" and abs(int(stamp["checked"]) - time.time()) < 120, stamp
+            assert not (sb.mod / "menu" / "latest.dl").exists(), "the downloaded list must be removed"
+            finish(proc)
+            # within a day: no second request
+            (sb.mod / "menu" / "latest.dl.args").unlink()
+            proc = start_menu_game(sb)
+            assert wait_for(lambda: menu_status(sb)["update"] == "0.4.7", 40)
+            time.sleep(2)
+            assert not (sb.mod / "menu" / "latest.dl.args").exists(), "asked twice within a day"
+            finish(proc)
+        finally:
+            sb.cleanup()
+        # the URL override of the tests drops the https-only rule; a quote in it is ignored (it would break the command line)
+        for url, expect in (("http://127.0.0.1:9/latest.txt", "http://127.0.0.1:9/latest.txt"), ('http://x/"y', "https://github.com/")):
+            sb = Sandbox()
+            try:
+                write_manifest(sb)
+                proc = start_menu_game(sb, env=dict(sb.env(), MISTRIMULTI_RELEASE_URL=url))
+                assert wait_for(lambda: (sb.mod / "menu" / "latest.dl.args").exists(), 40)
+                args = (sb.mod / "menu" / "latest.dl.args").read_bytes().decode("utf-16-le")
+                assert expect in args and (("--proto" not in args) == (url.startswith("http://127"))), args
+                finish(proc)
+            finally:
+                sb.cleanup()
+    finally:
+        curl.unlink(missing_ok=True)
+    print("release check (Windows): curl.exe from System32 with the quiet, bounded arguments; the answer is published and remembered for a day; the override is honoured")
+
+
 ALL = [test_host, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune, test_configure, test_fuzz,
        test_discovery_responder, test_scan, test_world_server, test_world_info, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password,
        test_menu_standby, test_menu_host_and_stop, test_menu_scan_and_addresses, test_menu_join, test_menu_join_world_info, test_menu_world_note_lifetime, test_menu_command_validation,
-       test_menu_helper_missing, test_menu_overrides_launcher_cfg]
+       test_menu_helper_missing, test_menu_overrides_launcher_cfg,
+       test_update_run, test_update_failures_and_momi, test_update_cancel_timeout_busy_missing, test_release_check_cache,
+       test_release_check_with_curl]
 only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_password runs just those
 for fn in ALL:
-    if not only or fn.__name__ in only:
+    if (not only or fn.__name__ in only) and (fake_update is not None or not fn.__name__.startswith(("test_update", "test_release"))) and (fake_curl is not None or fn.__name__ != "test_release_check_with_curl"):
         fn()
 print("PASS")
