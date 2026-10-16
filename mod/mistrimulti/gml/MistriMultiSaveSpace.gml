@@ -9,7 +9,7 @@ function __mistrimulti_savespace() {
     if (global[$ "__mistrimulti_savespace"] == undefined) {
         global.__mistrimulti_savespace = {
             solo_dir: undefined, active: false, title_menu: undefined,
-            orig_enter_game: undefined, orig_transition_to: undefined, choosing: false, error: "",
+            orig_enter_game: undefined, orig_transition_to: undefined, choosing: false, error: "", entry: "",
         };
     }
     return global.__mistrimulti_savespace;
@@ -149,6 +149,7 @@ function mistrimulti_savespace_enter(kind, arg) {
         return;
     }
     s.mode = mode_before;
+    s.entry = kind;   // "new" (New Game > Multiplayer) or "load" (Load Game > Multiplayer): the character logic reads it for the session
     if (kind == "new") mistrimulti_savespace_enter_multiplayer(arg);
     else s.orig_transition_to(Menu.Load);
 }
@@ -266,6 +267,7 @@ function mistrimulti_title_entered(ctx) {
     var s = __mistrimulti_savespace();
     s.choosing = false;
     s.mode = "";
+    s.entry = "";
     var rt = __mistrimulti_runtime();
     rt.enabled = false;
     rt.initialized = false;

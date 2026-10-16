@@ -1024,9 +1024,9 @@ function mistrimulti_progress_members_load() {
     return members;
 }
 
-function mistrimulti_progress_merge(uid, sections) {
+function mistrimulti_progress_merge(uid, sections, ignore_saved) {
     var r = __mistrimulti_runtime();
-    var base = mistrimulti_progress_load(uid);
+    var base = ignore_saved ? undefined : mistrimulti_progress_load(uid);
     var merged = {};
     if (base != undefined) {
         var kept = struct_get_names(base.data.sections);
@@ -1071,9 +1071,11 @@ function mistrimulti_progress_request(player, data) {
     if (!is_struct(core) || core.uid != data.uid || core.epoch != peer.epoch) return true;
     var session = r.progress_sessions[player];
     if (is_struct(session) && session.epoch == peer.epoch && session.uid == data.uid) return true;
-    var saved = mistrimulti_progress_load(data.uid);
+    // A player who started a new character in this world (profile_choice) gets no progress of the old one; it stays on disk.
+    var replaced = core[$ "replaced"] == true;
+    var saved = replaced ? undefined : mistrimulti_progress_load(data.uid);
     var path = mistrimulti_progress_path(data.uid);
-    if (saved == undefined && (file_exists(path) || file_exists(path + ".bak"))) {
+    if (!replaced && saved == undefined && (file_exists(path) || file_exists(path + ".bak"))) {
         return mistrimulti_event_emit("progress_error", { peer_epoch: peer.epoch, message: "The host progress record needs recovery." }, player);
     }
     var success = saved == undefined
@@ -1081,7 +1083,7 @@ function mistrimulti_progress_request(player, data) {
         : mistrimulti_progress_send("progress_record", player, peer.epoch, saved.revision, saved.data);
     if (success) {
         r.progress_sessions[player] = { uid: data.uid, epoch: peer.epoch, revision: saved == undefined ? 0 : saved.revision,
-            not_before: 0 };
+            not_before: 0, replaced: replaced };
         mistrimulti_progress_member(data.uid);
     }
     return success;
@@ -1157,7 +1159,7 @@ function mistrimulti_progress_upload(player, text, meta) {
         if (refusal != undefined) {
             return mistrimulti_event_emit("progress_error", { peer_epoch: session.epoch, message: "A progress update was rejected.", section: refusal }, player);
         }
-        var merged = mistrimulti_progress_merge(session.uid, update.sections);
+        var merged = mistrimulti_progress_merge(session.uid, update.sections, session[$ "replaced"] == true && session.revision == 0);
         if (mistrimulti_progress_size(merged.sections) > MISTRIMULTI_PROGRESS_RECORD_BYTES) {
             return mistrimulti_event_emit("progress_error", { peer_epoch: session.epoch, message: "Player progress exceeds the save limit." }, player);
         }

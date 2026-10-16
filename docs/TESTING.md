@@ -120,7 +120,14 @@ that fails to restore. The in-game checklist (what these tests cannot show) is i
 ```sh
 python3 tests/test_guestsave.py        # about 35 s
 python3 tests/mutate_guestsave.py      # breaks the GML 27 ways, about 1 minute
+python3 tests/test_guestchar.py        # a guest's character per world and the editor flow, about 10 s
+python3 tests/mutate_guestchar.py      # breaks that code 22 ways
 ```
+
+`test_guestchar.py` runs the real `MistriMultiCharacter.gml` (with the player-sync and progress files) against a faked character
+editor, popups and menu list: a world that is new to the guest, Load Game into a world with a character, New Game into a world
+with a character (the question, both answers, the backup copies), an editor that is closed, invisible or fails, forged answers,
+the entry path and the ghost fix. `docs/PLAYER-DATA.md` has the in-game checklist.
 
 Runs the real `MistriMultiGuestSave.gml` with the player-sync, progress and identity files (the harness of `tests/test_progress.py`):
 the save veto, flush on a save attempt and on the Settings tab, the goodbye frame, rejoining through another slot, a host that
@@ -396,7 +403,7 @@ sh scripts/run-features.sh
 
 The script re-runs itself in a private network namespace (`unshare -n`, loopback brought
 up) and runs `test_containers`, `test_ranch`, `test_progress`, `test_farm_sync`,
-`test_wallet`, `test_dungeon`, `test_story`, `test_buildings`, `test_guestsave`,
+`test_wallet`, `test_dungeon`, `test_story`, `test_buildings`, `test_guestsave`, `test_guestchar`,
 `test_devtools`, `test_maplive`, `test_menu` (GML parts), `test_trust_gml`,
 `test_event_features`, `test_event_layer` and `test_engine_audit` (without the real game
 scripts), printing PASS or FAIL with the time of each and exiting non-zero on any failure.

@@ -14,7 +14,7 @@ PY
 export MISTRIA_GML=
 rc=0
 out=$(mktemp)
-for t in containers ranch progress farm_sync wallet dungeon story buildings guestsave devtools renown maplive menu trust_gml event_features event_layer engine_audit; do
+for t in containers ranch progress farm_sync wallet dungeon story buildings guestsave guestchar devtools renown maplive menu trust_gml event_features event_layer engine_audit; do
     start=$(date +%s)
     if python3 "tests/test_$t.py" > "$out" 2>&1; then r=PASS; else r=FAIL; rc=1; fi
     echo "$r  $t ($(( $(date +%s) - start )) s)"

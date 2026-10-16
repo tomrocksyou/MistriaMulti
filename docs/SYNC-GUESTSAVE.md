@@ -81,7 +81,8 @@ being torn down. So:
   would never learn that the host had left. The host reacts to a guest's goodbye by forgetting that slot's record session, so
   the player can come back through any slot at once.
 - **Returning.** The guest asks the host for its records as usual (`docs/PLAYER-DATA.md`), restores them and does not see the
-  character creator again. If the old slot is still counted (the game vanished without a goodbye: alt-F4, network drop, crash;
+  character creator again (entering through Load Game; through New Game the guest is first asked "Keep mine" or "New character",
+  see "A character per world" there). If the old slot is still counted (the game vanished without a goodbye: alt-F4, network drop, crash;
   the helper expires a silent peer after 10 s) the host refuses with "This player identity is already connected". That
   refusal used to be final for the session; the guest now asks again every 3 s, at most 10 times, so it is let in as soon as
   the old slot expires.
@@ -218,7 +219,8 @@ Use two installs (host and guest), a host world on an autosave, and the MMAPI de
    the guest line); no autosave file is touched on the guest.
 4. **Solo untouched.** Choose Singleplayer: saving works as always, no notice, no export.
 5. **Settings flush.** As a guest, earn gold, open journal > Settings immediately, check the host's record; then "Return to main
-   menu". Join again, even through another slot: the character is as it was, no creator.
+   menu". Join again through Load Game > Multiplayer, even through another slot: the character is as it was, no creator.
+    (Through New Game > Multiplayer > Join the question "Keep mine / New character" appears first.)
 6. **Goodbye.** On the host, a guest that returned to its title disappears (no frozen ghost) and can rejoin at once.
 7. **Alt-F4 / "Exit to desktop"** as a guest after opening Settings: the character is current; without Settings, the last 5-10 s
    are missing. Rejoining within 10 s through a different slot works after a short wait (retry).

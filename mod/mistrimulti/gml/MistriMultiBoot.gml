@@ -13,6 +13,7 @@ function __mistrimulti_runtime() {
             character_owner: undefined, character_pending: false,
             character_ready_ticks: 0, character_menu: undefined,
             character_preset: undefined, character_loaded: false,
+            character_phase: "", character_ask: undefined, character_entry: "load",
         };
     }
     return global.__mistrimulti;
@@ -63,6 +64,8 @@ function mistrimulti_initialize() {
     r.mode = cfg.mode;
     r.bridge = native_root + string(cfg.id);
     directory_create(r.bridge);
+    // How the player entered this world (MistriMultiSaveSpace.gml): New Game asks for a new character, Load Game continues one.
+    r.character_entry = __mistrimulti_savespace()[$ "entry"] == "new" ? "new" : "load";
     mistrimulti_identity_initialize(cfg);
     mistrimulti_trust_initialize();
     mistrimulti_player_data_initialize();
@@ -196,10 +199,9 @@ function mistrimulti_tick() {
         if (r.room_was_settled) mistrimulti_trace("room", "tick " + string(r.ticks) + " settled in [" + room_now + "]", 500);
     }
     r.room_settled = r.ticks - r.room_seen_at >= 60;
-    var settled = r.room_settled;
     if (ARI != undefined && GRID != undefined) mistrimulti_read_peers();
     mistrimulti_events_tick();
-    var active = settled && instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
+    var active = mistrimulti_local_active();
     if (active) {
         mistrimulti_watch_changes();
         if (r.ticks mod 60 == 0 || r.mask != r.last_mask) mistrimulti_update_look();
@@ -259,6 +261,13 @@ function mistrimulti_tick() {
     }
 }
 
+// This game takes part in the world: its room settled, its character exists and is finished (a guest still in the character
+// editor or loading its records is not). The other players' characters are shown only then.
+function mistrimulti_local_active() {
+    var r = __mistrimulti_runtime();
+    return r.room_settled == true && instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
+}
+
 function mistrimulti_read_peers() {
     var r = __mistrimulti_runtime();
     for (var i = 0; i < 8; i++) {
@@ -294,7 +303,7 @@ function mistrimulti_read_peers() {
         // Delivers this peer's new events, in order, to the registered handlers.
         mistrimulti_events_receive(i, p);
         if (remember) mistrimulti_remember_peer(i);
-        if (p[$ "active"] == true && r[$ "room_settled"] == true) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
+        if (p[$ "active"] == true && mistrimulti_local_active()) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
     }
 }
 

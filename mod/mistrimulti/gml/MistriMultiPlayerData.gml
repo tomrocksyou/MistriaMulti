@@ -142,6 +142,7 @@ function mistrimulti_player_restore(data) {
     for (var i = 0; i < NpcId.LEN; i++) NPCS[i].report_relationship();
     r.character_owner = ARI;
     r.character_pending = false;
+    r.character_phase = "done";
     r.character_loaded = true;
     mistrimulti_progress_core_ready();
     r.look_signature = "";
