@@ -21,4 +21,8 @@ for t in containers ranch progress farm_sync wallet dungeon story buildings gues
     [ "$r" = FAIL ] && tail -15 "$out"
 done
 rm -f "$out"
+# Optional: GAME_SCRIPTS=<folder with the game's gml> also checks every function, enum and field the mod uses against it.
+if [ -n "${GAME_SCRIPTS:-}" ]; then
+    if python3 scripts/audit-gml-ids.py --game "$GAME_SCRIPTS"; then echo "PASS  engine identifiers"; else echo "FAIL  engine identifiers"; rc=1; fi
+fi
 exit $rc

@@ -87,7 +87,7 @@ class DevNode(StoryNode):
         out.update({
             "Requirement": sf.ENUMS["Requirement"], "LocationId": sf.ENUMS["LocationId"],
             "fulfill_requirement": fulfill, "requirements_pass": passes, "setup_room": setup_room,
-            "requirement_to_string": lambda i: "requirement_%d" % int(i), "is_bool": lambda v: isinstance(v, bool),
+            "requirement_to_string": lambda i: "requirement_%d" % int(i),
             "mmapi_log_flush": lambda *a: None,
         })
         return out

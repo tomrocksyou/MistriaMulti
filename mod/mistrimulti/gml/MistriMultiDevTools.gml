@@ -20,7 +20,7 @@ function __mistrimulti_dev_collect(req, plan, depth) {
     if (!is_array(req) || depth > MISTRIMULTI_DEV_DEPTH) return;
     for (var i = 0; i < Requirement.LEN; i++) {
         var v = req[i];
-        if (v == undefined || (is_bool(v) && !v) || (is_array(v) && array_length(v) == 0)) continue;
+        if (v == undefined || v == false || (is_array(v) && array_length(v) == 0)) continue;
         if (requirement_is_alias(i)) {
             __mistrimulti_dev_collect(REQUIREMENT_ALIASES[i], plan, depth + 1);
         } else if (i == Requirement.SeenCutscene && is_array(v)) {
