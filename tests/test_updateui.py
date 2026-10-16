@@ -19,6 +19,12 @@ from test_menu import Env, FakeLauncher, MOD, GML_DIR, ROOT, FRAME_US
 from gml_subset import GStruct
 from hud_fake import ALIGN
 
+_MANIFEST = (ROOT / "mod/mistrimulti/manifest.toml").read_text()
+MODV = [l.split('"')[1] for l in _MANIFEST.splitlines() if l.startswith("version =")][0]
+_parts = MODV.split(".")
+NEWER = ".".join(_parts[:-1] + [str(int(_parts[-1]) + 1)])   # a release newer than the installed mod, whatever its version is
+
+
 PLAIN, BUSY, GOOD, BAD = (235 + 235 * 256 + 235 * 65536, 20 + 170 * 256 + 230 * 65536, 40 + 200 * 256 + 70 * 65536,
                           50 + 60 * 256 + 220 * 65536)
 
@@ -58,7 +64,8 @@ class UEnv(Env):
                 raise AssertionError(self.errors)
 
 
-def make(update="0.4.7", title=True, sha=True):
+def make(update=None, title=True, sha=True):
+    update = NEWER if update is None else update
     env = UEnv()
     env.launcher = UpdLauncher(env)
     env.launcher.upd["update"] = update
@@ -166,27 +173,27 @@ def test_label_is_always_there_and_button_follows_the_release():
     env = make(update="none")
     env.frames(12)
     label, button, caption = parts(env)
-    assert label is not None and label["text"] == "MistriMulti 0.4.6" and label["color"] == PLAIN, label
+    assert label is not None and label["text"] == "MistriMulti %s" % MODV and label["color"] == PLAIN, label
     assert label["align"] == (ALIGN["RightOut"], ALIGN["Middle"]) and label["parent"] is env.sha, "next to the game's own version text"
     assert button["parent"] is label and button["align"] == (ALIGN["RightOut"], ALIGN["Middle"]) and button["size"][1] <= 16
     assert caption["text"] == "Update" and button["sprites"] == "spr_ui_button" and not button["enabled"], button
     assert env.errors_logged() == []
     # a newer release: the button appears; the label text is unchanged
-    env.launcher.set(update="0.4.7")
+    env.launcher.set(update=NEWER)
     env.frames(70)
-    assert button_on(env) and label_text(env) == "MistriMulti 0.4.6"
+    assert button_on(env) and label_text(env) == "MistriMulti %s" % MODV
     # not newer / older / junk: no button
-    for v in ("0.4.6", "0.4.5", "none", "banana", "0.4.7; rm"):
+    for v in (MODV, "0.0.1", "none", "banana", "0.4.7; rm"):
         env.launcher.set(update=v)
         env.frames(70)
         assert not button_on(env), v
-    env.launcher.set(update="0.4.7")
+    env.launcher.set(update=NEWER)
     env.frames(70)
     assert button_on(env)
     # the launcher stops answering: the button goes away (a click could not be heard)
     launcher_dies(env)
-    assert not button_on(env) and label_text(env) == "MistriMulti 0.4.6"
-    print("PASS: update ui: 'MistriMulti 0.4.6' next to the game's version text, the Update button only for a newer release and a live launcher")
+    assert not button_on(env) and label_text(env) == "MistriMulti %s" % MODV
+    print("PASS: update ui: 'MistriMulti <version>' next to the game's version text, the Update button only for a newer release and a live launcher")
 
 
 def test_click_sends_one_update_command_and_progress_is_plain_words():
@@ -304,13 +311,13 @@ def test_where_it_shows():
     env.anchor.rebuild()
     add_sha(env)
     env.frames(12)
-    assert label_text(env) == "MistriMulti 0.4.6" and button_on(env)
+    assert label_text(env) == "MistriMulti %s" % MODV and button_on(env)
     # the game's text node freed alone: new nodes when it is back, no throw meanwhile
     env.sha["freed"] = True
     env.frames(12)
     add_sha(env)
     env.frames(12)
-    assert label_text(env) == "MistriMulti 0.4.6"
+    assert label_text(env) == "MistriMulti %s" % MODV
     before = sum(1 for n in env.anchor.nodes)
     env.frames(300)
     assert sum(1 for n in env.anchor.nodes) == before, "ticks do not make new nodes"
@@ -324,12 +331,12 @@ def test_fallback_without_the_games_text_node():
     assert fallback_nodes(env) == []                          # 5 seconds of waiting for the game's own text first
     env.frames(300)
     nodes = fallback_nodes(env)
-    assert [n["text"] for n in nodes] == ["MistriMulti 0.4.6 (update 0.4.7 available)"], nodes
+    assert [n["text"] for n in nodes] == ["MistriMulti %s (update %s available)" % (MODV, NEWER)], nodes
     assert nodes[0]["align"] == (ALIGN["LeftIn"], ALIGN["BottomIn"]) and nodes[0]["pos"] == (112, 0)
     # the game's text appears later: the fallback goes, the real widgets come
     add_sha(env)
     env.frames(12)
-    assert fallback_nodes(env) == [] and label_text(env) == "MistriMulti 0.4.6"
+    assert fallback_nodes(env) == [] and label_text(env) == "MistriMulti %s" % MODV
     # a game text node that has no usable shape
     env2 = make(sha=False)
     env2.interp.call("__mistrimulti_savespace")["title_menu"] = 5
@@ -372,13 +379,13 @@ def test_in_world_badge_and_note():
     env.rt.update(enabled=True, mode="host", status=GStruct(running=True, mask=1, heartbeat=7), status_heartbeat=7,
                   status_seen_at=env.us, mask=1)
     env.frames(70)
-    assert tm.shown(env)[0] == "Multiplayer: Online (hosting) - update available (0.4.7)", tm.shown(env)
-    assert env.interp.call("mistrimulti_update_note") == " - update available (0.4.7)"
+    assert tm.shown(env)[0] == "Multiplayer: Online (hosting) - update available (%s)" % NEWER, tm.shown(env)
+    assert env.interp.call("mistrimulti_update_note") == " - update available (%s)" % NEWER
     # the note is not about a release that is not newer, and it is gone with the launcher
-    env.launcher.set(update="0.4.6")
+    env.launcher.set(update=MODV)
     env.frames(70)
     assert tm.shown(env)[0] == "Multiplayer: Online (hosting)"
-    env.launcher.set(update="0.4.7")
+    env.launcher.set(update=NEWER)
     env.frames(130)
     launcher_dies(env)
     assert env.interp.call("mistrimulti_update_note") == ""
@@ -395,7 +402,7 @@ def test_in_world_badge_and_note():
 def test_minimum_screen_layout():
     """At the smallest screen (480 x 270) the title row has room: the game's text, our label and the button share the bottom left
     and end well before the copyright line; the badge sits a row higher on the right. Measured with a 6 px per character guess."""
-    chars = len("v1.0.8 (modified)") + 1 + len("MistriMulti 0.4.6")
+    chars = len("v1.0.8 (modified)") + 1 + len("MistriMulti %s" % MODV)
     needed = 2 + chars * 6 + 6 + 46 + 6
     copyright_start = 480 - 2 - len("© 2024-2026 NPC Studio") * 6
     assert needed < copyright_start, (needed, copyright_start)
