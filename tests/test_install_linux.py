@@ -3,7 +3,7 @@
 
     python3 tests/test_install_linux.py
 """
-import os, re, shutil, subprocess, sys, tempfile, unittest
+import hashlib, http.server, io, json, os, re, shutil, subprocess, sys, tarfile, tempfile, threading, time, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -240,7 +240,7 @@ class InstallTests(unittest.TestCase):
         (repo / "scripts/build-linux.sh").write_text("exit 1\n")
         bindir = self.tmp / "bin"
         bindir.mkdir()
-        for tool in "sh awk sed grep cp mv mkdir rm ln cat cmp cksum mktemp dirname chmod head sort readlink printf cut tr date".split():
+        for tool in "sh awk sed grep cp mv mkdir rm ln cat cmp cksum mktemp dirname basename chmod head sort readlink printf cut tr date".split():
             w = shutil.which(tool)
             if w:
                 (bindir / tool).symlink_to(w)
@@ -257,6 +257,410 @@ class InstallTests(unittest.TestCase):
         (other / "manifest.toml").write_text('name = "SomethingElse"\n')
         run(home, repo)
         self.assertIn("SomethingElse", (other / "manifest.toml").read_text())
+
+
+# ---------------------------------------------------------------- update from a (fake) release server
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+class Site:
+    """A local web server that mimics the release layout (docs/RELEASES.md): /release/latest.txt, /mod/mistrimulti/<file>, /dl/<tar.gz>."""
+
+    def __init__(self):
+        self.files = {}
+        self.requests = []
+        self.fail = {}
+        site = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                site.requests.append(self.path)
+                if self.path in site.fail:
+                    self.send_error(site.fail[self.path])
+                    return
+                data = site.files.get(self.path)
+                if data is None:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def publish(self, version, mod, progs=None, raw=None, tar_hash=None, bad_tar=False):
+        """mod: {relative path under mod/mistrimulti: bytes}; progs: {program name: bytes} (default: new versions of all four), False = no tar."""
+        lines = ["version " + version]
+        for rel, data in mod.items():
+            self.files["/mod/mistrimulti/" + rel] = data
+            lines.append("%s mod/mistrimulti/%s" % (sha(data), rel))
+        count = len(mod)
+        if progs is not False:
+            progs = progs or {b: ("#!/bin/sh\necho %s %s\n" % (b, version)).encode() for b in BINS}
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+                for name, data in dict(progs, **{"install.sh": (ROOT / "install.sh").read_bytes()}).items():
+                    ti = tarfile.TarInfo("MistriaMulti/" + name)
+                    ti.size = len(data)
+                    ti.mode = 0o755
+                    tf.addfile(ti, io.BytesIO(data))
+            tar_bytes = buf.getvalue()
+            name = "MistriaMulti-%s-Linux.tar.gz" % version
+            self.files["/dl/" + name] = tar_bytes if not bad_tar else tar_bytes + b"x"
+            lines.insert(1, "#linux-tar %s %s" % (tar_hash or sha(tar_bytes), name))
+        lines.append("end %d" % count)
+        self.files["/release/latest.txt"] = (raw if raw is not None else "\n".join(lines) + "\n").encode()
+
+
+MOD_V1 = {"manifest.toml": b'name = "MistriaMulti"\nversion = "0.4.6"\n', "gml/A.gml": b"function a() { return 1; }\n", "gml/Old.gml": b"old\n"}
+MOD_V2 = {"manifest.toml": b'name = "MistriaMulti"\nversion = "0.9.0"\n', "gml/A.gml": b"function a() { return 2; }\n", "gml/B.gml": b"function b() {}\n"}
+
+
+def tree(path):
+    return {str(p.relative_to(path)): (p.read_bytes() if p.is_file() else None) for p in sorted(path.rglob("*"))}
+
+
+FAKE_CLI = "#!/bin/sh\necho \"cwd=$(pwd) exit_on_complete=$EXIT_ON_COMPLETE args=$#\" > \"$MOMI_PROOF\"\necho 'Installed 1 mod'\nexit ${MOMI_RC:-0}\n"
+
+
+class UpdateTests(unittest.TestCase):
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._t.name)
+        self.home, self.repo = make_env(self.tmp, {"1001": VDF_NO_OPTION})
+        self.site = Site()
+        self.dir = self.home / ".local/share/mistrimulti"
+        self.mod = self.home / ".local/share/Steam/steamapps/common/Fields of Mistria/mods/mistrimulti"
+        self.game = self.mod.parent.parent
+        # an installed 0.4.6 (the mod files of the old release, programs of the old build)
+        shutil.rmtree(self.repo / "mod" / "mistrimulti")
+        for rel, data in MOD_V1.items():
+            (self.repo / "mod/mistrimulti" / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / "mod/mistrimulti" / rel).write_bytes(data)
+        r = run(self.home, self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.extra = {"MISTRIMULTI_RELEASE_BASE": self.site.base}
+
+    def tearDown(self):
+        self.site.close()
+        self._t.cleanup()
+
+    def upd(self, *args, stdin="", extra=None, path=None):
+        return run(self.home, self.repo, *args, stdin=stdin, extra=dict(self.extra, **(extra or {})), path=path)
+
+    def snapshot(self):
+        return tree(self.dir), tree(self.mod)
+
+    def test_install_keeps_the_update_script(self):
+        self.assertTrue(os.access(self.dir / "mistrimulti-update.sh", os.X_OK))
+        self.assertEqual((self.dir / "mistrimulti-update.sh").read_bytes(), (ROOT / "install.sh").read_bytes())
+
+    def test_update_programs_and_mod_files(self):
+        self.site.publish("0.9.0", MOD_V2)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Latest release: 0.9.0", r.stdout)
+        self.assertEqual((self.mod / "gml/A.gml").read_bytes(), MOD_V2["gml/A.gml"])
+        self.assertEqual((self.mod / "gml/B.gml").read_bytes(), MOD_V2["gml/B.gml"])
+        self.assertFalse((self.mod / "gml/Old.gml").exists(), "a file that left the release is removed")
+        self.assertIn("0.9.0", (self.mod / "manifest.toml").read_text())
+        self.assertTrue((self.mod / "LICENSE").exists(), "LICENSE/CONTACT.md of the install are kept")
+        for b in BINS:
+            self.assertIn("0.9.0", (self.dir / b).read_text())
+            self.assertTrue(os.access(self.dir / b, os.X_OK))
+        self.assertFalse(list(self.dir.glob("*.new")) or list(self.mod.parent.glob("*.new")) or list(self.mod.parent.glob("*.old")))
+        self.assertIn("click Install", r.stdout)
+        self.assertIn("--momi-cli", r.stdout)
+        # idempotent: the second run changes nothing and asks for no MOMI step
+        before = self.snapshot()
+        n = len(self.site.requests)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(self.snapshot(), before)
+        self.assertIn("Mod files: already up to date", r.stdout)
+        self.assertIn("nothing to do", r.stdout)
+        # only the list and the program archive are fetched when the mod files already match
+        self.assertEqual(sorted(set(self.site.requests[n:])), ["/dl/MistriaMulti-0.9.0-Linux.tar.gz", "/release/latest.txt"])
+
+    def test_only_changed_mod_files_are_downloaded(self):
+        self.site.publish("0.9.0", MOD_V2)
+        self.upd("--update")
+        mod3 = dict(MOD_V2, **{"gml/A.gml": b"function a() { return 3; }\n"})
+        self.site.publish("0.9.1", mod3)
+        n = len(self.site.requests)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        got = [x for x in self.site.requests[n:] if x.startswith("/mod/")]
+        self.assertEqual(got, ["/mod/mistrimulti/gml/A.gml"])
+
+    def test_no_network_changes_nothing_and_says_so(self):
+        before = self.snapshot()
+        r = self.upd("--update", extra={"MISTRIMULTI_RELEASE_BASE": "http://127.0.0.1:1"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Could not reach", r.stdout)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_bad_downloads_change_nothing(self):
+        before = self.snapshot()
+        self.site.publish("0.9.0", MOD_V2)
+        self.site.files["/mod/mistrimulti/gml/B.gml"] = b"evil"
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("checksum", r.stdout)
+        self.assertEqual(self.snapshot(), before)
+        self.site.publish("0.9.0", MOD_V2, bad_tar=True)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("checksum", r.stdout)
+        self.assertEqual(self.snapshot(), before)
+        self.site.publish("0.9.0", MOD_V2)
+        self.site.fail["/mod/mistrimulti/gml/B.gml"] = 404
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("download failed", r.stdout)
+        self.assertEqual(self.snapshot(), before)
+        self.site.fail.clear()
+        h = "a" * 64
+        m = "%s mod/mistrimulti/manifest.toml" % sha(MOD_V2["manifest.toml"])
+        hostile = {
+            "path traversal": f"version 0.9.0\n{h} mod/mistrimulti/../../evil\n{m}\nend 2\n",
+            "absolute path": f"version 0.9.0\n{h} /etc/passwd\n{m}\nend 2\n",
+            "hidden file": f"version 0.9.0\n{h} mod/mistrimulti/.x\n{m}\nend 2\n",
+            "unknown tool": f"version 0.9.0\n{h} bin/evil.exe\n{m}\nend 2\n",
+            "no footer": f"version 0.9.0\n{m}\n",
+            "cut": f"version 0.9.0\n{m}\nend 1",
+            "wrong count": f"version 0.9.0\n{m}\nend 5\n",
+            "no manifest": f"version 0.9.0\n{h} mod/mistrimulti/gml/A.gml\nend 1\n",
+            "bad version": f"version 0.9.0/../x\n{m}\nend 1\n",
+            "upper hash": f"version 0.9.0\n{'A' * 64} mod/mistrimulti/manifest.toml\nend 1\n",
+            "duplicate": f"version 0.9.0\n{h} mod/mistrimulti/manifest.toml\n{h} mod/mistrimulti/manifest.toml\nend 2\n",
+            "content after footer": f"version 0.9.0\n{m}\nend 1\n{h} mod/mistrimulti/x\n",
+            "tar for another version": f"version 0.9.0\n#linux-tar {h} MistriaMulti-0.1.0-Linux.tar.gz\n{m}\nend 1\n",
+            "tar with a path": f"version 0.9.0\n#linux-tar {h} ../x-Linux.tar.gz\n{m}\nend 1\n",
+            "oversized": "version 0.9.0\n" + "#" + "x" * 40000 + "\nend 0\n",
+            "junk": "\x00\x01\x02" * 50 + "\n",
+            "empty": "",
+        }
+        for label, text in hostile.items():
+            self.site.publish("0.9.0", MOD_V2, raw=text)
+            self.site.requests.clear()
+            r = self.upd("--update")
+            self.assertEqual(r.returncode, 1, label + r.stdout)
+            self.assertIn("Nothing was changed", r.stdout, label)
+            if label != "oversized":
+                self.assertIn("not valid", r.stdout, label)
+            self.assertEqual(self.snapshot(), before, label)
+            self.assertEqual(self.site.requests, ["/release/latest.txt"], label)
+
+    def test_newer_installed_mod_is_not_replaced(self):
+        newer = dict(MOD_V2, **{"manifest.toml": b'name = "MistriaMulti"\nversion = "0.2.0"\n'})
+        (self.mod / "manifest.toml").write_text('name = "MistriaMulti"\nversion = "0.10.0"\n')
+        self.site.publish("0.2.0", newer)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("newer", r.stdout)
+        self.assertIn("0.10.0", (self.mod / "manifest.toml").read_text())
+        self.assertEqual((self.mod / "gml/A.gml").read_bytes(), MOD_V1["gml/A.gml"])
+
+    def test_foreign_mod_and_missing_game(self):
+        self.site.publish("0.9.0", MOD_V2)
+        (self.mod / "manifest.toml").write_text('name = "SomethingElse"\n')
+        r = self.upd("--update")
+        self.assertIn("Another mod", r.stdout)
+        self.assertIn("SomethingElse", (self.mod / "manifest.toml").read_text())
+        shutil.rmtree(self.game)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("Game folder not found", r.stdout)
+        self.assertIn("0.9.0", (self.dir / "mistrimulti-launcher").read_text(), "programs are still updated")
+
+    def test_release_without_linux_programs(self):
+        self.site.publish("0.9.0", MOD_V2, progs=False)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("lists no Linux programs", r.stdout)
+        self.assertIn("0.9.0", (self.mod / "manifest.toml").read_text())
+
+    def test_dry_run_changes_nothing(self):
+        self.site.publish("0.9.0", MOD_V2)
+        before = self.snapshot()
+        r = self.upd("--update", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("[dry run]", r.stdout)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_not_installed_yet(self):
+        shutil.rmtree(self.dir)
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Run ./install.sh first", r.stdout)
+
+    def test_wget_fallback_and_no_downloader(self):
+        wget = shutil.which("wget")
+        bindir = self.tmp / "bin2"
+        bindir.mkdir()
+        for tool in "sh awk sed grep cp mv mkdir rm ln cat cmp cksum mktemp dirname basename chmod head tail sort readlink printf cut tr date od wc find tar gzip sha256sum timeout id".split():
+            w = shutil.which(tool)
+            if w:
+                (bindir / tool).symlink_to(w)
+        r = self.upd("--update", path=str(bindir))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Neither curl nor wget", r.stdout)
+        if wget:
+            (bindir / "wget").symlink_to(wget)
+            self.site.publish("0.9.0", MOD_V2)
+            r = self.upd("--update", path=str(bindir))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual((self.mod / "gml/A.gml").read_bytes(), MOD_V2["gml/A.gml"])
+
+    def cli(self, name="ModsOfMistriaInstaller-cli-linux", rc=0):
+        p = self.tmp / name
+        p.write_text(FAKE_CLI)
+        p.chmod(0o755)
+        proof = self.tmp / "proof.txt"
+        self.extra.update({"MOMI_PROOF": str(proof), "MOMI_RC": str(rc)})
+        return p, proof
+
+    def test_momi_cli_is_run_only_after_consent(self):
+        p, proof = self.cli()
+        r = self.upd("--momi-cli", str(p))
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual((self.dir / "momi-cli.path").read_text().strip(), str(p))
+        self.site.publish("0.9.0", MOD_V2)
+        r = self.upd("--update", stdin="n\n")
+        self.assertFalse(proof.exists(), "declined: not run")
+        self.assertIn("Not run", r.stdout)
+        self.assertIn("click Install", r.stdout)
+        self.assertEqual(self.upd("--update", stdin="").returncode, 0)       # a pipe that ends: also a no
+        self.assertFalse(proof.exists())
+        # changed again, consent given
+        self.site.publish("0.9.1", dict(MOD_V2, **{"gml/B.gml": b"function b() { return 1; }\n"}))
+        r = self.upd("--update", stdin="y\n")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(proof.exists(), r.stdout)
+        line = proof.read_text()
+        self.assertIn("cwd=%s " % self.game, line)
+        self.assertIn("exit_on_complete=true", line)
+        self.assertIn("args=0", line)
+        self.assertIn("Installed 1 mod", r.stdout)
+        self.assertIn("exit code 0", r.stdout)
+        self.assertNotIn("click Install", r.stdout)
+        self.assertTrue((self.dir / "momi.log").exists())
+
+    def test_momi_cli_failure_and_validation(self):
+        p, proof = self.cli(rc=3)
+        self.upd("--momi-cli", str(p))
+        self.site.publish("0.9.0", MOD_V2)
+        r = self.upd("--update", stdin="y\n")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("exit code 3", r.stdout)
+        self.assertIn("click Install", r.stdout)
+        bad = self.tmp / "ModsOfMistriaInstaller"
+        bad.write_text(FAKE_CLI)
+        bad.chmod(0o755)
+        r = self.upd("--momi-cli", str(bad))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("-cli", r.stdout)
+        notexec = self.tmp / "x-cli"
+        notexec.write_text(FAKE_CLI)
+        self.assertEqual(self.upd("--momi-cli", str(notexec)).returncode, 1)
+        self.assertEqual(self.upd("--momi-cli", str(self.tmp / "missing-cli")).returncode, 1)
+        link = self.tmp / "link-cli"
+        link.symlink_to(p)
+        self.assertEqual(self.upd("--momi-cli", str(link)).returncode, 1)
+        self.assertEqual((self.dir / "momi-cli.path").read_text().strip(), str(p))
+        self.assertEqual(self.upd("--momi-cli", "none").returncode, 0)
+        self.assertFalse((self.dir / "momi-cli.path").exists())
+        # a saved path that is not a -cli program is not run
+        (self.dir / "momi-cli.path").write_text(str(bad) + "\n")
+        self.site.publish("0.9.1", dict(MOD_V2, **{"gml/B.gml": b"x\n"}))
+        proof.unlink(missing_ok=True)
+        self.upd("--update", stdin="y\n")
+        self.assertFalse(proof.exists())
+
+    def test_ingame_update_never_runs_momi_and_leaves_a_marker(self):
+        p, proof = self.cli()
+        self.upd("--momi-cli", str(p))
+        self.site.publish("0.9.0", MOD_V2)
+        md = self.tmp / "moddata"
+        r = self.upd("--ingame", str(md), stdin="y\n")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertFalse(proof.exists(), "the game is running: MOMI is not run")
+        self.assertTrue((self.dir / "momi-pending").exists())
+        self.assertEqual((self.mod / "gml/A.gml").read_bytes(), MOD_V2["gml/A.gml"])
+        r = self.upd("--ingame", str(md))
+        self.assertEqual(r.returncode, 11, r.stdout)                  # nothing to do
+        # the next update (game closed) does the MOMI step even though the files are current
+        r = self.upd("--update", stdin="y\n")
+        self.assertTrue(proof.exists(), r.stdout)
+        self.assertFalse((self.dir / "momi-pending").exists())
+
+    def test_ingame_exit_codes(self):
+        md = self.tmp / "moddata"
+        r = self.upd("--ingame", str(md), extra={"MISTRIMULTI_RELEASE_BASE": "http://127.0.0.1:1"})
+        self.assertEqual(r.returncode, 20)
+        self.site.publish("0.9.0", MOD_V2, raw="junk\n")
+        self.assertEqual(self.upd("--ingame", str(md)).returncode, 21)
+        self.site.publish("0.9.0", MOD_V2)
+        self.site.files["/mod/mistrimulti/gml/B.gml"] = b"evil"
+        self.assertEqual(self.upd("--ingame", str(md)).returncode, 22)
+        self.site.publish("0.9.0", MOD_V2, progs=False)
+        (self.mod / "manifest.toml").write_text('name = "MistriaMulti"\nversion = "0.10.0"\n')
+        self.assertEqual(self.upd("--ingame", str(md)).returncode, 13)
+        (self.mod / "manifest.toml").write_text('name = "MistriaMulti"\nversion = "0.4.6"\n')
+        self.site.publish("0.4.6", MOD_V1, progs={b: (self.dir / b).read_bytes() for b in BINS})
+        self.assertEqual(self.upd("--ingame", str(md)).returncode, 11)
+
+    def test_daily_check(self):
+        md = self.tmp / "moddata"
+        md.mkdir()
+        self.site.publish("0.9.0", MOD_V2)
+        r = self.upd("--daily", str(md))
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        data = json.loads((md / "update.json").read_text())
+        self.assertEqual((data["v"], data["latest"]), (1, "0.9.0"))
+        self.assertLess(abs(data["checked"] - time.time()), 300)
+        n = len(self.site.requests)
+        self.upd("--daily", str(md))
+        self.assertEqual(len(self.site.requests), n, "once a day")
+        (md / "update.json").write_text(json.dumps({"v": 1, "latest": "0.1.0", "checked": int(time.time()) - 2 * 86400}))
+        self.upd("--daily", str(md))
+        self.assertEqual(json.loads((md / "update.json").read_text())["latest"], "0.9.0")
+        (md / "update.json").write_text(json.dumps({"v": 1, "latest": "0.1.0", "checked": int(time.time()) + 9 * 86400}))
+        self.upd("--daily", str(md))
+        self.assertEqual(json.loads((md / "update.json").read_text())["latest"], "0.9.0", "a future time is ignored")
+        (md / "update.json").unlink()
+        (md / "update.cfg").write_text("check=off\n")
+        n = len(self.site.requests)
+        self.upd("--daily", str(md))
+        self.assertEqual(len(self.site.requests), n)
+        self.assertFalse((md / "update.json").exists())
+        (md / "update.cfg").write_text("check=on\n")
+        for label, base, setup in (("unreachable", "http://127.0.0.1:1", None),
+                                   ("404", self.site.base, lambda: self.site.fail.update({"/release/latest.txt": 404})),
+                                   ("invalid", self.site.base, lambda: (self.site.fail.clear(), self.site.publish("0.9.0", MOD_V2, raw="version 0.9.0\n")))):
+            if setup:
+                setup()
+            t = time.time()
+            r = self.upd("--daily", str(md), extra={"MISTRIMULTI_RELEASE_BASE": base})
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), label)
+            self.assertFalse((md / "update.json").exists(), label)
+            self.assertLess(time.time() - t, 15, label)
+        self.assertFalse(list(md.glob("*.tmp")))
+        # a missing folder is not created and not an error
+        self.assertEqual(self.upd("--daily", str(self.tmp / "nope")).returncode, 0)
+        self.assertFalse((self.tmp / "nope").exists())
 
 
 if __name__ == "__main__":

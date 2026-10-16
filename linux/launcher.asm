@@ -98,9 +98,13 @@ t_nl db 10,0
 t_optional db 'Optional setup: you can skip it. Start the game from Steam and choose Multiplayer, then Host a game or Join a game, in the game itself.',10,'This pre-sets a role (saved in launcher.cfg) that starts by itself.',10,10,0
 align 8
 name_table dq n_stop, n_status, n_txframe, n_txtmp, n_pid
+n_updscript db '/mistrimulti-update.sh',0
+s_sh db 'sh',0
+a_daily_flag db '--daily',0
 
 section .bss
 sig_flag resd 1
+dc_argv resq 6
 sigact_buf resb 32
 reason resq 1
 game_exit resd 1
@@ -1378,6 +1382,37 @@ FN install_signals
     call sys_rt_sigaction
 END_FN
 
+; Starts  sh <program folder>/mistrimulti-update.sh --daily <mod data folder>  in the background and does not wait for it. The script
+; checks the latest release at most once a day (curl or wget, short timeouts) and writes update.json for the mod's badge; "check=off" in
+; update.cfg turns it off. No script, no sh, no network: nothing happens and the game starts at once.
+FN daily_check
+    lea rcx, [p3]
+    lea rdx, [exe_dir]
+    lea r8, [n_updscript]
+    call path2
+    lea rcx, [p3]
+    call path_kind
+    cmp eax, 1
+    jne .d
+    lea rax, [s_sh]
+    mov [dc_argv], rax
+    lea rax, [p3]
+    mov [dc_argv+8], rax
+    lea rax, [a_daily_flag]
+    mov [dc_argv+16], rax
+    lea rax, [mod_dir]
+    mov [dc_argv+24], rax
+    mov qword [dc_argv+32], 0
+    lea rcx, [s_sh]
+    lea rdx, [dc_argv]
+    mov r8, -1
+    mov r9, -1
+    mov qword [rsp+32], -1
+    mov qword [rsp+40], 2               ; search PATH
+    call spawn
+.d:
+END_FN
+
 ; Runs the game command (everything after "--steam") as a child and waits for it, serving discovery and the world meanwhile.
 ; Sets game_exit.
 FN launch_game
@@ -1816,6 +1851,7 @@ program_main:
     xor edx, edx
     call sv_set
 .run:
+    call daily_check
     call launch_game
     call sess_stop
     mov ecx, ST_STOPPED

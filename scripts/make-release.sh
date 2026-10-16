@@ -7,17 +7,22 @@
 #
 #   sh scripts/make-release.sh                         release/latest.txt, mod files only. Run it whenever the mod changes
 #                                                      or its version is bumped; CI fails if the committed list is stale.
-#   sh scripts/make-release.sh --bin <dir> <outfile>   mod files plus the four tools found in <dir>. Used by the release
-#                                                      workflow; the result is published as the release asset latest.txt.
+#   sh scripts/make-release.sh --bin <dir> <outfile> [<Linux tar.gz>]
+#                                                      mod files plus the four tools found in <dir>, and (with the third
+#                                                      argument) a comment line "#linux-tar <sha256> <file name>" that
+#                                                      ./install.sh --update uses to verify the Linux programs. Used by the
+#                                                      release workflow; the result is published as the asset latest.txt.
 set -eu
 project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project"
 bindir=
 out=release/latest.txt
+linuxtar=
 if [ "${1:-}" = "--bin" ]; then
-    [ $# -eq 3 ] || { echo "usage: make-release.sh [--bin <dir> <outfile>]" >&2; exit 2; }
+    [ $# -eq 3 ] || [ $# -eq 4 ] || { echo "usage: make-release.sh [--bin <dir> <outfile> [<Linux tar.gz>]]" >&2; exit 2; }
     bindir=$2
     out=$3
+    linuxtar=${4:-}
 elif [ $# -ne 0 ]; then
     echo "usage: make-release.sh [--bin <dir> <outfile>]" >&2
     exit 2
@@ -44,6 +49,10 @@ count=$(wc -l < "$body" | tr -d ' ')
 mkdir -p "$(dirname -- "$out")"
 {
     printf 'version %s\n' "$version"
+    if [ -n "$linuxtar" ]; then
+        [ "$(basename "$linuxtar")" = "MistriaMulti-$version-Linux.tar.gz" ] || { echo "$linuxtar must be named MistriaMulti-$version-Linux.tar.gz" >&2; exit 1; }
+        printf '#linux-tar %s %s\n' "$(sha256sum "$linuxtar" | cut -d' ' -f1)" "$(basename "$linuxtar")"
+    fi
     cat "$body"
     printf 'end %s\n' "$count"
 } > "$out"

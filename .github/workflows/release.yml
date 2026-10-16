@@ -41,10 +41,10 @@ jobs:
         run: |
           mkdir -p dist
           cp build/MistriMulti.exe build/MistriMultiLauncher.exe build/mistrimulti-helper.exe build/mistrimulti-steam-id.exe dist/
-          sh scripts/make-release.sh --bin dist dist/latest.txt
+          sh scripts/make-player-packages.sh dist build dist
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' mod/mistrimulti/manifest.toml | head -n 1)
+          sh scripts/make-release.sh --bin dist dist/latest.txt "dist/MistriaMulti-$version-Linux.tar.gz"
           cat dist/latest.txt
-      - name: Player downloads (Windows zip, Linux tar.gz)
-        run: sh scripts/make-player-packages.sh dist build dist
       - uses: actions/upload-artifact@v4
         with:
           name: mistrimulti-release
