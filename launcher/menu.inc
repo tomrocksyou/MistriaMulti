@@ -4,6 +4,9 @@
 ; Differences from Linux: the host scan and this PC's addresses come from MistriMulti.exe (--scan / --addrs, the same code the
 ; manager window uses) run as a short child process, and the status file is written with a temporary file and MoveFileExW.
 ; Nothing listens and no helper runs in standby.
+; Two more commands belong to the title screen's "Update" button (common/updatecore.inc, docs/SYNC-UPDATE.md): cmd=update runs
+; MistriMulti.exe --update <result file> (next to the launcher) and relays its progress in status.json (us, uv, um, ue, ur);
+; cmd=update_cancel stops it. The same file also carries `update`, the answer of the daily release check (curl.exe in System32).
 
 ST_IDLE equ 0
 ST_HOSTING equ 1
@@ -24,26 +27,44 @@ ER_NOSCAN equ 7
 ER_REJ_BASE equ 20
 ER_WORLD_BASE equ 40
 
-extern GetTickCount64
+extern GetTickCount64, GetSystemTimeAsFileTime, ExpandEnvironmentStringsW
 
 section .data
 WSTR n_menudir, "\menu\x"
 WSTR n_menucmd, "\menu\cmd.txt"
 WSTR n_menustat, "\menu\status.json"
 WSTR n_menutmp, "\menu\status.tmp"
+WSTR n_menuworld, "\menu\world.txt"
 WSTR n_scanfile, "\menu\scan.txt"
 WSTR n_addrfile, "\menu\addrs.txt"
 WSTR n_manager, "MistriMulti.exe"
 WSTR f_mgrcmd, `"%s\\MistriMulti.exe" %s "%s"`
 WSTR s_optscan, "--scan"
 WSTR s_optaddrs, "--addrs"
+WSTR s_optupdate, "--update"
+WSTR n_updcfg, "\update.cfg"
+WSTR n_updchk, "\update_check.txt"
+WSTR n_updres, "\menu\update.txt"
+WSTR n_chkdl, "\menu\latest.dl"
+WSTR n_updtmp, "\update_check.tmp"
+WSTR s_manifest_rel, "\mods\mistrimulti\manifest.toml"
+WSTR s_curl_path, "%SystemRoot%\System32\curl.exe"
+WSTR e_relurl, "MISTRIMULTI_RELEASE_URL"
+WSTR e_uplimit, "MISTRIMULTI_UPDATE_TIMEOUT_MS"
+WSTR s_rel_url, "https://github.com/tomrocksyou/MistriaMulti/releases/latest/download/latest.txt"
+WSTR f_curlcmd, `"%s" -fsSL --max-time 5 --connect-timeout 3 --max-filesize 65536 --proto =https --proto-redir =https -o "%s" "%s"`
+WSTR f_curlcmd_o, `"%s" -fsSL --max-time 5 --connect-timeout 3 --max-filesize 65536 -o "%s" "%s"`
 k_seq db 4,'seq='
 k_cmd db 4,'cmd='
 c_scan db 'scan',0
 c_stop db 'stop',0
+c_update db 'update',0
+c_ucancel db 'update_cancel',0
+j_pct_s db '%s',0
 f_auth db '"auth":',0
 f_reject db '"reject":',0
-j_m1 db '{"v":1,"hb":%d,"seq":%d,"state":"%s","err":%d,"session":"%s","helper":%d,"scan":%d,"port":%d,"addrs":[',0
+j_m1 db '{"v":1,"hb":%d,"seq":%d,"state":"%s","err":%d,"session":"%s","helper":%d,"scan":%d,"port":%d,"hw":%d,"hf":%d,"dw":%d',0
+j_m9 db ',"addrs":[',0
 j_addr db '%s"%d.%d.%d.%d"',0
 j_m10 db '],"hosts":[',0
 j_host db '%s{"ip":"%d.%d.%d.%d","port":%d,"flags":%d,"name":"%s"}',0
@@ -77,6 +98,14 @@ sv_scan resd 1
 sv_helper_ok resd 1
 sv_prev_slot resd 1
 sv_cmd resd 1
+up_proc resq 1
+ck_proc resq 1
+up_wres resw 1040
+ck_wout resw 1040
+ck_wcurl resw 1040
+ck_wurl resw 520
+up_ft resq 1
+up_wnum resw 16
 sv_deadline resq 1
 sv_last_write resq 1
 sv_addr_count resd 1
@@ -94,6 +123,14 @@ sv_t_pass resb 72
 sv_t_room resb 16
 sv_tmp resb 48
 sv_json resb 4096
+sv_hw resd 1                           ; guest: the host's current world (game id; 0 = unknown), from its signed header
+sv_hf resd 1                           ; guest: bit 0 the host named a world, bit 1 that world is saved on the host
+sv_dw resd 1                           ; guest: the game id of the world file that was downloaded
+wh_id resd 1                           ; host: the world the mod says is being played (menu/world.txt, 0 = no file: any newest save)
+wh_found resd 1                        ; host: a save of that world exists (or, with no world.txt, any save)
+wh_buf resb 64
+wh_disc_bits resd 1
+wh_disc_at resq 1
 
 section .text
 ; ---------------- status file ----------------
@@ -121,6 +158,22 @@ FN sv_status_write
     mov [rsp+64], rax
     mov eax, [cfg_port]
     mov [rsp+72], rax
+    mov eax, [sv_hw]
+    mov [rsp+80], rax
+    mov eax, [sv_hf]
+    mov [rsp+88], rax
+    mov eax, [sv_dw]
+    mov [rsp+96], rax
+    call wsprintfA
+    add r12, rax
+    call up_json_make                   ; ,"update":..,"us":..,"uv":..,"um":..,"ue":..,"ur":.. (common/updatecore.inc)
+    mov rcx, r12
+    lea rdx, [j_pct_s]
+    lea r8, [up_json]
+    call wsprintfA
+    add r12, rax
+    mov rcx, r12
+    lea rdx, [j_m9]
     call wsprintfA
     add r12, rax
     xor r13d, r13d
@@ -266,7 +319,98 @@ FN disc_stop
 .d:
 END_FN
 
+; The mod's note about the world the host plays now (menu\world.txt, written by MistriMultiMenu.gml): read by the world server and the
+; discovery answer. No file = the old behaviour (the newest save). It belongs to a session, so a stop or a new session deletes it.
+FN wh_forget
+    lea rcx, [p1]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_menuworld]
+    call wsprintfW
+    lea rcx, [p1]
+    call DeleteFileW
+    mov dword [wh_id], 0
+    mov dword [wh_disc_bits], 0
+    mov qword [wh_disc_at], 0
+END_FN
+
+FN sv_world_clear
+    mov dword [sv_hw], 0
+    mov dword [sv_hf], 0
+    mov dword [sv_dw], 0
+END_FN
+
+; Reads menu\world.txt ("id=<game id>") into wh_id (0 when absent or invalid)
+FN wh_load
+    mov dword [wh_id], 0
+    lea rcx, [p1]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_menuworld]
+    call wsprintfW
+    lea rcx, [p1]
+    lea rdx, [wh_buf]
+    mov r8d, 40
+    call read_file
+    test rax, rax
+    jle .d
+    lea rcx, [wh_buf]
+    mov byte [rcx+rax], 0
+    call wf_parse_world
+    mov [wh_id], eax
+.d:
+END_FN
+
+; The host's world as the server and the discovery answer see it: wh_id, and the save to send (ws_name, ws_path, ws_size) which is the
+; newest save OF THAT WORLD when the mod named one -> eax 1 if there is one (wh_found)
+FN wh_state
+    call wh_load
+    call world_find_newest
+    mov [wh_found], eax
+END_FN
+
+; Puts the world info into the world header being built in wf_hdr: byte 6 flags (bit 0 world named, bit 1 saved), u32 id at 44. Signed later.
+FN wh_fill_hdr
+    mov eax, [wh_id]
+    test eax, eax
+    jz .d
+    mov [wf_hdr+44], eax
+    mov al, 1
+    cmp dword [wh_found], 0
+    je .set
+    or al, 2
+.set:
+    mov [wf_hdr+6], al
+.d:
+END_FN
+
+; Discovery answer: flags bit 2 = the host named its current world, bit 3 = that world is saved (at most one look at the disk a second)
+FN wh_disc_flags
+    call GetTickCount64
+    mov rcx, rax
+    sub rcx, [wh_disc_at]
+    cmp rcx, 1000
+    jb .have
+    mov [wh_disc_at], rax
+    call wh_state
+    xor eax, eax
+    cmp dword [wh_id], 0
+    je .store
+    mov eax, 4
+    cmp dword [wh_found], 0
+    je .store
+    or eax, 8
+.store:
+    mov [wh_disc_bits], eax
+.have:
+    movzx eax, byte [disc_resp+5]
+    and eax, 3
+    or eax, [wh_disc_bits]
+    mov [disc_resp+5], al
+END_FN
+
 FN sess_stop
+    call wh_forget
     call stop_helper
     call disc_stop
     mov dword [cfg_mode], 0
@@ -401,6 +545,7 @@ END_FN
 ; Hosting: sv_t_port / sv_t_pass / sv_t_room were validated by the caller.
 FN sv_host
     call sess_stop
+    call sv_world_clear
     mov dword [cfg_mode], 1
     mov dword [cfg_player], 0
     mov dword [cfg_port], 7777
@@ -476,6 +621,7 @@ END_FN
 ; Joining: sv_t_host, sv_t_port, sv_t_pass and sv_t_room were validated by the caller.
 FN sv_join
     call sess_stop
+    call sv_world_clear
     mov dword [cfg_mode], 2
     mov dword [cfg_port], 7777
     cmp byte [sv_t_port], 0
@@ -677,7 +823,13 @@ FN sv_join_step
     lea rdx, [p1]
     call world_fetch
     mov r12d, eax
-    test eax, eax
+    mov eax, [wf_host_id]               ; which world the host plays now / which one arrived: the mod compares them before it enters
+    mov [sv_hw], eax
+    mov eax, [wf_host_flags]
+    mov [sv_hf], eax
+    mov eax, [wf_got_id]
+    mov [sv_dw], eax
+    test r12d, r12d
     jnz .worldfail
     mov dword [sv_phase], 0
     mov ecx, ST_READY
@@ -860,7 +1012,7 @@ FN sv_scan_now
 END_FN
 
 ; ---------------- commands ----------------
-; Reads and deletes cmd.txt. eax: 0 nothing new, 1 host, 2 join, 3 scan, 4 stop, 9 anything else (answered, not acted on).
+; Reads and deletes cmd.txt. eax: 0 nothing new, 1 host, 2 join, 3 scan, 4 stop, 5 update, 6 update_cancel, 9 anything else (answered, not acted on).
 FN sv_read_cmd
     lea rcx, [p1]
     lea rdx, [f_cat]
@@ -938,6 +1090,18 @@ FN sv_read_cmd
     mov edx, 4
     test eax, eax
     jnz .got
+    lea rcx, [sv_t_cmd]
+    lea rdx, [c_update]
+    call a_equal
+    mov edx, 5
+    test eax, eax
+    jnz .got
+    lea rcx, [sv_t_cmd]
+    lea rdx, [c_ucancel]
+    call a_equal
+    mov edx, 6
+    test eax, eax
+    jnz .got
     mov edx, 9
 .got:
     mov eax, edx
@@ -989,7 +1153,17 @@ FN sv_poll
     je .scan
     cmp eax, 4
     je .stop
+    cmp eax, 5
+    je .update
+    cmp eax, 6
+    je .ucancel
     call sv_status_write                ; unknown command: only the answer (seq) changes
+    jmp .step
+.update:
+    call up_cmd_update                  ; never touches the session state: it only fills the update fields
+    jmp .step
+.ucancel:
+    call up_cmd_cancel
     jmp .step
 .host:
     call sv_valid_common
@@ -1024,11 +1198,14 @@ FN sv_poll
     jmp .step
 .stop:
     call sess_stop
+    call sv_world_clear
     mov ecx, ST_IDLE
     xor edx, edx
     call sv_set
 .step:
     call sv_join_step
+    call up_step                        ; a running update program (common/updatecore.inc)
+    call chk_step                       ; the daily release check, in the background, after the game started
     call sv_status_tick
 END_FN
 
@@ -1054,6 +1231,8 @@ FN menu_prepare
     call wsprintfW
     lea rcx, [p1]
     call DeleteFileW                    ; a command left over from an earlier run must not be applied
+    call sv_world_clear
+    call wh_forget                      ; and neither must a world note of an earlier run
     lea rcx, [p1]
     lea rdx, [f_slash]
     lea r8, [exe_dir]
@@ -1092,3 +1271,320 @@ FN menu_init
     mov eax, 1
 .d:
 END_FN
+
+; ---------------- update run and release check: the Windows side (common/updatecore.inc is the logic) ----------------
+FN plat_ms
+    call GetTickCount64
+END_FN
+
+FN plat_unix
+    lea rcx, [up_ft]
+    call GetSystemTimeAsFileTime
+    mov rax, [up_ft]
+    mov rcx, 116444736000000000         ; 100 ns ticks from 1601 to 1970
+    sub rax, rcx
+    jb .zero
+    xor edx, edx
+    mov rcx, 10000000
+    div rcx
+    jmp .d
+.zero:
+    xor eax, eax
+.d:
+END_FN
+
+; p1 = a wide path. eax 1 if it is a file and its first 8000 bytes are in file_buf (NUL terminated), cfg_len set
+FN plat_load
+    lea rcx, [p1]
+    lea rdx, [file_buf]
+    mov r8d, 8000
+    call read_file
+    test rax, rax
+    jle .no
+    mov [cfg_len], rax
+    lea rcx, [file_buf]
+    mov byte [rcx+rax], 0
+    mov eax, 1
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_cfg_read
+    lea rcx, [p1]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_updcfg]
+    call wsprintfW
+    call plat_load
+END_FN
+
+FN plat_cache_read
+    lea rcx, [p1]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_updchk]
+    call wsprintfW
+    call plat_load
+END_FN
+
+FN plat_cache_write                    ; rcx data, rdx length
+    mov r12, rcx
+    mov r13, rdx
+    lea rcx, [p1]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_updtmp]
+    call wsprintfW
+    lea rcx, [p1]
+    mov rdx, r12
+    mov r8, r13
+    call write_file
+    test eax, eax
+    jz .d
+    lea rcx, [p2]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_updchk]
+    call wsprintfW
+    lea rcx, [p1]
+    lea rdx, [p2]
+    mov r8d, 1                          ; MOVEFILE_REPLACE_EXISTING
+    call MoveFileExW
+.d:
+END_FN
+
+; <game folder>\mods\mistrimulti\manifest.toml, the game folder being where the game program named on the command line lives
+FN plat_manifest_read
+    cmp word [game_dir], 0
+    je .no
+    lea rcx, [p1]
+    lea rdx, [f_cat]
+    lea r8, [game_dir]
+    lea r9, [s_manifest_rel]
+    call wsprintfW
+    call plat_load
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+; rcx = process handle -> rax exit code, or -1 while it still runs (the handle is closed once it has ended)
+FN plat_proc_poll
+    mov r12, rcx
+    test rcx, rcx
+    jz .gone
+    xor edx, edx
+    call WaitForSingleObject
+    test eax, eax
+    jnz .running
+    mov dword [up_ft], 1
+    mov rcx, r12
+    lea rdx, [up_ft]
+    call GetExitCodeProcess
+    mov eax, [up_ft]
+    mov r13, rax
+    mov rcx, r12
+    call CloseHandle
+    mov rax, r13
+    jmp .d
+.gone:
+    mov eax, 1
+    jmp .d
+.running:
+    mov rax, -1
+.d:
+END_FN
+
+FN plat_proc_kill                      ; rcx = process handle
+    mov r12, rcx
+    test rcx, rcx
+    jz .d
+    mov edx, 1
+    call TerminateProcess
+    mov rcx, r12
+    mov edx, 2000
+    call WaitForSingleObject
+    mov rcx, r12
+    call CloseHandle
+.d:
+END_FN
+
+FN plat_up_limit                       ; test hook: MISTRIMULTI_UPDATE_TIMEOUT_MS=<1..999999> shortens the run time limit
+    lea rcx, [e_uplimit]
+    lea rdx, [up_wnum]
+    mov r8d, 8
+    call GetEnvironmentVariableW
+    test eax, eax
+    jz .no
+    cmp eax, 7
+    ja .no
+    lea rcx, [up_wnum]
+    call w2i
+    test eax, eax
+    jnz .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_up_prepare
+    lea rcx, [up_wres]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_updres]
+    call wsprintfW
+    lea rcx, [up_wres]
+    call DeleteFileW                    ; a result of an earlier run must not be read as this run's
+END_FN
+
+; Starts  <launcher folder>\MistriMulti.exe --update <result file>  (no window). eax 1 if it was started.
+; It is not tied to the launcher's life: an update that has begun may finish even when the game closes.
+FN plat_up_start
+    lea rcx, [p1]
+    lea rdx, [f_slash]
+    lea r8, [exe_dir]
+    lea r9, [n_manager]
+    call wsprintfW
+    lea rcx, [p1]
+    call file_exists
+    test eax, eax
+    jz .no
+    lea rcx, [cmd_buf]
+    lea rdx, [f_mgrcmd]
+    lea r8, [exe_dir]
+    lea r9, [s_optupdate]
+    lea rax, [up_wres]
+    mov [rsp+32], rax
+    call wsprintfW
+    lea rcx, [cmd_buf]
+    lea rdx, [exe_dir]
+    xor r8d, r8d
+    mov r9d, 0x08000000                 ; CREATE_NO_WINDOW
+    call spawn
+    test rax, rax
+    jz .no
+    mov [up_proc], rax
+    mov eax, 1
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_up_poll
+    mov rcx, [up_proc]
+    call plat_proc_poll
+END_FN
+
+FN plat_up_kill
+    mov rcx, [up_proc]
+    call plat_proc_kill
+    mov qword [up_proc], 0
+END_FN
+
+FN plat_up_read
+    lea rcx, [up_wres]
+    lea rdx, [p1]
+    call wcopy
+    call plat_load
+END_FN
+
+; Starts  %SystemRoot%\System32\curl.exe -fsSL --max-time 5 ... -o <menu\latest.dl> <release list URL>  (a short, quiet try).
+; MISTRIMULTI_RELEASE_URL replaces the URL (for tests); the https-only rule is then dropped so a test server on loopback works.
+FN plat_chk_start
+    lea rcx, [ck_wout]
+    lea rdx, [f_cat]
+    lea r8, [mod_dir]
+    lea r9, [n_chkdl]
+    call wsprintfW
+    lea rcx, [ck_wout]
+    call DeleteFileW
+    lea rcx, [s_curl_path]
+    lea rdx, [ck_wcurl]
+    mov r8d, 1000
+    call ExpandEnvironmentStringsW
+    test eax, eax
+    jz .no
+    lea rcx, [ck_wcurl]
+    call file_exists
+    test eax, eax
+    jz .no
+    mov word [ck_wurl], 0
+    lea rcx, [e_relurl]
+    lea rdx, [ck_wurl]
+    mov r8d, 500
+    call GetEnvironmentVariableW
+    test eax, eax
+    jz .plain
+    cmp eax, 490
+    ja .plain
+    lea rsi, [ck_wurl]                  ; an override with a quote in it would break the command line: ignore it
+.q: movzx eax, word [rsi]
+    test eax, eax
+    jz .override
+    cmp eax, '"'
+    je .badurl
+    add rsi, 2
+    jmp .q
+.badurl:
+    mov word [ck_wurl], 0
+.plain:
+    lea rcx, [cmd_buf]
+    lea rdx, [f_curlcmd]
+    lea r8, [ck_wcurl]
+    lea r9, [ck_wout]
+    lea rax, [s_rel_url]
+    mov [rsp+32], rax
+    call wsprintfW
+    jmp .go
+.override:
+    lea rcx, [cmd_buf]
+    lea rdx, [f_curlcmd_o]
+    lea r8, [ck_wcurl]
+    lea r9, [ck_wout]
+    lea rax, [ck_wurl]
+    mov [rsp+32], rax
+    call wsprintfW
+.go:
+    lea rcx, [cmd_buf]
+    xor edx, edx
+    xor r8d, r8d
+    mov r9d, 0x08000000                 ; CREATE_NO_WINDOW
+    call spawn
+    test rax, rax
+    jz .no
+    mov [ck_proc], rax
+    mov eax, 1
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_chk_poll
+    mov rcx, [ck_proc]
+    call plat_proc_poll
+END_FN
+
+FN plat_chk_kill
+    mov rcx, [ck_proc]
+    call plat_proc_kill
+    mov qword [ck_proc], 0
+END_FN
+
+FN plat_chk_read
+    lea rcx, [ck_wout]
+    lea rdx, [p1]
+    call wcopy
+    call plat_load
+END_FN
+
+FN plat_chk_clean
+    lea rcx, [ck_wout]
+    call DeleteFileW
+END_FN
+
+%include "updatecore.inc"

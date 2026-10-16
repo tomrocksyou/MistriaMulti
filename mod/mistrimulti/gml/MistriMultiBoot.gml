@@ -13,6 +13,7 @@ function __mistrimulti_runtime() {
             character_owner: undefined, character_pending: false,
             character_ready_ticks: 0, character_menu: undefined,
             character_preset: undefined, character_loaded: false,
+            character_phase: "", character_ask: undefined, character_entry: "load",
         };
     }
     return global.__mistrimulti;
@@ -63,6 +64,8 @@ function mistrimulti_initialize() {
     r.mode = cfg.mode;
     r.bridge = native_root + string(cfg.id);
     directory_create(r.bridge);
+    // How the player entered this world (MistriMultiSaveSpace.gml): New Game asks for a new character, Load Game continues one.
+    r.character_entry = __mistrimulti_savespace()[$ "entry"] == "new" ? "new" : "load";
     mistrimulti_identity_initialize(cfg);
     mistrimulti_trust_initialize();
     mistrimulti_player_data_initialize();
@@ -100,7 +103,7 @@ function mistrimulti_initialize() {
         mmapi_debug_register_fn("mistrimulti.trust", mistrimulti_trust_debug, { mod_name: "mistrimulti" });
         mmapi_debug_register_fn("mistrimulti.unlock_mines", mistrimulti_devtools_unlock_mines, { mod_name: "mistrimulti" });
     }
-    mmapi_log_info("mistrimulti", "MistriaMulti 0.4.0 loaded: " + r.mode);
+    mmapi_log_info("mistrimulti", "MistriaMulti 0.4.7 loaded: " + r.mode);
     mmapi_log_flush("mistrimulti");
 }
 
@@ -135,7 +138,7 @@ function mistrimulti_tick() {
         try { mmapi_log_warn("mistrimulti", "Mod tick is running."); mmapi_log_flush("mistrimulti"); } catch (e) {}
     }
     // The Host / Join menu and the badge's watchdog work on the title screen too, before any multiplayer world exists.
-    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); mistrimulti_badge_tick(); mistrimulti_savespace_tick(); }
+    try { mistrimulti_menu_tick(); mistrimulti_badge_watchdog(); mistrimulti_badge_tick(); mistrimulti_updateui_tick(); mistrimulti_savespace_tick(); }
     catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_tick", "mistrimulti", "Multiplayer menu tick failed: " + string(e)); }
     // Multiplayer starts only after the player picked the multiplayer save space.
     if (!r.initialized && !__mistrimulti_savespace().active) return;
@@ -196,10 +199,9 @@ function mistrimulti_tick() {
         if (r.room_was_settled) mistrimulti_trace("room", "tick " + string(r.ticks) + " settled in [" + room_now + "]", 500);
     }
     r.room_settled = r.ticks - r.room_seen_at >= 60;
-    var settled = r.room_settled;
     if (ARI != undefined && GRID != undefined) mistrimulti_read_peers();
     mistrimulti_events_tick();
-    var active = settled && instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
+    var active = mistrimulti_local_active();
     if (active) {
         mistrimulti_watch_changes();
         if (r.ticks mod 60 == 0 || r.mask != r.last_mask) mistrimulti_update_look();
@@ -259,6 +261,13 @@ function mistrimulti_tick() {
     }
 }
 
+// This game takes part in the world: its room settled, its character exists and is finished (a guest still in the character
+// editor or loading its records is not). The other players' characters are shown only then.
+function mistrimulti_local_active() {
+    var r = __mistrimulti_runtime();
+    return r.room_settled == true && instance_exists(obj_ari) && ARI != undefined && GRID != undefined && r.player_ready && !r.character_pending;
+}
+
 function mistrimulti_read_peers() {
     var r = __mistrimulti_runtime();
     for (var i = 0; i < 8; i++) {
@@ -294,7 +303,7 @@ function mistrimulti_read_peers() {
         // Delivers this peer's new events, in order, to the registered handlers.
         mistrimulti_events_receive(i, p);
         if (remember) mistrimulti_remember_peer(i);
-        if (p[$ "active"] == true && r[$ "room_settled"] == true) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
+        if (p[$ "active"] == true && mistrimulti_local_active()) mistrimulti_update_peer(i); else mistrimulti_hide_peer(i);
     }
 }
 
@@ -359,7 +368,7 @@ function mistrimulti_show_status() {
         mistrimulti_netstatus_refresh();
         var shown = mistrimulti_status_text().text;
         var reason = n.why != "" ? n.why : __mistrimulti_menu().why;
-        create_notification(ANCHOR.wrap_for_local(shown + (reason != "" ? " (" + reason + ")" : "")));
+        create_notification(ANCHOR.wrap_for_local(shown + (reason != "" ? " (" + reason + ")" : "") + mistrimulti_update_note()));
         return;
     }
     var count = 0;
@@ -370,6 +379,7 @@ function mistrimulti_show_status() {
     if (r.mode == "join" && r.player_revision > r.player_saved_revision) text += " | Saving player progress";
     var trust = mistrimulti_trust_status_text();
     if (trust != "") text += " | " + trust;
+    text += mistrimulti_update_note();
     create_notification(ANCHOR.wrap_for_local(text));
 }
 
@@ -473,5 +483,5 @@ function mistrimulti_register() {
     mistrimulti_dungeon_register_hooks();
 }
 
-mmapi_mod_declare("mistrimulti", "0.4.0");
+mmapi_mod_declare("mistrimulti", "0.4.7");
 mistrimulti_register();

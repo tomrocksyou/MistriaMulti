@@ -23,6 +23,12 @@ a_join_cmd db 'join',0
 a_scan_cmd db 'scan',0
 a_steam_cmd db 'steam-setup',0
 a_save_cmd db 'save-solo',0
+a_update_cmd db 'update',0
+a_update_flag db '--update',0
+a_result_flag db '--result',0
+s_sh db 'sh',0
+n_updscript db '/mistrimulti-update.sh',0
+t_noupdate db 'The update script (mistrimulti-update.sh) is not next to this program. Run ./install.sh --update from the MistriaMulti download folder instead.',10,0
 a_help1 db 'help',0
 a_help2 db '--help',0
 a_scan_hook db '--scan',0
@@ -55,7 +61,9 @@ t_usage db 'MistriaMulti manager',10
     db '                      [--player N] [--room CODE] [--port N] [--password TEXT]',10
     db '  mistrimulti-manager scan            list the hosts that can be found',10
     db '  mistrimulti-manager steam-setup     print the Steam launch option for the launcher',10
-    db '  mistrimulti-manager save-solo       copy your solo saves to ~/Documents/MistriMulti Backups',10,0
+    db '  mistrimulti-manager save-solo       copy your solo saves to ~/Documents/MistriMulti Backups',10
+    db '  mistrimulti-manager update          download the latest release and update the programs and the mod files',10
+    db '  mistrimulti-manager update --result FILE   the same without questions; progress and result as key=value lines in FILE',10,0
 t_nodir db 'Could not find the folder where the game keeps its files. Start the game once, or set MISTRIMULTI_DATA_DIR to that folder.',10,0
 t_nocfg db 'Could not save the setup.',10,0
 t_hostmsg db 'You are set to host.',10,10,'Tell your friends one of these addresses; they pick yours in the join list or type it:',10,10,0
@@ -97,6 +105,7 @@ t_two db '  ',0
 align 8
 
 section .bss
+upd_argv resq 6
 join_ip resb 32
 join_port resd 1
 join_flags resd 1
@@ -1232,6 +1241,55 @@ FN hook_fetch
 .d:
 END_FN
 
+; mistrimulti-manager update: hands over to sh <program folder>/mistrimulti-update.sh --update (install.sh's copy, which does the download).
+FN do_update_cmd
+    call exe_init
+    test eax, eax
+    jz .fail
+    lea rcx, [p1]
+    lea rdx, [exe_dir]
+    lea r8, [n_updscript]
+    call path2
+    lea rcx, [p1]
+    call path_kind
+    cmp eax, 1
+    jne .missing
+    lea rax, [s_sh]
+    mov [upd_argv], rax
+    lea rax, [p1]
+    mov [upd_argv+8], rax
+    lea rax, [a_update_flag]
+    mov [upd_argv+16], rax
+    mov qword [upd_argv+24], 0
+    mov ecx, 3
+    call arg_n                          ; mistrimulti-manager update --result <file>: no questions, progress in the file
+    test rax, rax
+    jz .exec
+    mov r12, rax
+    mov ecx, 2
+    call arg_n
+    test rax, rax
+    jz .exec
+    mov rcx, rax
+    lea rdx, [a_result_flag]
+    call a_equal
+    test eax, eax
+    jz .exec
+    lea rax, [a_result_flag]
+    mov [upd_argv+24], rax
+    mov [upd_argv+32], r12
+    mov qword [upd_argv+40], 0
+.exec:
+    lea rcx, [s_sh]
+    lea rdx, [upd_argv]
+    call exec_search
+.missing:
+    lea rcx, [t_noupdate]
+    call say_err
+.fail:
+    mov eax, 1
+END_FN
+
 program_main:
     mov ecx, 1
     call arg_n
@@ -1263,6 +1321,11 @@ program_main:
     call a_equal
     test eax, eax
     jnz .save
+    mov rcx, r12
+    lea rdx, [a_update_cmd]
+    call a_equal
+    test eax, eax
+    jnz .update
     mov rcx, r12
     lea rdx, [a_scan_hook]
     call a_equal
@@ -1317,6 +1380,9 @@ program_main:
     jmp .exit
 .save:
     call do_save_solo
+    jmp .exit
+.update:
+    call do_update_cmd
     jmp .exit
 .hscan:
     call hook_scan

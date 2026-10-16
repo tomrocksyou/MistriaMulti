@@ -44,9 +44,9 @@ def main():
             game.batch([{'op':'set','path':'global.__mistrimulti.character_owner','value':None}])
             wait(lambda: game.call('character')['open'])
             editing = game.call('character')
-            assert editing['pending'] and editing['edited_look'] == saved['look']
+            assert editing['pending'], editing   # a new character: the editor starts from the game's defaults, not from the saved profile
             wait(lambda: frame()['active'] is False)
-            print('PASS: Creator reloads the saved outfit and withholds presence until completion')
+            print('PASS: Creator opens for a new character and withholds presence until completion')
             print('Press Continue in the game to finish this check.', flush=True)
             wait(lambda: not game.call('character')['pending'], 180)
             wait(lambda: frame()['active'] is True)

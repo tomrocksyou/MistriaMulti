@@ -52,6 +52,8 @@ function mistrimulti_progress_reset_session() {
     r.progress_sessions = array_create(8, undefined);
     r.romance_view = {};
     r.romance_spouse_view = {};
+    r.kit_owed = false;
+    r.kit_tutorials = [];
 }
 
 // The core record was applied (PlayerData restore or fresh start). A guest is ready once its progress is applied as well.
@@ -815,11 +817,55 @@ function mistrimulti_progress_capture_story_rewards() {
         var level = T2R.read("mm_paid_" + quests[i]);
         if (is_real(level) && level > 0) paid[$ quests[i]] = level;
     }
-    return { init: T2R.read("mm_paid_init") == true, paid: paid };
+    var out = { init: T2R.read("mm_paid_init") == true, paid: paid };
+    var kit = mistrimulti_progress_story_kit();
+    if (kit != undefined) out.kit = kit;
+    var view = mistrimulti_progress_story_view();
+    if (array_length(struct_get_names(view)) > 0) out.view = view;
+    return out;
+}
+
+// The world cutscenes this player has been given the effects of but not watched yet ("mm_view": scene -> game day, text in
+// the world facts; MistriMultiStory.gml). Missing in older records: nothing is held.
+function mistrimulti_progress_story_view() {
+    var text = T2R.read("mm_view");
+    var data = undefined;
+    if (is_string(text)) {
+        try { data = json_parse(text); }
+        catch (e) { data = undefined; }
+    }
+    return is_struct(data) ? data : {};
+}
+
+// The scenes whose starter kit this player was given ("mm_kit", the JSON list in the world facts), or undefined when the kit was
+// never given (a record from before the kit: nothing is owed to it).
+function mistrimulti_progress_story_kit() {
+    var text = T2R.read("mm_kit");
+    var data = undefined;
+    if (is_string(text)) {
+        try { data = json_parse(text); }
+        catch (e) { data = undefined; }
+    }
+    return is_array(data) ? data : undefined;
 }
 
 function mistrimulti_progress_valid_story_rewards(v) {
     if (!mistrimulti_progress_bool_valid(v[$ "init"]) || !is_struct(v[$ "paid"])) return false;
+    var kit = v[$ "kit"];
+    if (kit != undefined) {
+        if (!is_array(kit) || array_length(kit) > 16) return false;
+        for (var i = 0; i < array_length(kit); i++) if (!mistrimulti_progress_text_valid(kit[i], 96)) return false;
+    }
+    var view = v[$ "view"];
+    if (view != undefined) {
+        if (!is_struct(view)) return false;
+        var held = struct_get_names(view);
+        if (array_length(held) > 64) return false;
+        for (var i = 0; i < array_length(held); i++) {
+            var day = view[$ held[i]];
+            if (!mistrimulti_progress_text_valid(held[i], 96) || !is_real(day) || day != floor(day) || day < 0 || day > 1000000) return false;
+        }
+    }
     var keys = struct_get_names(v.paid);
     if (array_length(keys) > 2048) return false;
     for (var i = 0; i < array_length(keys); i++) {
@@ -834,6 +880,9 @@ function mistrimulti_progress_restore_story_rewards(v) {
     var quests = mistrimulti_progress_story_quests();
     for (var i = 0; i < array_length(quests); i++) T2R.write("mm_paid_" + quests[i], v.paid[$ quests[i]]);
     T2R.write("mm_paid_init", v.init ? true : undefined);
+    T2R.write("mm_kit", is_array(v[$ "kit"]) ? json_stringify(v.kit) : undefined);
+    var view = v[$ "view"];
+    T2R.write("mm_view", is_struct(view) && array_length(struct_get_names(view)) > 0 ? json_stringify(view) : undefined);
 }
 
 // ---- records ------------------------------------------------------------------------------------------------------------------
@@ -929,6 +978,13 @@ function mistrimulti_progress_fresh() {
     try { ARI.inbox.on_new_day(); }
     catch (e) { mmapi_warn_rate_limited("mistrimulti_progress_mail", "mistrimulti", "First letters could not be delivered: " + string(e)); }
     r.progress_sigs = {};
+    // The starter kit: only for a character that is new in this session as a whole (a core record restored without a progress
+    // record is an old character, whose inventory already holds what it had).
+    if (r[$ "kit_owed"] == true) {
+        r.kit_owed = false;
+        try { mistrimulti_story_kit_grant(); }
+        catch (e) { mmapi_warn_rate_limited("mistrimulti_kit", "mistrimulti", "The starter kit could not be given: " + string(e)); }
+    }
 }
 
 // ---- host storage -------------------------------------------------------------------------------------------------------------
@@ -997,9 +1053,9 @@ function mistrimulti_progress_members_load() {
     return members;
 }
 
-function mistrimulti_progress_merge(uid, sections) {
+function mistrimulti_progress_merge(uid, sections, ignore_saved) {
     var r = __mistrimulti_runtime();
-    var base = mistrimulti_progress_load(uid);
+    var base = ignore_saved ? undefined : mistrimulti_progress_load(uid);
     var merged = {};
     if (base != undefined) {
         var kept = struct_get_names(base.data.sections);
@@ -1044,9 +1100,11 @@ function mistrimulti_progress_request(player, data) {
     if (!is_struct(core) || core.uid != data.uid || core.epoch != peer.epoch) return true;
     var session = r.progress_sessions[player];
     if (is_struct(session) && session.epoch == peer.epoch && session.uid == data.uid) return true;
-    var saved = mistrimulti_progress_load(data.uid);
+    // A player who started a new character in this world (profile_choice) gets no progress of the old one; it stays on disk.
+    var replaced = core[$ "replaced"] == true;
+    var saved = replaced ? undefined : mistrimulti_progress_load(data.uid);
     var path = mistrimulti_progress_path(data.uid);
-    if (saved == undefined && (file_exists(path) || file_exists(path + ".bak"))) {
+    if (!replaced && saved == undefined && (file_exists(path) || file_exists(path + ".bak"))) {
         return mistrimulti_event_emit("progress_error", { peer_epoch: peer.epoch, message: "The host progress record needs recovery." }, player);
     }
     var success = saved == undefined
@@ -1054,7 +1112,7 @@ function mistrimulti_progress_request(player, data) {
         : mistrimulti_progress_send("progress_record", player, peer.epoch, saved.revision, saved.data);
     if (success) {
         r.progress_sessions[player] = { uid: data.uid, epoch: peer.epoch, revision: saved == undefined ? 0 : saved.revision,
-            not_before: 0 };
+            not_before: 0, replaced: replaced };
         mistrimulti_progress_member(data.uid);
     }
     return success;
@@ -1130,7 +1188,7 @@ function mistrimulti_progress_upload(player, text, meta) {
         if (refusal != undefined) {
             return mistrimulti_event_emit("progress_error", { peer_epoch: session.epoch, message: "A progress update was rejected.", section: refusal }, player);
         }
-        var merged = mistrimulti_progress_merge(session.uid, update.sections);
+        var merged = mistrimulti_progress_merge(session.uid, update.sections, session[$ "replaced"] == true && session.revision == 0);
         if (mistrimulti_progress_size(merged.sections) > MISTRIMULTI_PROGRESS_RECORD_BYTES) {
             return mistrimulti_event_emit("progress_error", { peer_epoch: session.epoch, message: "Player progress exceeds the save limit." }, player);
         }

@@ -219,11 +219,15 @@ def world_proof(wk, slot, cnonce, hnonce):
     return (b"MSWP\x02").ljust(16, b"\0") + world_proof_tag(wk, slot, cnonce, hnonce)
 
 
-def world_header(status, data=b"", name=b"game-123-autosave.sav", digest=None, length=None, version=2):
+def world_header(status, data=b"", name=b"game-123-autosave.sav", digest=None, length=None, version=2, info_flags=0, host_world=0):
+    """info_flags (byte 6: bit 0 the host named the world it plays now, bit 1 that world is saved) and host_world (u32 at 44: its game id)
+    are the world info extension; hosts that predate it leave both zero."""
     h = bytearray(112)
     h[0:4] = b"MSWR"
     h[4] = version
     h[5] = status
+    h[6] = info_flags
+    h[44:48] = host_world.to_bytes(4, "little")
     h[8:12] = (len(data) if length is None else length).to_bytes(4, "little")
     h[12:44] = digest if digest is not None else hashlib.sha256(data).digest()
     h[48:48 + len(name)] = name

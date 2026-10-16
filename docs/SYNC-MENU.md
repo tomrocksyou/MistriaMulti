@@ -77,11 +77,19 @@ Written by the mod as `cmd.tmp`, then renamed. `key=value` lines, LF or CRLF, at
 | key | meaning |
 | --- | --- |
 | `seq` | 1..999999; the launcher applies a command only when `seq` differs from the last one it applied. The mod starts from a clock-based number so a restart of the mod cannot reuse one |
-| `cmd` | `host`, `join`, `scan` or `stop`; anything else only moves `seq` |
+| `cmd` | `host`, `join`, `scan`, `stop`, and (title screen Update button, `docs/SYNC-UPDATE.md`) `update` and `update_cancel`; anything else only moves `seq` |
 | `host` | join: the host's IPv4 address (`a.b.c.d`) |
 | `port` | optional, 1..65535, default 7777 (the game port of the host: the scan reports it) |
 | `password` | optional, 1..64 printable ASCII characters, no spaces |
 | `room` | optional, 8 hex digits (hosts with a custom room code; default `4d495354`) |
+
+### `<mod data>/menu/world.txt` (host mod -> launcher)
+
+`id=<Game.unique_identifier>` (one line), written by a host's mod as `world.tmp` and renamed, once per world, as soon as the world is
+loaded. It tells the launcher which world is being played now, so the world server sends THAT world's newest save and says whether one
+exists (`docs/PROTOCOL.md`, "World info"). The launcher never trusts it: the id must parse as 1..2147483647, anything else is "no note". It belongs to a
+session: the launcher deletes it when it starts, on every `host` / `join` / `stop` command and at the end of the game. The mod forgets
+what it published when the title screen returns.
 
 The launcher **deletes the file as soon as it has read it** (a password must not stay on disk; the only copy is the helper's
 `auth.cfg`, mode 0600 on Linux, as before). Every value is validated (same checks as `launcher.cfg`); an invalid command is
@@ -92,7 +100,7 @@ answered with state `error`, err 3, and starts nothing. Not a regular file (dire
 Rewritten after every change and at least once a second:
 
 ```json
-{"v":1,"hb":1789596,"seq":3,"state":"hosting","err":0,"session":"host","helper":1,"scan":2,"port":7777,
+{"v":1,"hb":1789596,"seq":3,"state":"hosting","err":0,"session":"host","helper":1,"scan":2,"port":7777,"hw":0,"hf":0,"dw":0,
  "addrs":["100.64.0.7","192.168.1.20"],
  "hosts":[{"ip":"100.101.102.103","port":7777,"flags":2,"name":"DECK"}]}
 ```
@@ -103,9 +111,16 @@ Rewritten after every change and at least once a second:
 - `state`: `idle`, `hosting`, `joining`, `downloading`, `ready` (joined and world downloaded), `error`, `scanning`, `stopped`.
 - `session`: `none`, `host`, `join`. `helper`: 1 when the helper program exists. `scan` counts finished scans (a scan that
   ended in error 7 counts too).
+- `hw`, `hf`, `dw` (guest, after the world download; zero otherwise and cleared by `host`, `join` and `stop`): the id of the world the host
+  plays now (0 = not told), its flags (bit 0 named, bit 1 saved) and the id of the world file that arrived. Added after 0.4.5; the mod treats a
+  missing field as 0.
 - `addrs` (host): this computer's addresses, Tailscale first. `hosts`: at most 12 found by the last scan, `flags` as in the
-  discovery reply (bit 0 custom room code, bit 1 needs a password), `name` cleaned (printable ASCII, `"` and `\` replaced by `_`).
+  discovery reply (bit 0 custom room code, bit 1 needs a password, bit 2 the host named the world it plays, bit 3 that world is saved), `name` cleaned (printable ASCII, `"` and `\` replaced by `_`).
 - The mod validates every field (`mistrimulti_menu_clean`); a damaged file is ignored, the last good one is kept.
+- Added with the Update button (`docs/SYNC-UPDATE.md`; the mod treats missing fields as "no update, no run"): `update` (`"0.4.7"` when a newer release
+  is known, else `"none"`), `us` (`none`, `checking`, `downloading`, `installing`, `done`, `failed`, `needs_momi`), `uv` (version), `um` (the update
+  program's message, cleaned), `ue` (error code: 61 busy, 62 program missing, 63 no result, 64 failed, 66 too long, or the program's own), `ur` (run counter).
+  `cmd=update` starts the update program (it never changes `state` / `err` / `session`); `cmd=update_cancel` stops a run that is not installing yet.
 
 ### Error codes (`err`; the words are in `mistrimulti_menu_error_text`)
 
@@ -124,8 +139,10 @@ Rewritten after every change and at least once a second:
 | 24 | the host's game is full |
 | 26 | the host needs a password and none was sent |
 | 41..47 | world download: 41 cannot connect (port 7775), 42 the host has no saved world yet, 43 invalid reply, 44 checksum mismatch, 45 cannot write, 46 out of memory, 47 refused (no joined session, wrong proof, or a host from an older release) |
+| 48 | world download: the host plays a world it has not saved yet (nothing downloadable is that world) |
+| 49 | (mod only) the world that arrived is not the world the host plays now (`hw != dw`) |
 
-(21..26 are `20 +` the helper's reject reason in its `status.json`; 40.. are `40 +` the `world_fetch` result.)
+(21..26 are `20 +` the helper's reject reason in its `status.json`; 40.. are `40 +` the `world_fetch` result; 49 is made by the mod.)
 
 ## What a command does
 
@@ -171,6 +188,63 @@ That is why `status.json` shows `scanning` / `downloading` first, and why the mo
   connected as a ghost.
 - Everything is guarded: a popup or file error is logged (`mmapi_log_error`), the flow resets (and sends `stop`), the game goes on.
   Singleplayer is never touched.
+
+## Leaving the flow: every way out resets everything
+
+Real-game finding (0.4.5): New Game > Multiplayer > Host a game > Cancel left **New Game dead until the game was restarted**.
+Cause: the game closes any popup by itself on Escape or on a click outside it **without calling a button**, so a state that only a
+button callback cleared (the `choosing` flag in `__mistrimulti_savespace()`, the menu `flow`, a session on the launcher) stayed set,
+and the New Game wrapper (`mistrimulti_title_enter_game`) ignores the button while `choosing` is set. Now:
+
+- **One exit.** Cancel, Close, Back to the title, Escape and a click outside all end in `mistrimulti_menu_cancel` -> `mistrimulti_menu_reset(stop)`:
+  popups and text box closed, the flow dropped, `choosing` cleared, and `stop` sent whenever the launcher has (or is starting) a session. The
+  decision is `mistrimulti_menu_session_running`: the screen says so (waiting for the host / scan / join, hosting, the error that follows a session)
+  **or** the launcher's status shows a session.
+- **Escape is seen.** The tick compares the flow's popup with `close_requested` (the game sets it when it closes a popup by itself) and treats
+  a closed popup as Cancel. A closed text box returns to the screen before it (as before).
+- **A flag is never trusted alone.** `mistrimulti_savespace_choosing_live()` clears `choosing` unless the Singleplayer / Multiplayer popup
+  (`choose_popup`) or the flow is really on screen. It runs in the tick and again when New Game / Load Game is pressed, so even if
+  something else leaves the flag behind, the button works at once. A flow with nothing on screen and nothing coming is reset after 3 s.
+- Beginning the flow again closes any old flow and stops its session. A failing popup constructor clears the flag and lets the game's own
+  New Game go on.
+- `tests/test_menu.py::test_every_cancel_path_resets_and_can_restart` walks every screen (question, choose, host, waiting for the host,
+  hosting, host list, looking for hosts, connecting, downloading, the error screens, world-not-saved, world-changed, the four text boxes)
+  and every exit of it (button, Escape, closed text box), checks that nothing is left and that the session was stopped where one had been started, then
+  presses New Game and Load Game again. Not covered: the "Continue world / New world" popup the game shows AFTER Start playing (a host
+  who presses Escape there is in the multiplayer save space with a running host session; New Game still works, and the title screen stops the session).
+
+## Which world does a guest get? (finding 2 of the 0.4.5 real-game test)
+
+The host started a NEW world (New Game > Multiplayer > Host a game > Start a new world) without saving. The guest joined and downloaded the host's
+**last saved** world (day 3) while the host was in the new world (day 1): wrong day ("Your day is ahead of the host's world"), the guest's
+character carried the old world's progress. The identity of a world is the game's `Game.unique_identifier` (the mod's world key is
+`<host identity>_<id>`, and the id is the number in the save file's name). Now:
+
+1. **The host publishes the world it plays** (`menu/world.txt`, above). The launcher serves only that world's newest save, signs the id and a
+   "saved" flag into the world header, answers a world that was never saved with status 4, and repeats the facts in the discovery answer (`docs/PROTOCOL.md`, "World info").
+2. **The guest compares before it enters.** After the download the launcher reports `hw`, `hf`, `dw`. The mod enters when the world that arrived
+   is the world the host plays (`hw == dw`) or when nothing was said (`0`: an older host or launcher). Otherwise:
+   - the host's world is not saved: error 48 "The host has started a new world but has not saved it yet. Ask them to sleep or save once, then press Join again." (**Try again** joins the same host again);
+   - the host changed world while the guest was downloading (`hw != dw`): error 49, the session is stopped, **Try again** downloads again;
+   - the host list marks hosts whose current world is not saved ("[new world, not saved]", from the discovery flags).
+3. **Safety net inside the world.** `mistrimulti_menu_guest_world_check` (every tick, guests) compares the suffix of the host's world key (from its
+   frames) with this game's `Game.unique_identifier`. A difference sets `r.world_mismatch`: `MistriMultiPlayerSync.gml` then never hands the guest's character
+   to the host (so nothing of the old world is written into the new world's records), and `MistriMultiGuestSave.gml` shows "The host is playing a
+   different world than the one you downloaded ..." and returns the guest to the title screen after 2 s (state `wrongworld`, like `restarted`). The same path
+   already handled a host that starts another world during the session (`restarted`). Guests' solo saves are never touched (a guest saves nothing).
+4. **The host's side is easier: a new world is saved early.** `mistrimulti_world_options_hearts` (the last question of New world) marks the
+   session `new_world`. `mistrimulti_menu_early_save` waits until the world is loaded and published, the player is in control (`PlayerState.Default`),
+   at home, no scene (`MIST.is_running()`), no popup, no loading screen, then does what the journal's "Save your progress?" does: hold the player
+   (`PlayerState.Dummy`), `LOAD_SEQUENCE.start("misc_local/saving", ...)`, inside it `ARI.save_position = ...` and
+   `save_game(exact_save_path(Game.unique_identifier, false))` (the autosave name, so the host's own end-of-day autosave replaces it later), then back to `Default`.
+   `save_game` runs `game.save_guard`, so `mistrimulti_save_guard` (flush guests, checkpoint, drops) and `save.game_saving` (wallet, renown, progress commit) run exactly as for any
+   save; nothing is bypassed. The host reads "MistriaMulti: your new world is saved. Friends can join now." (the game's own "Save complete" shows too). One attempt;
+   a failing save still finishes the loading sequence and says "could not be saved". If the conditions are not met within two minutes the host reads
+   "your new world is not saved yet, so friends cannot join it. Sleep or save at the journal once." (once).
+   **Not possible / not done:** the world cannot be saved before the player is in control (the intro scene and the first moments run inside MIST scenes the mod must not interrupt);
+   there is no hook for "world finished loading", so the mod polls; the save uses the autosave file name, not a manual one. A host who continues an existing world needs nothing.
+5. **Old releases.** A new guest against an old host gets zero world info (nothing changes). An old guest against a new host that has a note: status 4 is "invalid
+   reply" (code 43) for it; a world with a save is sent as before (an old guest ignores the new header fields). Both sides need the release after 0.4.5 for the new behaviour.
 
 ## The badge ("Multiplayer: Offline / Idle / Online")
 
@@ -223,10 +297,11 @@ The real-game test showed no badge at all: the mod runtime has no `draw_*` funct
 
 | Command | What it covers |
 | --- | --- |
-| `python3 tests/test_menu.py` | the GML menu and badge against a scripted fake launcher: every screen, validation, error words, cancel/Escape, silent launcher, hostile status file, badge states and fallbacks, the badge in a world, short popup labels (15 tests); `python3 tests/mutate_polish.py` breaks the badge and labels on purpose |
+| `python3 tests/test_menu.py` | the GML menu and badge against a scripted fake launcher: every screen, validation, error words, cancel/Escape, silent launcher, hostile status file, badge states and fallbacks, the badge in a world, short popup labels; **every cancel path of the host / join flow followed by New Game again, stuck flags healing, the world check before entering, the host's world note, the guest's wrong-world detection, the early save of a new world (25 tests)**; `python3 tests/mutate_polish.py` and `python3 tests/mutate_joinflow.py [--asm]` break things on purpose |
 | `unshare -n ... python3 tests/test_menu.py <launcher> <helper> <fakegame>` | plus an end-to-end test: GML menu <-> real Linux launcher + helper <-> a real host: host with password, scan, wrong password, right password, world download, leave, badge Online |
-| `tests/test_launcher_linux.py` (`test_menu_*`) | standby, nothing listening, host/stop, helper arguments, scan and join with a real host, failures, command validation, helper missing, `launcher.cfg` compatibility |
-| `tests/test_launcher.py` (`test_menu_*`, Wine) | the same for the Windows launcher; `--addrs` and `--scan` of `MistriMulti.exe`; a real Windows host helper with a password |
+| `tests/test_launcher_linux.py` (`test_menu_*`, `test_world_info`) | standby, nothing listening, host/stop, helper arguments, scan and join with a real host, failures, command validation, helper missing, `launcher.cfg` compatibility; **the world note: which save is served, signed world info, status 4, discovery flags 4/8, junk notes, hw/hf/dw in the guest's status, the note's lifetime** |
+| `tests/test_launcher.py` (`test_menu_*`, `test_world_info`, Wine) | the same for the Windows launcher; `--addrs` and `--scan` of `MistriMulti.exe`; a real Windows host helper with a password; the same world-info cases (shared in `tests/worldserver_cases.py`) and the Windows guest reading the signed world info |
+| `tests/test_updateui.py`, `tests/test_launcher_linux.py` (`test_update_*`, `test_release_check_*`), `tests/test_launcher.py` | the title screen's version label, Update button, update run and daily release check: see `docs/SYNC-UPDATE.md` |
 
 Sandbox note: tests that open ports run in a private network namespace (`unshare -n`, `lo` up), as `scripts`/`runall.sh` do.
 
@@ -252,6 +327,15 @@ Sandbox note: tests that open ports run in a private network namespace (`unshare
 9. Proton: the launcher writes the bridge path the way the Windows game sees it (existing behaviour, `docs/STEAM-DECK.md`).
 10. Windows: not run on a real Windows machine; Wine only.
 
+11. `Game.unique_identifier` is a whole number 1..2147483647 equal to the digits in the save's file name (read from `SaveManager.gml`,
+    `LoadState.gml`), on host and guest. A guest's `Game.unique_identifier` after `LoadState.Load` is the file name's id.
+12. A popup that the game closes by itself (Escape, click outside) has `close_requested == true` and runs no button callback (read from
+    `PopupMenu.gml`, `AnchorMenu.run_exit_listening`).
+13. The early save: `LOAD_SEQUENCE.start(key, fn, args, fade)` calls `fn` and finishes when it returns true; `LocationPosition`, `Vec2`, `PlayerState.Default` / `Dummy`,
+    `exact_save_path`, `save_game`, `MIST.is_running()`, `ANCHOR.popup_is_open()`, `is_home_location` and `obj_ari.fsm.current_state_id()` are callable from the mod
+    (all are used by the game's own journal-save code, `Interact.gml`; never executed by the mod). That a new game's first controllable moment is at home with
+    `PlayerState.Default`. That saving at that moment does not disturb the intro.
+
 ## In-game checklist (please walk through it once and report)
 
 1. Start the game from Steam with **no** `launcher.cfg`. The badge (bottom right, title screen) says `Multiplayer: Idle ...`
@@ -271,11 +355,28 @@ Sandbox note: tests that open ports run in a private network namespace (`unshare
 6. Press **Escape** on "Looking for hosts" and on the text box: no stuck popup, no crash.
 7. Stop the launcher (kill it) while on the title screen: the badge says `Offline - launcher stopped` within a few seconds;
    Multiplayer shows the plain-words popup.
+8. **Cancel paths.** On the title screen: New Game > Multiplayer > Host a game > Start hosting > Cancel (on "Starting your game..."); then New Game
+   again: the Singleplayer / Multiplayer question must appear. Repeat with Escape (and a click outside the popup) on: the question, "Multiplayer", the
+   host screen, "Starting your game...", "You are hosting", "Join a game", "Looking for hosts", the password / address / room text boxes, "Connecting...",
+   "Downloading ...", and an error. After each, New Game and Load Game must work, and on the host machine `launcher.log` / the badge must show that
+   hosting stopped (the guest can no longer find the host). `Menu:` lines in the MMAPI log say "a popup was dismissed on screen <name>".
+9. **New world.** Host: New Game > Multiplayer > Host a game > Start hosting > Start playing > New world (hearts choice). In the new world, once you can move at
+   home, the game briefly shows "Saving..." and "MistriaMulti: your new world is saved. Friends can join now." (log: `saving the new world so friends can join it`;
+   `<game folder>/multiplayer/saves/game-<id>-autosave.sav` exists; `menu/world.txt` says `id=<id>`). The guest joins at once and arrives in the SAME world
+   (same day, no old character). If you walk away before the save (or a scene runs), after two minutes you read the "not saved yet" notice.
+10. **Old save vs new world.** Host loads an old world, then returns to the title screen and starts a NEW one but dismisses the early save (cannot be forced;
+    for the test, pull the plug on the save by quitting the game right after "Start playing"): a guest who joins reads "The host has started a new world but has not
+    saved it yet. Ask them to sleep or save once, then press Join again." and is NOT put in a world. After the host sleeps once, "Try again" enters. The host
+    list shows "[new world, not saved]" for that host.
+11. A guest who is already in the host's world when the host starts another one is told and returned to the title screen within a few seconds.
 
 ## Known limitations
 
-- The host's world is the last saved copy (unchanged): the host should sleep once before friends join. The menu says so on the
-  hosting screen, and "The host has no saved world yet" explains the empty case.
+- The host's world is the last saved copy of THE WORLD THE HOST PLAYS (after 0.4.5; a new world is saved early by the mod): changes since the last save are not
+  in it. The menu says so on the hosting screen, and "The host has no saved world yet" explains the empty case. A host whose launcher or mod is older than this change
+  still gets the old behaviour (the newest save in the folder).
+- The early save needs the player to be at home and in control; a host who leaves home first is told after two minutes. It uses the game's loading
+  sequence, whose behaviour in the first minutes of a new game could not be tested (see the assumptions).
 - A scan or a download blocks the launcher for a few seconds; the game is not affected (separate process), the menu shows
   "Looking for hosts..." / "Downloading...".
 - The host password is optional and set from the menu; a custom room code can only come from an older `launcher.cfg` host or by hand.

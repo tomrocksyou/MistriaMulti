@@ -19,6 +19,8 @@ mod_data/mistrimulti/worlds/<world-key>/
     members.json                              identities that have records
     players/<player-identity>.json            core record (+ .bak)
     players/<player-identity>.progress.json   progress record (+ .bak)
+    players/<player-identity>.h1.json .. .h5.json   earlier characters of this identity in this world (the history)
+    players/<player-identity>.swap.json       the current character, parked for the length of a swap
     commits/<save name>.json                  records committed with a host save (+ .bak)
     commits/discarded.json                    records replaced by the last rollback
 ```
@@ -50,12 +52,125 @@ host-controlled transactions. Client-reported progress is validated for shape an
 bounds; gameplay actions are not yet recomputed on the host. A uid (Steam ID or local id) is only a claim:
 the host binds it to the install fingerprint its helper verified (`docs/SECURITY.md`), so another install cannot use it.
 
+## A character per world
+
+A character belongs to one identity **in one world**: the record in `worlds/<world-key>/players/` (above) is the only place that
+decides which character a guest plays. A friend who joins a world that is new to him therefore makes a new character, and the
+character he made in another world is not offered, not applied and not changed. How the guest reaches the world decides what
+happens (`MistriMultiSaveSpace.gml` records it in `s.entry` when the player starts playing; `MistriMultiBoot.gml` copies it to the
+runtime for the session; the guest sends it as `intent` in `profile_request`, `"new"` or `"load"`):
+
+| Entry | The host has no record of this identity in this world | The host has a record |
+| --- | --- | --- |
+| **Load Game > Multiplayer** (the downloaded worlds) | the character editor, as a new player | the record is restored, **no editor** |
+| **New Game > Multiplayer > Join a game** | the character editor | the game asks: **Keep mine** (restore, no editor; with earlier characters in this world a second question lists them, see below) or **New character** (the editor) |
+
+The editor of a new character starts from the game's defaults (the default look, the name "Guest", the default pronouns and
+birthday), never from the host's character that the guest's game loaded and never from an earlier character of this install.
+There is no "start from my last look" button: the owner prefers a fresh start, and a button would need UI nodes that cannot
+be checked here. The per-install file `mod_data/mistrimulti/characters/<identity>.json` (and its `.bak`) is still written after the
+editor, as a convenience copy of the last character this install made; **nothing reads it any more**. Old files of that kind and the
+legacy `character.json` stay on disk untouched; they cannot override a world. (They used to be applied to every world.)
+
+Answering **New character** does not delete anything. The host's old records stay in place while the guest is in the editor (a crash
+there loses nothing and the next join finds the old character); on the answer the host keeps a copy of them as a **generation of the
+history** (next section), hands the guest a fresh start (core and progress, nothing of the old progress is merged in) and the new
+character's first upload replaces the primary files, after which the old ones are also the `.bak`. Wire protocol: after
+`profile_request` with `intent: "new"` and an existing record, the host answers `profile_exists {chars}` instead of the record, the
+guest asks, then sends `profile_choice {world, uid, keep, gen}` (`keep` 1 = the current character, 2 = the earlier character `gen`,
+0 = a new one) and the host answers with the record or `profile_start`. The host acts only on a choice for a question it asked this
+session (same slot, epoch and identity); anything else is ignored.
+
+### Choosing between your characters (history)
+
+Only **a player's own** characters in **that world** are ever listed: the history is keyed by the identity and the world key, so
+neither the host's character nor another player's can appear. Code: `MistriMultiCharPicker.gml`.
+
+- **Keeping.** Every character that "New character" replaces is parked in `players/<identity>.h<N>.json` (`N` = 1..5), one file per
+  generation, written as a temporary file and renamed. A file holds `{v, seq, core, progress}`: the complete core and progress
+  records as they were stored (the same envelopes as `<identity>.json` and `.progress.json`) and a counter `seq` (higher = more
+  recent). Five generations are kept; a sixth reuses the slot of the oldest, so nothing has to be deleted. The name, day and gold
+  that the question shows are read from the record, so there is no separate index to get out of step; a slot file that fails the
+  records' own validation is not offered and not loaded. Two copies of the same character (the guest left the editor unfinished and
+  chose "New character" again, or a swap failed halfway) have the same signature (revisions, day, name) and are stored and offered
+  once.
+- **The question.** `profile_exists` carries `chars`: the current character first (`id` 0), then the earlier ones newest first
+  (`id` = slot), each `{id, name, day, gold}` (about 100 bytes each, far below the 8 KiB event limit). After **Keep mine**, a guest
+  whose list has more than one entry gets a second popup (`MultipleChoicePopup`, "Your characters here") with one row per
+  character, e.g. `Cy (now), Spring 21, Y2, 300g`, and **New character** last: at most 1 + 5 + 1 = 7 rows, the same number as the
+  join menu's list of hosts (4 hosts + 3) in the same popup type, which is the limit assumed to fit. A guest with one character is
+  not asked twice. Closing the popup without choosing asks again.
+- **The swap.** Choosing an earlier character sends `keep: 2, gen: N`. The host (`mistrimulti_history_swap`) reads and validates the
+  slot, copies the current records to `<identity>.swap.json`, applies the one-partner rule to the chosen record, stores it as the
+  current core and progress record (the usual `.bak` + temporary file + rename, with the chosen record's revision, so the guest's
+  next upload continues it) and writes the former current character into the chosen slot. A failure at any step leaves every
+  character in some file (the current files, the `.bak`, a slot, `swap.json`); a failure on the last step tries another slot. The
+  host then sends the record (`profile_record`) as for "Keep mine"; the swap runs once per question even if the answer has to be
+  sent again. If the host cannot load the character it sends `profile_error` and the guest is asked again from the start. The guest
+  checks what the host sends (at most six rows; a name, a number for the day, a number for gold).
+- **Upgrading from 0.4.5**, which kept one replaced character as `<identity>.replaced.json` and `.progress.replaced.json`: the
+  first list or "New character" imports it into the history and renames the two files to `*.imported` (nothing is deleted).
+- **Not in the question:** level, a picture of the character, the last time it was played. Level was left out to keep the row short.
+  A picture would need `ANCHOR.create_ari_node(parent, preset, x, y, scale, clipping_canvas)` (the function the Load Game screen
+  uses) inside the popup, which cannot be placed and clipped without running the game. The day and gold identify a character well
+  enough.
+
+#### Why not the Load Game row?
+
+The owner suggested reusing the Load Game screen's row (portrait, name, farm name, play time, season and day, gold). In the game's
+scripts (`scripts/UI/Anchor/Menus/LoadMenu.gml`) that row is built inline in the menu's `refresh` function from the entries of
+`Setup.load_menu_data` (a save header: `preset`, `name`, `farm_name`, `playtime`, `calendar_time`, `clock_time`, `stats`, `weather`,
+`path`). There is no function that makes a row, the tap handler is the menu's own ("Load game / Delete" for a save file), and the
+game's `Anchor` creates that menu only for `Menu.Load`. Reusing it would mean copying the game's code or changing a menu class whose
+callbacks cannot be replaced, so the picker is a popup list.
+
+### The Load Game list shows the guest's own character
+
+The Load Game list of Multiplayer worlds is built from the downloaded save's header, which holds **the host's** character (name,
+look). `mistrimulti_savespace_rebuild_menu` (MistriMultiSaveSpace.gml) now calls `mistrimulti_charcache_apply` for each entry when the
+space is the multiplayer one and the session mode is `join`: the header's `name` becomes the guest's own name and `preset` the guest's
+own look; the rest (farm name, play time, season and day, gold) stays the save's. The host's list and the solo list are untouched.
+
+- `mod_data/mistrimulti/characters/<world-key>.json`: `{v, world, game, name, look, used}`, written by the guest after the editor, after
+  a restore (Load Game, Keep mine, a swap) and whenever name or look change (checked with each checkpoint, written only when they
+  differ). `used` is `date_current_datetime()`.
+- `mod_data/mistrimulti/characters/worlds.json`: `{v, worlds: {"<game number>": "<world-key>"}}`. A list entry knows the game's world
+  number (`game_ident` in the save manager's manifest, the number in the save's file name, the value of `Game.unique_identifier`),
+  but not the host's identity, the other half of the world key; this map joins them.
+- It never throws (a failure inside the rebuild would make the list mark the save invalid and remove it): the name is set first and
+  alone, then the look is built inside its own `try`. A look the game cannot build keeps the host's portrait with the guest's name; a
+  missing, damaged or foreign file leaves the entry as the game made it. Before the guest has ever played the world nothing is
+  cached and the list shows the host's character, as before.
+
+Other per-player host state (the shared wallet and renown mirror, the one-partner-per-villager claims) is not rebuilt at the moment
+of the answer; it follows the new records as they upload. A replaced player's old romance claims therefore stay registered
+until the new progress record's first upload.
+
+### The character editor, observable
+
+The guest cannot be active (no presence, no checkpoint, no synced action: `character_pending`) until the editor is finished. While
+a guest has not finished, the other players' characters are not created in its game either. Every step is logged at warn level
+with the prefix `Character editor:`: waiting (with the reason, every 20 s), opening (attempt number and entry), opened or failed
+(with the reason; a failed open is retried after 5 s), shown (with the editor's alpha, pause status and load-sequence state), still
+not visible after 3 seconds (the state; the mod then calls `request_show(0)` once), still open (every minute), closed without
+Continue (it opens again with the same look), Continue tapped (ticks since opening, whether it was ever shown), complete or
+completing failed (with the reason; the editor opens again). The question for an existing character is logged too. If a guest
+reports "I never saw the editor", these lines say whether it was opened, whether it was visible, whether Continue was tapped
+without being shown, or whether the guest was never asked.
+
+The first real-game log of a guest who never saw the editor also showed the host's ghost being created, hidden and destroyed on
+every read for as long as the guest was loading. The cause was `mistrimulti_read_peers` creating ghosts while the main tick
+(correctly) removed them again for a guest that was not active yet; ghosts are now created only when the guest is playing
+(`mistrimulti_local_active`).
+
 ## Joining and saving
 
 A guest requests its record before publishing an active character or sending
 progress, and then requests its progress record; it becomes active only when both are
 applied. A returning player loads the host's records and does not create a character
-again. A new player receives starter items and a new character's progress and opens the
+again (when it entered through Load Game, or answered "Keep mine"; see "A character per world"). A new player receives starter items, the starter kit (the items, baths, spell and tutorial of the host's first-day scenes, which the
+guest's copy of the world would otherwise skip: the first hoe and seeds; once, see `docs/SYNC-STORY.md` "Starter kit") and a new
+character's progress and opens the
 character creator; inventory and money from another local save are not imported.
 A world whose players only have core records (made before the progress record existed) keeps
 working: the core record is restored as before and the progress starts fresh and is then stored. The same identity cannot occupy two guest slots simultaneously,
@@ -87,11 +202,47 @@ Guest native saves are blocked throughout multiplayer to protect their local
 world (`docs/SYNC-GUESTSAVE.md`: what a save attempt, a quit and a lost host do). The host's own native save remains its main character save; its checkpoint
 record is also mirrored alongside the guest records.
 
+## In-game checklist (the character per world)
+
+Unverified in the real game: everything below. Use a Windows guest and a host, and read the guest's log (`Character editor:` lines).
+
+1. Host a new world. Guest: New Game > Multiplayer > Join. The editor opens from the default look and name "Guest", whatever the guest
+   made before; the log shows opening, opened, shown, Continue tapped, complete. The guest cannot be seen by the host before Continue.
+2. Same guest leaves and uses Load Game > Multiplayer, same world: no editor, no question, the character as it was.
+3. Same guest uses New Game > Multiplayer > Join again for the same world: the question appears with "Keep mine" and "New character".
+   "Keep mine": no editor, old character. Join again, "New character": the editor opens from the defaults; the host's
+   `players/<id>.json` is unchanged until Continue; afterwards `.replaced.json` and `.bak` hold the old character.
+4. Another world (another host): the editor again from the defaults; the first world's character is untouched.
+5. Close the question without choosing (back/escape): it is asked again after a second. Kill the game inside the editor: the next
+   join finds the old character (Load Game) or asks again (New Game).
+6. If the editor is invisible: the log says `still not visible after 3 seconds (alpha=...)` and the editor appears; send that line.
+7. No flicker of the host's character while loading (the log no longer repeats `trace ghost: create ... hide ... cleanup`).
+
+### In-game checklist (choosing between your characters, the Load Game list)
+
+Unverified in the real game. A host and a Windows guest; read the guest's log (`Character editor:` lines) and the host's `players/` folder.
+
+1. Guest with one character in the world: New Game > Join > Keep mine: no second question, the character as it was.
+2. Make two more characters (Join > New character > Continue, twice). Join once more > Keep mine: a popup "Your characters here" with
+   the current character first (marked "(now)"), the two earlier ones newest first, **New character** last. Check that the rows fit
+   on the screen, the text is not cut off and the buttons can be tapped (7 rows is the most it is built for).
+3. Pick an earlier character: no editor; the guest has that name, look, inventory, gold and progress (recipes, mail). On the host
+   `players/<id>.json` is that character and the one that was current is in `.h<N>.json`. Join again: the list shows the new order.
+4. Make seven characters in total: the host has five `.h<N>.json` and the first one made is no longer listed.
+5. Join > New character and quit the game inside the editor, twice: the list still shows each character once.
+6. Close the second popup without choosing (escape/back): it comes back after a second.
+7. Load Game > Multiplayer (as the guest) after having played a world: the world's row shows the guest's name and look, not the
+   host's ("Ari", default clothes); farm name, play time, date and gold are the save's. Delete `mod_data/mistrimulti/characters/`:
+   the row shows the host's character again. The host's Load Game list is unchanged.
+8. In the world the guest still has its own character (the list is only a label).
+
 ## Source
 
 `MistriMultiPlayerData.gml` captures, validates, restores and writes engine data.
 `MistriMultiProgress.gml` does the same for the progress record, commits and restores records with the host's save
 and keeps the claim registry of the one-partner rule.
+`MistriMultiCharPicker.gml` keeps the history of a player's replaced characters on the host, swaps one back, builds the guest's
+question and keeps the guest's per-world cache for the Load Game list.
 `MistriMultiPlayerSync.gml` handles the world handshake, record transfer and save
 confirmation. `MistriMultiEvents.gml` orders, acknowledges and reassembles the
 transfers; the assembly networking helper handles transport, fragmentation,

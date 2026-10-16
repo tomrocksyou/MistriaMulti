@@ -3,39 +3,58 @@
 # After that you only start the game from Steam: hosting and joining are chosen in the game's own Multiplayer menu.
 #
 #   ./install.sh               install (safe to run again)
+#   ./install.sh --update      download the latest GitHub release and update the programs and the mod files (safe to run again).
+#                              Then it runs MOMI's command-line installer if you set that up and agree, else it tells you what to click.
+#                              The same thing:  mistrimulti-manager update
+#   ./install.sh --momi-cli PATH [--always]   remember MOMI's command-line program (ModsOfMistriaInstaller-cli-linux) for --update;
+#                              with --always it may also run without a question when an update starts without a terminal; "none" forgets both
+#   ./install.sh --update --result FILE   no questions, for programs (the game's Update button): progress and result as state=/version=/message=/error=
+#                              lines in FILE (docs/RELEASES.md). MOMI's installer runs only with --always set earlier and MISTRIMULTI_NO_MOMI unset.
 #   ./install.sh --dry-run     show what would be done, change nothing
 #   ./install.sh --uninstall   put Steam's settings back and remove the program folder
 #   ./install.sh --yes         allow it to run the one `sudo apt-get install` it may need (nasm, binutils)
 #
 # Environment: MISTRIMULTI_DIR (program folder, default ~/.local/share/mistrimulti),
 #              MISTRIMULTI_APPID (Steam app id, default: found from the game's appmanifest, else 2142790),
-#              MISTRIMULTI_STEAM_RUNNING=1|0 (override the "is Steam running" check).
+#              MISTRIMULTI_STEAM_RUNNING=1|0 (override the "is Steam running" check),
+#              MISTRIMULTI_RELEASE_BASE (tests only: a web server that mimics the release layout, see docs/RELEASES.md).
+# The game's launcher starts a quiet "mistrimulti-update.sh --daily <mod data folder>" in the background (at most one check a day):
+# it only writes update.json for the in-game badge. A line "check=off" in <mod data folder>/update.cfg turns it off.
 set -eu
 
 exec 3<&0
 SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SELF=$SRC/$(basename -- "$0")
 DEFAULT_APPID=2142790          # Fields of Mistria; also the compatdata id used in tests/test_launcher_linux.py
 GAME_NAME='Fields of Mistria'
 DIR=${MISTRIMULTI_DIR:-$HOME/.local/share/mistrimulti}
 BINS='mistrimulti-launcher mistrimulti-manager mistrimulti-helper-linux mistrimulti-steam-id-linux'
 BACKUP_SUFFIX=.mistrimulti-backup
 APPLIED_SUFFIX=.mistrimulti-applied
+REPO=tomrocksyou/MistriaMulti
 
-DRY=0 YES=0 UNINSTALL=0
-for arg in "$@"; do
-    case $arg in
+DRY=0 YES=0 UNINSTALL=0 UPDATE=0 DAILY='' MOMICLI='' RESULT='' ALWAYS=0
+while [ $# -gt 0 ]; do
+    case $1 in
         --dry-run) DRY=1 ;;
         --yes|-y) YES=1 ;;
         --uninstall) UNINSTALL=1 ;;
-        -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+        --update) UPDATE=1 ;;
+        --daily) [ $# -ge 2 ] || exit 2; DAILY=$2; shift ;;
+        --result) [ $# -ge 2 ] || exit 2; RESULT=$2; UPDATE=1; shift ;;
+        --always) ALWAYS=1 ;;
+        --momi-cli) [ $# -ge 2 ] || { echo "--momi-cli needs a path (or the word none)" >&2; exit 2; }; MOMICLI=$2; shift ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
+    shift
 done
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/mistrimulti-install.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-say() { printf '%s\n' "$*"; }
+LASTMSG=''
+say() { printf '%s\n' "$*"; LASTMSG=$*; }
 act() { if [ "$DRY" = 1 ]; then say "[dry run] would: $*"; else say "$*"; fi; }
 SUMMARY=$TMP/summary
 : > "$SUMMARY"
@@ -242,7 +261,357 @@ do_uninstall() {
     say 'Uninstalled.'
 }
 
+# ---------------------------------------------------------------- update from the latest GitHub release
+# Layout and rules (the same as the Windows manager's, docs/RELEASES.md):
+#   <releases>/latest/download/latest.txt     the list: version, SHA-256 of every file, a footer
+#   raw.githubusercontent.com/<repo>/v<version>/mod/mistrimulti/<file>     the mod files (read from the tagged commit)
+#   <releases>/download/v<version>/MistriaMulti-<version>-Linux.tar.gz      the Linux programs (hash in a "#linux-tar" line of the list)
+# Nothing is installed unless the whole list is valid and every downloaded file matched its hash.
+if [ -n "${MISTRIMULTI_RELEASE_BASE:-}" ]; then
+    URL_LIST=$MISTRIMULTI_RELEASE_BASE/release/latest.txt
+    PROTO=''
+else
+    URL_LIST=https://github.com/$REPO/releases/latest/download/latest.txt
+    PROTO='--proto =https --proto-redir =https'
+fi
+url_mod() { if [ -n "${MISTRIMULTI_RELEASE_BASE:-}" ]; then echo "$MISTRIMULTI_RELEASE_BASE/$2"; else echo "https://raw.githubusercontent.com/$REPO/v$1/$2"; fi; }
+url_tar() { if [ -n "${MISTRIMULTI_RELEASE_BASE:-}" ]; then echo "$MISTRIMULTI_RELEASE_BASE/dl/$2"; else echo "https://github.com/$REPO/releases/download/v$1/$2"; fi; }
+
+# fetch URL OUTFILE MAXBYTES [CONNECT_SECONDS TOTAL_SECONDS]: 0 ok, 1 failed, 2 neither curl nor wget
+fetch() {
+    ct=${4:-10} tt=${5:-120}
+    rm -f "$2"
+    if command -v curl >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        curl -fsSL --connect-timeout "$ct" --max-time "$tt" --max-filesize "$3" $PROTO -o "$2" "$1" 2>/dev/null || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -T "$tt" -t 1 -O "$2" "$1" 2>/dev/null || return 1
+    else
+        return 2
+    fi
+    [ -f "$2" ] || return 1
+    [ "$(wc -c < "$2")" -le "$3" ] || { rm -f "$2"; return 1; }
+    return 0
+}
+
+sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+
+# ver_cmp A B -> -1 (A older), 0, 1 (A newer); numbers compared group by group, missing groups are 0
+ver_cmp() { awk -v a="$1" -v b="$2" 'BEGIN { na = split(a, x, "."); nb = split(b, y, "."); for (i = 1; i <= 4; i++) { p = (i <= na) ? x[i] + 0 : 0; q = (i <= nb) ? y[i] + 0 : 0; if (p < q) { print -1; exit } if (p > q) { print 1; exit } } print 0 }'; }
+
+# check_list FILE: validates the whole list. On success: LIST_VERSION, $TMP/modfiles ("<hash> <path under mod/mistrimulti/>"), $TMP/linuxtar ("<hash> <name>", may be empty)
+check_list() {
+    f=$1
+    [ "$(wc -c < "$f")" -le 30000 ] || return 1
+    [ "$(tail -c 1 "$f" | od -An -tx1 | tr -d ' \n')" = 0a ] || return 1      # a list that lost its tail is rejected
+    awk -v modout="$TMP/modfiles" -v tarout="$TMP/linuxtar" '
+    function bad() { failed = 1; exit 1 }
+    function hexok(h) { return length(h) == 64 && h !~ /[^0-9a-f]/ }
+    BEGIN { n = 0; end = -1; ver = ""; man = 0; tars = 0; printf "" > modout; printf "" > tarout }
+    { sub(/\r$/, "") }
+    /^[ \t]*$/ { next }
+    /^#/ {
+        if ($1 == "#linux-tar") { if (NF != 3 || !hexok($2) || $3 !~ /^MistriaMulti-[0-9.]+-Linux\.tar\.gz$/ || tars++) bad(); print $2, $3 > tarout }
+        next
+    }
+    end >= 0 { bad() }
+    ver == "" {
+        if (NF != 2 || $1 != "version" || $2 !~ /^[0-9]+(\.[0-9]+)*$/ || length($2) > 27) bad()
+        k = split($2, g, "."); if (k > 4) bad(); for (i = 1; i <= k; i++) if (length(g[i]) > 5) bad()
+        ver = $2; next
+    }
+    $1 == "end" && NF == 2 { if ($2 !~ /^[0-9]+$/ || $2 + 0 != n) bad(); end = $2; next }
+    {
+        if (NF != 2 || !hexok($1) || length($2) > 160 || seen[$2]++) bad()
+        path = $2
+        if (substr(path, 1, 16) == "mod/mistrimulti/") {
+            rest = substr(path, 17); k = split(rest, c, "/"); if (k < 1) bad()
+            for (i = 1; i <= k; i++) {
+                if (c[i] !~ /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/ || c[i] ~ /\.$/) bad()
+            }
+            if (rest == "manifest.toml") man = 1
+            print $1, rest > modout; n++
+        } else if (path ~ /^bin\/(MistriMulti\.exe|MistriMultiLauncher\.exe|mistrimulti-helper\.exe|mistrimulti-steam-id\.exe)$/) { n++ }
+        else bad()
+        if (n > 200) bad()
+    }
+    END { if (failed) exit 1; if (ver == "" || end < 0 || !man) exit 1; print ver }
+    ' "$f" >"$TMP/listver" 2>/dev/null || return 1
+    LIST_VERSION=$(cat "$TMP/listver")
+    [ -n "$LIST_VERSION" ] || return 1
+    [ -f "$TMP/linuxtar" ] || : > "$TMP/linuxtar"
+    if [ -s "$TMP/linuxtar" ]; then
+        [ "$(cut -d' ' -f2 "$TMP/linuxtar")" = "MistriaMulti-$LIST_VERSION-Linux.tar.gz" ] || return 1
+    fi
+    return 0
+}
+
+installed_mod_version() {    # $1 manifest path -> prints the version (digits and dots only), nothing if unknown
+    [ -f "$1" ] || return 0
+    v=$(sed -n 's/^version = "\([0-9][0-9.]*\)".*/\1/p' "$1" | head -n 1)
+    printf '%s' "$v"
+}
+
+# --daily MODDATA: quiet, at most once a day, short timeouts. Writes MODDATA/update.json for the in-game badge. Never fails loudly.
+do_daily() {
+    md=$1
+    [ -d "$md" ] || exit 0
+    if [ -f "$md/update.cfg" ] && grep -q 'check=off' "$md/update.cfg" 2>/dev/null; then exit 0; fi
+    now=$(date +%s 2>/dev/null) || exit 0
+    last=$(sed -n 's/.*"checked":[ ]*\([0-9][0-9]*\).*/\1/p' "$md/update.json" 2>/dev/null | head -n 1)
+    case $last in ''|*[!0-9]*) last='' ;; esac
+    if [ -n "$last" ] && [ ${#last} -le 11 ] && [ "$last" -le "$now" ] && [ $((now - last)) -lt 86400 ]; then exit 0; fi
+    fetch "$URL_LIST" "$TMP/latest.txt" 30000 4 6 || exit 0
+    check_list "$TMP/latest.txt" || exit 0
+    printf '{"v":1,"latest":"%s","checked":%s}\n' "$LIST_VERSION" "$now" > "$md/update.json.tmp" 2>/dev/null || exit 0
+    mv -f "$md/update.json.tmp" "$md/update.json" 2>/dev/null || rm -f "$md/update.json.tmp"
+    exit 0
+}
+
+valid_cli_name() { case $(basename -- "$1") in *-cli*|*-CLI*|*-Cli*) return 0 ;; esac; return 1; }
+
+# --momi-cli PATH|none
+do_momi_cli() {
+    if [ "$1" = none ]; then rm -f "$DIR/momi-cli.path" "$DIR/momi-cli.auto"; say "MOMI's command-line program is forgotten. --update will tell you to press Install in MOMI instead."; exit 0; fi
+    p=$1
+    case $p in /*) ;; *) p=$(pwd)/$p ;; esac
+    if [ ! -f "$p" ] || [ -L "$p" ] || [ ! -x "$p" ]; then
+        say "$p is not an executable file. Download MOMI's command-line program (ModsOfMistriaInstaller-cli-linux), make it executable (chmod +x) and give its path."
+        exit 1
+    fi
+    if ! valid_cli_name "$p"; then
+        say "Only MOMI's command-line program (a file name with -cli in it) can be used here; $(basename -- "$p") is not."
+        exit 1
+    fi
+    mkdir -p "$DIR"
+    printf '%s\n' "$p" > "$DIR/momi-cli.path"
+    say "Saved: $p"
+    if [ "$ALWAYS" = 1 ]; then
+        : > "$DIR/momi-cli.auto"
+        say "--always: it may also run without a question when an update starts without a terminal (for example from the game's Update button,"
+        say "unless that caller forbids it because the game is open). It rewrites the game's data file, so keep the game closed then."
+    else
+        rm -f "$DIR/momi-cli.auto"
+    fi
+    say "After a mod update, ./install.sh --update asks before it runs it (every time)."
+    exit 0
+}
+
+# Is MOMI's command-line program set up and still what it was? Sets cli.
+momi_cli_ok() {
+    cli=''
+    [ -f "$DIR/momi-cli.path" ] && read -r cli < "$DIR/momi-cli.path" || true
+    [ -n "$cli" ] && [ -f "$cli" ] && [ ! -L "$cli" ] && [ -x "$cli" ] && valid_cli_name "$cli" && [ -n "$GAMEDIR" ]
+}
+
+# Runs it in the game folder: no arguments (per MOMI's source that installs every mod in the mods folder), EXIT_ON_COMPLETE=true so it
+# does not wait for a key, no input, at most 5 minutes. Output goes to $DIR/momi.log. Sets MOMI_RC (124 = timed out).
+momi_run() {
+    MOMI_RC=0
+    if command -v timeout >/dev/null 2>&1; then
+        (cd "$GAMEDIR" && EXIT_ON_COMPLETE=true timeout 300 "$cli" < /dev/null > "$DIR/momi.log" 2>&1) || MOMI_RC=$?
+    else
+        (cd "$GAMEDIR" && EXIT_ON_COMPLETE=true "$cli" < /dev/null > "$DIR/momi.log" 2>&1) || MOMI_RC=$?
+    fi
+}
+
+# The MOMI step: $1 = 1 when the mod files changed. Runs MOMI's command-line installer only if the player chose it and agrees.
+momi_step() {
+    if [ "$1" != 1 ]; then say 'MOMI: nothing to do (the mod files did not change).'; return 0; fi
+    ran=0
+    if momi_cli_ok; then
+        say ''
+        say "MOMI must now rebuild the game's data. MOMI's command-line installer is set up: $cli"
+        say "It installs every mod in your mods folder (not only the ones ticked in the MOMI window). Close Fields of Mistria first."
+        if [ "$DRY" = 1 ]; then say '[dry run] would ask whether to run it'; return 0; fi
+        printf 'Run it now? [y/N] '
+        ans=n; read -r ans <&3 || ans=n
+        case $ans in
+            y|Y|yes|YES)
+                say 'Running MOMI (it can take a minute) ...'
+                momi_run
+                rc=$MOMI_RC
+                say 'What MOMI said (last lines of '"$DIR/momi.log"'):'
+                tail -n 15 "$DIR/momi.log" 2>/dev/null | sed 's/^/    /' || true
+                if [ "$rc" = 0 ]; then
+                    say 'MOMI finished (exit code 0). Start the game from Steam. (Exit code 0 alone does not prove every mod installed: read the lines above.)'
+                    ran=1
+                else
+                    say "MOMI's installer did not finish well (exit code $rc)."
+                fi ;;
+            *) say "Not run." ;;
+        esac
+    fi
+    if [ "$ran" != 1 ]; then
+        say ''
+        say 'One more step for the mod: close the game, open MOMI (Mods of Mistria installer), select MistriaMulti and click Install.'
+        say 'To let this script do it next time: download MOMI'"'"'s command-line program, then run  ./install.sh --momi-cli /path/to/ModsOfMistriaInstaller-cli-linux'
+    fi
+}
+
+# result file (--result): small key=value lines, replaced atomically
+RES_VER=''
+res() { [ -n "$RESULT" ] || return 0; printf 'state=%s\nversion=%s\nmessage=%s\nerror=%s\n' "$1" "$RES_VER" "$2" "${3:-0}" > "$RESULT.tmp" 2>/dev/null && mv -f "$RESULT.tmp" "$RESULT" 2>/dev/null || true; }
+# a failure: the last thing said is the message; the exit status is the code with --result, else 1
+ec() { res failed "$LASTMSG" "$1"; if [ -n "$RESULT" ]; then exit "$1"; else exit 1; fi; }
+
+do_update() {
+    if [ ! -d "$DIR" ]; then
+        say "MistriaMulti is not installed here yet ($DIR is missing). Run ./install.sh first; it also sets the Steam launch option."
+        ec 13
+    fi
+    say 'MistriaMulti update'
+    if [ "$DRY" = 1 ]; then say '(dry run: nothing will be changed)'; fi
+    find_steam
+    find_game
+    say 'Looking for the latest release on GitHub ...'
+    res checking 'Looking for the latest release.'
+    rc=0; fetch "$URL_LIST" "$TMP/latest.txt" 30000 10 60 || rc=$?
+    if [ "$rc" = 2 ]; then say 'Neither curl nor wget is installed, so nothing can be downloaded. Nothing was changed.'; ec 20; fi
+    if [ "$rc" != 0 ]; then
+        say "You can also download the new MistriaMulti-<version>-Linux.tar.gz by hand from https://github.com/$REPO/releases and run its ./install.sh."
+        say 'Could not reach GitHub (no network, or no release published yet). Nothing was changed.'
+        ec 20
+    fi
+    if ! check_list "$TMP/latest.txt"; then say 'The update list is not valid, or was cut off. Nothing was changed.'; ec 21; fi
+    latest=$LIST_VERSION
+    RES_VER=$latest
+    say "Latest release: $latest"
+    res downloading 'Downloading the update.'
+
+    # ---- mod files: download what differs, verify, assemble a complete new folder
+    MODCHANGED=0 MODNOTE=''
+    newmod=$TMP/newmod
+    dest=''
+    if [ -z "$GAMEDIR" ]; then
+        MODNOTE='Game folder not found: the mod files were not updated (use MOMI with the downloaded mod folder).'
+    else
+        dest=$GAMEDIR/mods/mistrimulti
+        have=$(installed_mod_version "$dest/manifest.toml")
+        if [ -f "$dest/manifest.toml" ] && ! grep -Eq 'name = "Mistria?Multi"' "$dest/manifest.toml"; then
+            MODNOTE="Another mod is in $dest: the mod files were not touched."; dest=''
+        elif [ -n "$have" ] && [ "$(ver_cmp "$have" "$latest")" = 1 ]; then
+            MODNOTE="The mod installed here ($have) is newer than the published $latest: the mod files were not touched."; dest=''
+        fi
+    fi
+    if [ -n "$dest" ]; then
+        mkdir -p "$newmod"
+        changed=0
+        while read -r hash rel; do
+            mkdir -p "$newmod/$(dirname -- "$rel")"
+            if [ -f "$dest/$rel" ] && [ "$(sha_of "$dest/$rel")" = "$hash" ]; then
+                cp "$dest/$rel" "$newmod/$rel"
+                continue
+            fi
+            rc=0; fetch "$(url_mod "$latest" "mod/mistrimulti/$rel")" "$newmod/$rel" 1048576 10 120 || rc=$?
+            if [ "$rc" != 0 ]; then say "A download failed ($rel). Nothing was changed."; ec 22; fi
+            if [ "$(sha_of "$newmod/$rel")" != "$hash" ]; then say "A downloaded file failed its checksum ($rel). Nothing was changed."; ec 22; fi
+            changed=$((changed + 1))
+        done < "$TMP/modfiles"
+        stale=0
+        if [ -d "$dest" ]; then
+            cut -d' ' -f2 "$TMP/modfiles" > "$TMP/rels"
+            ( cd "$dest" && find . -type f ) | sed 's|^\./||' | while read -r rel; do
+                case $rel in LICENSE|CONTACT.md) continue ;; esac
+                grep -qxF -- "$rel" "$TMP/rels" || echo "$rel"
+            done > "$TMP/stale"
+            stale=$(wc -l < "$TMP/stale" | tr -d ' ')
+        fi
+        if [ "$changed" -gt 0 ] || [ "$stale" -gt 0 ] || [ ! -f "$dest/manifest.toml" ]; then MODCHANGED=1; fi
+        MODCOUNT=$changed MODSTALE=$stale
+    fi
+
+    # ---- programs: the Linux tar.gz named in the list, verified by hash
+    PROGCHANGED=0 PROGNOTE='' PROGS=''
+    if [ -s "$TMP/linuxtar" ]; then
+        read -r thash tname < "$TMP/linuxtar"
+        rc=0; fetch "$(url_tar "$latest" "$tname")" "$TMP/linux.tar.gz" 20971520 10 180 || rc=$?
+        if [ "$rc" != 0 ]; then say "A download failed ($tname). Nothing was changed."; ec 22; fi
+        if [ "$(sha_of "$TMP/linux.tar.gz")" != "$thash" ]; then say "A downloaded file failed its checksum ($tname). Nothing was changed."; ec 22; fi
+        mkdir -p "$TMP/tar"
+        members=''
+        for b in $BINS install.sh; do members="$members MistriaMulti/$b"; done
+        # shellcheck disable=SC2086
+        if ! tar -xzf "$TMP/linux.tar.gz" -C "$TMP/tar" --no-same-owner $members 2>/dev/null; then
+            say "The programs in $tname could not be unpacked. Nothing was changed."; ec 22
+        fi
+        for b in $BINS install.sh; do
+            f=$TMP/tar/MistriaMulti/$b
+            if [ ! -f "$f" ] || [ -L "$f" ] || [ ! -s "$f" ]; then say "$tname does not contain a usable $b. Nothing was changed."; ec 22; fi
+        done
+        for b in $BINS; do
+            cmp -s "$TMP/tar/MistriaMulti/$b" "$DIR/$b" 2>/dev/null || { PROGS="$PROGS $b"; PROGCHANGED=$((PROGCHANGED + 1)); }
+        done
+    else
+        PROGNOTE='This release lists no Linux programs: the programs were not changed.'
+    fi
+
+    # ---- apply (everything was downloaded and verified)
+    res installing 'Installing the update.'
+    if [ "$DRY" = 1 ]; then
+        say "[dry run] would update the programs:${PROGS:- (none)}"
+        [ -n "$dest" ] && say "[dry run] would update the mod files in $dest ($MODCOUNT changed, $MODSTALE removed)"
+    else
+        for b in $PROGS; do
+            cp "$TMP/tar/MistriaMulti/$b" "$DIR/$b.new" && chmod 755 "$DIR/$b.new" && mv -f "$DIR/$b.new" "$DIR/$b"
+        done
+        if [ -s "$TMP/linuxtar" ] && ! cmp -s "$TMP/tar/MistriaMulti/install.sh" "$DIR/mistrimulti-update.sh" 2>/dev/null; then
+            cp "$TMP/tar/MistriaMulti/install.sh" "$DIR/mistrimulti-update.sh.new" && chmod 755 "$DIR/mistrimulti-update.sh.new" \
+                && mv -f "$DIR/mistrimulti-update.sh.new" "$DIR/mistrimulti-update.sh"
+        fi
+        if [ -n "$dest" ] && [ "$MODCHANGED" = 1 ]; then
+            for n in LICENSE CONTACT.md; do [ -f "$dest/$n" ] && cp "$dest/$n" "$newmod/$n"; done
+            mkdir -p "$GAMEDIR/mods"
+            rm -rf "$dest.new" "$dest.old"
+            cp -R "$newmod" "$dest.new"
+            # manifest.toml last in effect: the folder is swapped as a whole, the old one kept until the new one is in place
+            if [ -d "$dest" ]; then mv "$dest" "$dest.old"; fi
+            if mv "$dest.new" "$dest"; then rm -rf "$dest.old"
+            else [ -d "$dest.old" ] && mv "$dest.old" "$dest"; say 'Could not put the new mod files in place; the old ones were put back.'; ec 23; fi
+        fi
+    fi
+
+    say ''
+    say '=== Update done ==='
+    say "Release $latest."
+    if [ "$PROGCHANGED" -gt 0 ]; then say "Programs updated: $PROGCHANGED (in $DIR)."; elif [ -z "$PROGNOTE" ]; then say 'Programs: already up to date.'; fi
+    if [ -n "$PROGNOTE" ]; then say "$PROGNOTE"; fi
+    if [ -n "$MODNOTE" ]; then say "$MODNOTE"
+    elif [ "$MODCHANGED" = 1 ]; then say "Mod files updated in $dest ($MODCOUNT changed, $MODSTALE old file(s) removed)."
+    else say 'Mod files: already up to date.'; fi
+    if [ -n "$RESULT" ]; then
+        # No questions. The mod files changed (or an earlier update left the marker): MOMI has to rebuild the game's data. Its command-line
+        # installer runs only when the player allowed that without a question (--momi-cli ... --always) and MISTRIMULTI_NO_MOMI is unset
+        # (the caller sets it while the game is open: MOMI rewrites the game's data file). Otherwise the answer is needs_momi.
+        if [ -n "$MODNOTE" ]; then res done "$MODNOTE" 0; exit 0; fi
+        pend=0
+        if [ "$MODCHANGED" = 1 ]; then : > "$DIR/momi-pending"; pend=1; elif [ -f "$DIR/momi-pending" ]; then pend=1; fi
+        if [ "$pend" = 1 ]; then
+            if [ -z "${MISTRIMULTI_NO_MOMI:-}" ] && [ -f "$DIR/momi-cli.auto" ] && momi_cli_ok; then
+                res installing "Running MOMI's installer."
+                momi_run
+                if [ "$MOMI_RC" = 0 ]; then rm -f "$DIR/momi-pending"; res done "Updated, and MOMI installed the new mod files. Restart the game." 0; exit 0; fi
+                if [ "$MOMI_RC" = 124 ]; then res needs_momi "Updated. MOMI's installer took too long; close the game and press Install in MOMI." 31; exit 0; fi
+                res needs_momi "Updated, but MOMI's installer reported a problem (exit code $MOMI_RC). Close the game and press Install in MOMI." 30; exit 0
+            fi
+            res needs_momi 'Updated. Close the game and press Install in MOMI, then start the game.' 0
+            exit 0
+        fi
+        if [ "$PROGCHANGED" -gt 0 ]; then res done 'Updated the MistriaMulti programs. Restart the game to use them.' 0; else res done 'MistriaMulti is up to date.' 0; fi
+        exit 0
+    fi
+    if [ -z "$MODNOTE" ]; then
+        if [ -f "$DIR/momi-pending" ] && [ "$MODCHANGED" != 1 ]; then say 'An earlier update (from the game) still needs the MOMI step.'; MODCHANGED=1; fi
+        momi_step "$MODCHANGED"
+        [ "$DRY" = 1 ] || rm -f "$DIR/momi-pending"
+    fi
+    exit 0
+}
+
 # ---------------------------------------------------------------- main
+if [ -n "$DAILY" ]; then do_daily "$DAILY"; fi
+if [ -n "$MOMICLI" ]; then do_momi_cli "$MOMICLI"; fi
+if [ "$UPDATE" = 1 ]; then do_update; fi
 if [ "$UNINSTALL" = 1 ]; then do_uninstall; exit 0; fi
 
 say "MistriaMulti installer"; [ "$DRY" = 1 ] && say '(dry run: nothing will be changed)'
@@ -301,6 +670,10 @@ if [ "$DRY" != 1 ]; then
         if [ -f "$DIR/$b" ] && cmp -s "$PROGDIR/$b" "$DIR/$b"; then chmod 755 "$DIR/$b"; continue; fi
         cp "$PROGDIR/$b" "$DIR/$b.new" && chmod 755 "$DIR/$b.new" && mv -f "$DIR/$b.new" "$DIR/$b"
     done
+    # the update script the manager, the launcher (daily check) and the game's Update button run
+    if ! cmp -s "$SELF" "$DIR/mistrimulti-update.sh" 2>/dev/null; then
+        cp "$SELF" "$DIR/mistrimulti-update.sh.new" && chmod 755 "$DIR/mistrimulti-update.sh.new" && mv -f "$DIR/mistrimulti-update.sh.new" "$DIR/mistrimulti-update.sh"
+    fi
 fi
 note "Programs are in $DIR"
 link=$HOME/.local/bin/mistrimulti

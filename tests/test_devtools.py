@@ -24,7 +24,8 @@ BOOT = ROOT / "mod/mistrimulti/gml/MistriMultiBoot.gml"
 
 # ---- the extra game data -----------------------------------------------------------------------------------------
 R_MINES, R_QUEST, R_ITEM_REQ, R_NESTED = 8, 9, 10, 11
-sf.ENUMS["Requirement"] = G(**sf.ENUMS["Requirement"], OpenedMines=R_MINES, CompletedQuest=R_QUEST, HasItem=R_ITEM_REQ, Nested=R_NESTED)
+sf.ENUMS["Requirement"] = G({**sf.ENUMS["Requirement"], "OpenedMines": R_MINES, "CompletedQuest": R_QUEST, "HasItem": R_ITEM_REQ,
+                             "Nested": R_NESTED})
 sf.ENUMS["LocationId"] = G(**sf.ENUMS["LocationId"], Dungeon=9)
 sf.SCENES["mines_letter"] = dict(target=sf.T_MAIN, removals=1)
 sf.SCENES["mines_open"] = dict(target=sf.T_MAIN, removals=1, items=[("pickaxe_gift", 1)])
@@ -86,7 +87,7 @@ class DevNode(StoryNode):
         out.update({
             "Requirement": sf.ENUMS["Requirement"], "LocationId": sf.ENUMS["LocationId"],
             "fulfill_requirement": fulfill, "requirements_pass": passes, "setup_room": setup_room,
-            "requirement_to_string": lambda i: "requirement_%d" % int(i), "is_bool": lambda v: isinstance(v, bool),
+            "requirement_to_string": lambda i: "requirement_%d" % int(i),
             "mmapi_log_flush": lambda *a: None,
         })
         return out

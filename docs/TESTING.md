@@ -120,7 +120,16 @@ that fails to restore. The in-game checklist (what these tests cannot show) is i
 ```sh
 python3 tests/test_guestsave.py        # about 35 s
 python3 tests/mutate_guestsave.py      # breaks the GML 27 ways, about 1 minute
+python3 tests/test_guestchar.py        # a guest's characters per world, the editor flow, the picker and the Load Game list, about 50 s
+python3 tests/mutate_guestchar.py      # breaks that code 43 ways (about 15 minutes)
 ```
+
+`test_guestchar.py` runs the real `MistriMultiCharacter.gml` (with the player-sync and progress files) against a faked character
+editor, popups and menu list: a world that is new to the guest, Load Game into a world with a character, New Game into a world
+with a character (the question, both answers, the backup copies), an editor that is closed, invisible or fails, forged answers,
+the entry path and the ghost fix; and, with `MistriMultiCharPicker.gml`, the history of replaced characters (five generations, rotation,
+swap, a disk that fails at each step, forged choices, the 0.4.5 import), the list popup and the Load Game list built from the
+guest's cache. `docs/PLAYER-DATA.md` has the in-game checklists.
 
 Runs the real `MistriMultiGuestSave.gml` with the player-sync, progress and identity files (the harness of `tests/test_progress.py`):
 the save veto, flush on a save attempt and on the Settings tab, the goodbye frame, rejoining through another slot, a host that
@@ -212,6 +221,7 @@ python3 tests/test_menu.py                                                # GML 
 unshare -n sh -c '<bring lo up>; python3 tests/test_menu.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux'
 python3 tests/test_launcher_linux.py ...   # test_menu_*: standby, host/stop, scan and join, failures, command validation
 python3 tests/test_launcher.py ...         # test_menu_*: the same for the Windows launcher under Wine
+python3 tests/mutate_joinflow.py [--asm]    # breaks the cancel paths, the world check, the world note and (with --asm, in `unshare -n`) the launcher side on purpose
 ```
 
 What the first one proves: every screen of the flow in order, input validation (addresses, rooms, passwords, injected lines),
@@ -294,10 +304,17 @@ adopt/sell/buy requests answered once, refunds, pooled barn products, snapshots,
 
 ## Story checks
 
-`python3 tests/test_story.py` (about a minute) runs the real story, villager and cutscene GML on the event layer (25 scenarios: steps
+`python3 tests/test_story.py` (about two minutes) runs the real story, villager and cutscene GML on the event layer (52 scenarios: steps
 by host and guest, three players taking one step, world and private cutscenes, late join, rejoin, host restart with claims in
-flight, a cutscene holding only its own game, 100 steps through a full send queue, hostile input, the villagers' day plan).
-`python3 tests/mutate_story.py` breaks the GML in 20 ways and fails if any test still passes. See `docs/SYNC-STORY.md`.
+flight, a cutscene holding only its own game, 100 steps through a full send queue, hostile input, the villagers' day plan, and
+the story scenes that every player watches themselves: any order, loss, restarts, late join, safe fall-backs).
+`python3 tests/mutate_story.py` breaks the GML in 44 ways and `python3 tests/mutate_story_views.py` breaks the shared-scenes part in
+29; both fail if any test still passes. See `docs/SYNC-STORY.md`.
+
+`python3 tests/test_starterkit.py` (about 20 seconds) runs the real story, progress, player-sync and character GML for the starter kit of
+a new guest character (first tools and seeds): day 1 and later, a host that has not played yet, rejoin, Load Game, 'New character',
+old records, failures, the tutorial popup. `python3 tests/mutate_starterkit.py` breaks the GML in 23 ways and fails if any test still
+passes. See `docs/SYNC-STORY.md`, "Starter kit".
 
 `python3 tests/test_maplive.py` (seconds) runs the real map-marker GML against a model of the game's MapMenu: live marker updates, rebuild only on change, other locations, closing, hostile peers. The remote hit shake is `test_hit_shake` in `tests/test_farm_sync.py`. See `docs/SYNC-MAPLIVE.md`.
 
@@ -394,7 +411,7 @@ sh scripts/run-features.sh
 
 The script re-runs itself in a private network namespace (`unshare -n`, loopback brought
 up) and runs `test_containers`, `test_ranch`, `test_progress`, `test_farm_sync`,
-`test_wallet`, `test_dungeon`, `test_story`, `test_buildings`, `test_guestsave`,
+`test_wallet`, `test_dungeon`, `test_story`, `test_buildings`, `test_guestsave`, `test_guestchar`,
 `test_devtools`, `test_maplive`, `test_menu` (GML parts), `test_trust_gml`,
 `test_event_features`, `test_event_layer` and `test_engine_audit` (without the real game
 scripts), printing PASS or FAIL with the time of each and exiting non-zero on any failure.

@@ -1086,6 +1086,13 @@ FN world_find_newest
     call wf_valid_name
     test eax, eax
     jz .each
+    cmp dword [wh_id], 0
+    je .anyworld
+    mov rcx, r13
+    call wf_name_id
+    cmp eax, [wh_id]                    ; the mod named the world being played: only that world's saves count
+    jne .each
+.anyworld:
     lea rcx, [p3]
     lea rdx, [p1]
     lea r8, [s_slash]
@@ -1172,7 +1179,7 @@ FN world_serve
     mov dword [wf_hdr], 'MSWR'
     mov byte [wf_hdr+4], 2
     xor r12d, r12d                      ; file buffer
-    call world_find_newest
+    call wh_state                       ; the world the mod says the host plays now; its newest save (any newest save without a note)
     test eax, eax
     jz .nosave
     mov r13d, [ws_size]
@@ -1201,6 +1208,7 @@ FN world_serve
     lea rdi, [wf_hdr+48]
     mov ecx, 63
     rep movsb
+    call wh_fill_hdr
     call wa_sign_header
     lea rcx, [wf_hdr]
     mov edx, 144
@@ -1213,6 +1221,9 @@ FN world_serve
     jmp .free
 .nosave:
     mov byte [wf_hdr+5], 1
+    cmp dword [wh_id], 0
+    je .sendhdr
+    mov byte [wf_hdr+5], 4              ; the host plays a world it has not saved: nothing downloadable is that world
     jmp .sendhdr
 .cannot:
     lea rdi, [wf_hdr+8]
@@ -1221,6 +1232,7 @@ FN world_serve
     rep stosb
     mov byte [wf_hdr+5], 2
 .sendhdr:
+    call wh_fill_hdr
     call wa_sign_header
     lea rcx, [wf_hdr]
     mov edx, 144
@@ -1290,6 +1302,7 @@ FN disc_serve
     jne .check
     cmp byte [disc_buf+4], 1
     jne .check
+    call wh_disc_flags
     mov rcx, [disc_sock]
     lea rdx, [disc_resp]
     mov r8d, 64

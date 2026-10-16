@@ -1,12 +1,16 @@
 ; Test stand-in for FieldsOfMistria.exe: writes its command line to ran.txt (in its working directory),
 ; sleeps three seconds, exits with code 7.
+; If its file name contains "-cli" it plays MOMI's command-line installer instead: no sleep, exit code 0 only when the
+; environment variable EXIT_ON_COMPLETE is "true" (9 otherwise), and "-cli-fail" exits with 5.
 bits 64
 default rel
-extern GetCommandLineW, CreateFileW, WriteFile, CloseHandle, Sleep, ExitProcess, lstrlenW
+extern GetEnvironmentVariableW, GetCommandLineW, CreateFileW, WriteFile, CloseHandle, Sleep, ExitProcess, lstrlenW
 section .data
 name dw __utf16__("ran.txt"), 0
+envname dw __utf16__("EXIT_ON_COMPLETE"), 0
 section .bss
 written resd 1
+envbuf resw 16
 section .text
 global start
 start:
@@ -35,6 +39,39 @@ start:
     call WriteFile
     mov rcx, rsi
     call CloseHandle
+    mov rsi, rbx
+.cli:
+    cmp word [rsi], 0
+    je .nocli
+    cmp dword [rsi], '-' | ('c' << 16)
+    jne .clinext
+    cmp dword [rsi+4], 'l' | ('i' << 16)
+    je .iscli
+.clinext:
+    add rsi, 2
+    jmp .cli
+.iscli:
+    cmp dword [rsi+8], '-' | ('f' << 16)
+    je .exit5
+    lea rcx, [envname]
+    lea rdx, [envbuf]
+    mov r8d, 8
+    call GetEnvironmentVariableW
+    cmp eax, 4
+    jne .exit9
+    cmp dword [envbuf], 't' | ('r' << 16)
+    jne .exit9
+    cmp dword [envbuf+4], 'u' | ('e' << 16)
+    jne .exit9
+    xor ecx, ecx
+    call ExitProcess
+.exit5:
+    mov ecx, 5
+    call ExitProcess
+.exit9:
+    mov ecx, 9
+    call ExitProcess
+.nocli:
     ; "--quick" anywhere on the command line skips the sleep, "--slow" sleeps 12 seconds, otherwise 3
     mov rsi, rbx
     mov r12d, 3000

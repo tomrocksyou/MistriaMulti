@@ -6,7 +6,10 @@
 //   cmd.txt      we write "seq=N / cmd=host|join|scan|stop / host= / port= / password= / room=" lines (atomically); the
 //                launcher deletes the file when it has read it and answers each new seq once
 //   status.json  the launcher writes it about once a second: heartbeat, the last seq it applied, state, err code, this
-//                computer's addresses and the hosts its last scan found. We only read it.
+//                computer's addresses, the hosts its last scan found and, after a join, which world the host plays (hw/hf) and which
+//                one was downloaded (dw). We only read it.
+//   world.txt    a host's note to its launcher: "id=<Game.unique_identifier>", written once the world is loaded (docs/SYNC-MENU.md,
+//                "Which world does a guest get?"). The launcher serves THAT world's newest save and says whether one exists.
 // Screens (all of them the game's own popups): [Singleplayer / Multiplayer] -> [Host a game / Join a game]
 //   host: [Start hosting / Set a password] -> "starting..." -> addresses to give to friends -> [Start playing]
 //   join: "looking for hosts..." -> [host list / Type an address / Refresh] -> (password, room code) -> "connecting...",
@@ -17,6 +20,7 @@ function __mistrimulti_menu() {
         global.__mistrimulti_menu = {
             frames: 0, seq: 0, status: undefined, hb: -1, hb_at: 0, alive: false, why: "", logged_why: "",
             texts: {}, text_n: 0, flow: undefined, warned: false, outbox: [],
+            published: "", publish_at: 0, save_tried: false, save_next: 0, save_since: 0, save_told: false,
         };
     }
     return global.__mistrimulti_menu;
@@ -73,6 +77,8 @@ function mistrimulti_menu_clean(raw) {
     var st = {
         hb: raw.hb, seq: raw.seq, state: raw.state, err: raw.err, session: "none", helper: raw[$ "helper"] == 1,
         scan: is_real(raw[$ "scan"]) ? raw.scan : 0, port: is_real(raw[$ "port"]) ? raw.port : 7777, addrs: [], hosts: [],
+        hw: is_real(raw[$ "hw"]) ? floor(raw.hw) : 0, hf: is_real(raw[$ "hf"]) ? floor(raw.hf) : 0, dw: is_real(raw[$ "dw"]) ? floor(raw.dw) : 0,
+        upd: mistrimulti_update_fields(raw),      // the release check and the update program's progress (MistriMultiUpdateUI.gml)
     };
     if (is_string(raw[$ "session"])) st.session = raw.session;
     if (is_array(raw[$ "addrs"])) {
@@ -175,6 +181,8 @@ function mistrimulti_menu_error_text(code) {
         case 45: return "The downloaded world could not be saved on this computer. The disk may be full.";
         case 46: return "There is not enough memory to download the world.";
         case 47: return "The host refused to send the world. Join again; if it keeps happening, both players should update MistriaMulti.";
+        case 48: return "The host has started a new world but has not saved it yet. Ask them to sleep or save once, then press Join again.";
+        case 49: return "The host is playing a different world than the one that was downloaded (it started another world meanwhile). Press Try again to download the host's world again.";
     }
     return "Something went wrong (code " + string(code) + "). Try again.";
 }
@@ -211,8 +219,18 @@ function mistrimulti_menu_log(text) {
 }
 
 function mistrimulti_menu_close_popup(popup) {
-    if (popup == undefined) return;
+    if (popup == undefined || popup[$ "close_requested"] == true) return;     // already closing (Escape): the game closes a popup once
     try { popup.close(); } catch (e) { mmapi_log_error("mistrimulti", "Menu: closing a popup failed: " + string(e)); }
+}
+
+// Is the flow really on screen (or about to be)? A flow whose popup the game closed by itself, with nothing coming, is a dead one.
+function mistrimulti_menu_flow_alive() {
+    var f = __mistrimulti_menu().flow;
+    if (f == undefined) return false;
+    if (f.next != "" || f.pause > 0 || f.stage == "input") return true;     // a closed text box is handled by the tick (back to the list)
+    if (f.popup != undefined && f.popup[$ "close_requested"] != true) return true;
+    if (f.input != undefined && f.input[$ "close_requested"] != true) return true;
+    return false;
 }
 
 // Closes whatever is on screen and drops the flow. stop: also tell the launcher to stop hosting / joining.
@@ -234,6 +252,7 @@ function mistrimulti_menu_reset(stop) {
 // argument for it (the new-game state).
 function mistrimulti_menu_begin(kind, arg) {
     var m = __mistrimulti_menu();
+    if (m.flow != undefined) mistrimulti_menu_reset(true);      // a flow that was left behind: close its popups, stop its session
     mistrimulti_menu_poll();
     var why = mistrimulti_menu_unavailable();
     if (why != "") {
@@ -244,7 +263,7 @@ function mistrimulti_menu_begin(kind, arg) {
     m.flow = {
         kind: kind, arg: arg, role: "", stage: "", next: "", next_arg: "", pause: 0, since: get_timer(), seq: 0, popup: undefined,
         input: undefined, input_kind: "", input_got: false, input_closed: 0, hosts: [], pass: "", room: "", ip: "", port: 7777,
-        scan_before: 0, wait_text: "", err: 0, note: "",
+        scan_before: 0, wait_text: "", err: 0, note: "", idle: 0,
     };
     __mistrimulti_savespace().choosing = true;
     mistrimulti_menu_ui("choose");
@@ -337,6 +356,7 @@ function mistrimulti_menu_ui_hosting() {
 function mistrimulti_menu_host_label(h) {
     var text = h.name == "" ? h.ip : (h.name + "  " + h.ip);
     if ((h.flags & 2) != 0) text += "  [password]";
+    if ((h.flags & 4) != 0 && (h.flags & 8) == 0) text += "  [new world, not saved]";     // the host named the world it plays; nothing is saved for it
     return text;
 }
 
@@ -405,12 +425,25 @@ function mistrimulti_menu_back() {
     } catch (e) { mistrimulti_menu_reset(true); }
 }
 
+// Does the launcher have (or is it starting) a session that a cancel must end? A screen that only chooses never started one; the
+// status file is asked as well, so a session that is running for any other reason is stopped too.
+function mistrimulti_menu_session_running(f) {
+    var m = __mistrimulti_menu();
+    if (f != undefined && f.stage != "choose" && f.stage != "host" && f.stage != "list" && f.stage != "input") return true;
+    var st = m.status;
+    if (st == undefined) return false;
+    return st.session != "none" || st.state == "hosting" || st.state == "joining" || st.state == "downloading" || st.state == "ready";
+}
+
+// Every way out of the flow (Cancel, Close, Escape, a click outside the popup, the title screen coming back) ends here: nothing of the
+// flow stays behind (popups, text box, choosing flag), and a session that was started is stopped.
 function mistrimulti_menu_cancel() {
+    var stop = true;
     try {
         var f = mistrimulti_menu_popup_gone();
-        var stop = f != undefined && f.stage != "choose" && f.stage != "host" && f.stage != "list" && f.stage != "input";
-        mistrimulti_menu_reset(stop);
+        stop = mistrimulti_menu_session_running(f);
     } catch (e) { mmapi_log_error("mistrimulti", "Menu cancel failed: " + string(e)); }
+    mistrimulti_menu_reset(stop);
 }
 
 function mistrimulti_menu_ask(kind) {
@@ -519,6 +552,7 @@ function mistrimulti_menu_retry() {
         var f = mistrimulti_menu_popup_gone();
         if (f == undefined) return;
         if (f.err == 26 || f.err == 21) { f.input_kind = "password"; mistrimulti_menu_show_later("input", false); return; }
+        if ((f.err == 48 || f.err == 49) && f.role == "join" && mistrimulti_menu_valid_ip(f.ip)) { mistrimulti_menu_join(f.ip, f.port); return; }   // press Join again
         if (f.role == "host") { mistrimulti_menu_show_later("host", false); return; }
         if (f.err == 3 || f.err == 5) { f.input_kind = f.input_kind == "" ? "ip" : f.input_kind; mistrimulti_menu_show_later("input", false); return; }
         mistrimulti_menu_scan();
@@ -561,11 +595,24 @@ function mistrimulti_menu_tick() {
         catch (e) { mmapi_log_error("mistrimulti", "Menu: a command could not be sent: " + string(e)); }
     }
     if (m.frames mod (f == undefined ? 60 : 10) == 1) mistrimulti_menu_poll();
+    try { mistrimulti_menu_world_tick(); }
+    catch (e) { mmapi_warn_rate_limited("mistrimulti_menu_world", "mistrimulti", "World note / early save failed: " + string(e)); }
     if (f == undefined) return;
     try {
         if (f.pause > 0) { f.pause--; return; }
         if (f.next != "") { mistrimulti_menu_ui(f.next); return; }
         var now = get_timer();
+        // A popup the game closed by itself (Escape, a click outside it) never calls a button: that is a Cancel.
+        if (f.stage != "input" && f.popup != undefined && f.popup[$ "close_requested"] == true) {
+            mistrimulti_menu_log("a popup was dismissed on screen " + f.stage + ": cancelled");
+            mistrimulti_menu_cancel();
+            return;
+        }
+        // Nothing on screen, nothing coming, and still a flow for 3 seconds: something went wrong. Never leave the player stuck.
+        if (f.popup == undefined && f.input == undefined) {
+            f.idle++;
+            if (f.idle > 180) { mistrimulti_menu_log("the flow had nothing on screen (" + f.stage + "): reset"); mistrimulti_menu_reset(true); return; }
+        } else f.idle = 0;
         // The player closed the text box without confirming: back to where he was.
         if (f.stage == "input" && !f.input_got && f.input != undefined && f.input[$ "close_requested"] == true) {
             f.input_closed++;
@@ -577,7 +624,6 @@ function mistrimulti_menu_tick() {
         }
         // Waiting screens
         if (f.stage != "wait_host" && f.stage != "wait_scan" && f.stage != "wait_join") return;
-        if (f.popup != undefined && f.popup[$ "close_requested"] == true && f.pause <= 0) { mistrimulti_menu_cancel(); return; }
         var st = m.status;
         if (st == undefined || !m.alive) {
             if (now - f.since > 6000000) { mistrimulti_menu_log("launcher gone: " + m.why); mistrimulti_menu_fail(4); }
@@ -605,7 +651,14 @@ function mistrimulti_menu_tick() {
                 mistrimulti_menu_show_later("wait", true);
                 f.stage = "wait_join";
             } else if (st.state == "ready") {
-                mistrimulti_menu_log("joined " + f.ip + ", world downloaded");
+                // The world that arrived must be the world the host plays now (both are game ids; 0 = not told: an older launcher or host).
+                if (st.hw != 0 && st.dw != 0 && st.hw != st.dw) {
+                    mistrimulti_menu_log("joined " + f.ip + " but the host plays world " + string(st.hw) + " and world " + string(st.dw) + " arrived");
+                    try { mistrimulti_menu_send("stop", undefined); } catch (e) { mmapi_log_error("mistrimulti", "Menu: stop failed: " + string(e)); }
+                    mistrimulti_menu_fail(49);
+                    return;
+                }
+                mistrimulti_menu_log("joined " + f.ip + ", world downloaded (host world " + string(st.hw) + ", downloaded " + string(st.dw) + ")");
                 mistrimulti_menu_close_popup(f.popup);
                 f.popup = undefined;
                 f.stage = "entering";
@@ -627,9 +680,107 @@ function mistrimulti_menu_tick() {
 // The title screen is back (or the game started): a session that is still running is stopped, so nobody stays connected.
 function mistrimulti_menu_title_entered() {
     var m = __mistrimulti_menu();
+    m.published = "";                       // the launcher deletes the note when the session stops; the next world publishes its own
+    m.save_tried = false;
+    m.save_since = 0;
+    m.save_told = false;
     if (m.flow != undefined) mistrimulti_menu_reset(false);
     mistrimulti_menu_poll();
     if (m.status != undefined && m.alive && m.status.session != "none") {
         try { mistrimulti_menu_send("stop", undefined); } catch (e) { mmapi_log_error("mistrimulti", "Menu: stop failed: " + string(e)); }
     }
+}
+
+// ---------------------------------------------------------------- which world is the host playing? (docs/SYNC-MENU.md)
+
+// "<digits>" of a world key ("<identity>_<Game.unique_identifier>"): what follows the last underscore, or "".
+function mistrimulti_world_key_id(key) {
+    if (!is_string(key)) return "";
+    for (var i = string_length(key); i >= 1; i--) {
+        if (string_char_at(key, i) == "_") return string_copy(key, i + 1, string_length(key) - i);
+    }
+    return "";
+}
+
+// Every tick. Host: tell the launcher which world is being played (once per world), and save a NEW world early so guests can join it.
+// Guest: note whether the host plays another world than the one this game loaded (r.world_mismatch; MistriMultiGuestSave.gml and
+// MistriMultiPlayerSync.gml act on it).
+function mistrimulti_menu_world_tick() {
+    var r = __mistrimulti_runtime();
+    var m = __mistrimulti_menu();
+    if (r.enabled != true) { r.world_mismatch = false; return; }
+    if (r.mode == "join") { mistrimulti_menu_guest_world_check(r); return; }
+    if (r.mode != "host" || r[$ "player_ready"] != true || !is_string(r[$ "world_key"]) || r.world_key == "") return;
+    var id = Game.unique_identifier;
+    if (!is_real(id) || id < 1 || id > 2147483647) return;
+    var key = string(floor(id));
+    if (m.published != key && get_timer() >= m.publish_at) {
+        m.publish_at = get_timer() + 2000000;
+        try {
+            var dir = mistrimulti_menu_dir();
+            save_text_file(dir + "/world.tmp", "id=" + key + "\n");
+            file_rename(dir + "/world.tmp", dir + "/world.txt");
+            m.published = key;
+            mistrimulti_menu_log("told the launcher this host plays world " + key);
+        } catch (e) {
+            mmapi_warn_rate_limited("mistrimulti_menu_world_note", "mistrimulti", "Could not tell the launcher which world is played: " + string(e));
+        }
+    }
+    if (m.published == key) mistrimulti_menu_early_save(r, m);
+}
+
+// Guest: the host's world key ends in the host's Game.unique_identifier; this game loaded a world with its own. They differ when the
+// host plays another world than the downloaded one (for example a new world that was never saved). Never hand a character to such a host.
+function mistrimulti_menu_guest_world_check(r) {
+    var host = r.peers[0];
+    r.world_mismatch = false;
+    if ((r.mask & 1) == 0 || !is_struct(host) || !is_string(host[$ "world"]) || host.world == "") return;
+    var theirs = mistrimulti_world_key_id(host.world);
+    if (theirs == "" || string_digits(theirs) != theirs) return;
+    if (string(Game.unique_identifier) != theirs) {
+        r.world_mismatch = true;
+        mmapi_warn_rate_limited("mistrimulti_world_mismatch", "mistrimulti", "The host plays world " + theirs + " but this game loaded world " + string(Game.unique_identifier) + ".");
+    }
+}
+
+// A host that starts a NEW world has no save of it, so a friend could not join it. Once the new world is loaded and the player is in
+// control (at home, no cutscene, no popup), save it the way the journal does (the game's own save, through its own guards), then say so.
+function mistrimulti_menu_early_save(r, m) {
+    if (__mistrimulti_savespace()[$ "new_world"] != true || m.save_tried) return;
+    var now = get_timer();
+    if (m.save_since == 0) m.save_since = now;
+    if (now < m.save_next) return;
+    m.save_next = now + 1000000;
+    if (ARI == undefined || !instance_exists(obj_ari) || LOAD_SEQUENCE == undefined || LOAD_SEQUENCE.is_active() || MIST.is_running() || ANCHOR.popup_is_open()
+        || obj_ari.fsm.current_state_id() != PlayerState.Default || !is_home_location(CURRENT_LOCATION_ID)) {
+        if (!m.save_told && now - m.save_since > 120000000) {
+            m.save_told = true;
+            create_notification(ANCHOR.wrap_for_local("MistriaMulti: your new world is not saved yet, so friends cannot join it. Sleep or save at the journal once."));
+        }
+        return;
+    }
+    m.save_tried = true;
+    mistrimulti_menu_log("saving the new world so friends can join it");
+    CLOCK.time_stopped = false;
+    obj_ari.fsm.change_state(PlayerState.Dummy);
+    LOAD_SEQUENCE.start("misc_local/saving", mistrimulti_menu_early_save_run, [], FADE_SPEED_TRANSITION);
+}
+
+// Runs inside the game's loading sequence (the same one the journal's save uses). Always finishes the sequence.
+function mistrimulti_menu_early_save_run() {
+    var done = false;
+    try {
+        ARI.save_position = new LocationPosition(CURRENT_LOCATION_ID, Vec2(obj_ari.x, obj_ari.y));
+        save_game(exact_save_path(Game.unique_identifier, false));
+        done = true;
+    } catch (e) {
+        mmapi_log_error("mistrimulti", "Saving the new world failed: " + string(e));
+    }
+    try { obj_ari.fsm.change_state(PlayerState.Default); } catch (e) {}
+    try {
+        create_notification(ANCHOR.wrap_for_local(done
+            ? "MistriaMulti: your new world is saved. Friends can join now."
+            : "MistriaMulti: your new world could not be saved. Sleep or save at the journal once so friends can join."));
+    } catch (e) {}
+    return true;
 }

@@ -46,8 +46,39 @@ Press **F8** in the game to see the connection status.
 
 ## Update
 
-Download the new zip (or tar.gz), unpack it **in the same place** so it replaces the old `MistriaMulti` folder's files, close the game, run `Install-Mod.bat` (Linux:
-`./install.sh`), then MOMI > **Install** again. Every player must update.
+Every player must have the same version.
+
+**Windows:** close the game, open `MistriMulti.exe` and press **Update MistriMulti**. It downloads the newest release from
+GitHub, checks every file against its checksum and replaces the mod files and the programs (all or nothing: if anything fails,
+nothing is changed and the window says why). Then the mod has to be installed into the game once more:
+
+- Press **Open MOMI** once and choose your MOMI program (it is remembered). After the next update the window opens MOMI for you:
+  select **MistriaMulti** and click **Install**.
+- Optional, saves the last click: in that file dialog choose MOMI's **command-line** program instead (its name contains `-cli`,
+  from the same MOMI download page). After an update the manager then asks "Run MOMI's installer for you?"; Yes runs it, No
+  opens MOMI. It installs every mod in your mods folder. It asks every time, and if MOMI's installer reports a problem you are
+  told to press Install in MOMI.
+
+**Linux / Steam Deck:** close the game, then in a terminal run `~/.local/share/mistrimulti/mistrimulti-update.sh --update` (or
+`mistrimulti-manager update`, or `./install.sh --update` in the unpacked folder). It does the same: downloads, verifies, updates
+the programs in `~/.local/share/mistrimulti` and the mod files in the game's `mods` folder, and tells you to press Install in
+MOMI. To let it run MOMI for you, download MOMI's command-line program (`ModsOfMistriaInstaller-cli-linux`), `chmod +x` it and
+run `./install.sh --momi-cli /path/to/it` once; `--update` then asks before it runs it.
+
+No network, or no release yet: you are told and nothing is changed. The old way (download the new zip or tar.gz, unpack it over
+the old folder, run `Install-Mod.bat` / `./install.sh`, then MOMI > **Install**) still works.
+
+### Update from inside the game
+
+On the title screen, bottom left, next to the game's own version, the game shows **MistriMulti 0.4.6** (your installed version). Once a day the
+launcher quietly asks whether a newer release exists (this needs `curl`, which Windows 10 and later and SteamOS have). When there is one, an
+**Update** button appears next to the version. Click it: the text shows what happens (`Downloading 0.4.7...`), then either `Installed. Restart the game`
+or `Updated. Close the game and press Install in MOMI`, or a plain error with the button back for another try. Every player still has to update. In a
+world, the Multiplayer badge (and F8) say `update available (0.4.7)`. You cannot start an update while you host or join; the button only exists on the title screen.
+
+To switch the daily check off, create a text file named `update.cfg` in the MistriaMulti data folder (next to `launcher.cfg`; Windows
+`%LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti`) with the single line `check=off`. The version still shows, but nothing is requested and no button
+appears. The check never delays the game and stays silent when you are offline.
 
 ## If something goes wrong
 
@@ -66,5 +97,7 @@ Download the new zip (or tar.gz), unpack it **in the same place** so it replaces
 Tested in the real game: both players' characters, time and weather, sleeping and the new day, hoeing, watering and planting,
 chests, the shipping bin and one shared gold purse, picking things up in town, leaving and rejoining with your own inventory.
 Written but not yet tried in the real game: each other on the map, the mines, animals and buildings, quests and cutscenes.
-Villagers walk the same schedule on every screen but can be a few steps apart. This is an experimental mod: back up saves you
+Villagers walk the same schedule on every screen but can be a few steps apart. Story cutscenes are watched by everybody
+themselves (skip them with the game's own skip button if you like): what a scene changes in the world counts once, and
+rewards are paid once per player. This is an experimental mod: back up saves you
 care about (the launcher also keeps copies of your singleplayer saves in `mod_data/mistrimulti/solo_backups`).

@@ -357,6 +357,34 @@ def test_host_closes_or_restarts_the_world():
     print("PASS: host quits to its title or restarts the world: the guest is told within seconds and returned to the title")
 
 
+def test_wrong_world_is_left():
+    """MistriMultiMenu.gml sets r.world_mismatch when the host plays another world than the one this guest loaded (a new world the host
+    never saved: the guest got its older save). The guest is told in plain words and returned to the title, like for a closed world."""
+    world, host, alice, _ = host_gone_fixture(12)
+    alice.rt["world_mismatch"] = True
+    took = run_until(world, lambda: alice.popups, 15000, "the wrong world")
+    assert took <= 6000, took
+    popup = popup_of(alice)
+    assert popup.body == "mistrimulti/guest_wrong_body" and popup.title == "mistrimulti/guest_gone_title", (popup.title, popup.body)
+    words = alice.interp.call("mistrimulti_guestsave_local_missing", None, GStruct(key="mistrimulti/guest_wrong_body"))
+    assert "different world" in words and "sleep or save once" in words and "character was not changed" in words, words
+    tap_return(world, alice)
+    print("PASS: a guest whose host plays another world than the downloaded one is told and returned to the title")
+
+
+def test_wrong_world_gets_no_character():
+    """Before the guest leaves, its character is not handed to a host that plays another world (it would become that world's record)."""
+    world = make_world(13, guests=1)
+    host, alice = world.games[0].node, world.games[1].node
+    alice.rt["world_mismatch"] = True
+    world.run(8000)
+    assert alice.rt["player_ready"] is False and alice.rt["player_error"] == "The host plays another world.", alice.rt["player_error"]
+    assert core_file(host, ALICE) is None or core_file(host, ALICE) == {}, "the host must not get a record for the guest"
+    alice.rt["world_mismatch"] = False
+    wait_ready(world, alice)
+    print("PASS: a guest never hands its character to a host that plays another world; it does as soon as the worlds match")
+
+
 def test_short_outage_and_waiting_guest_stay():
     world, host, alice, _ = host_gone_fixture(10)
     # A cut shorter than expiry + grace (host and guest keep their worlds): nothing happens afterwards.
@@ -545,7 +573,7 @@ def test_wiring():
 
 TESTS = [test_guest_save_is_vetoed, test_save_attempt_sends_character, test_final_flush_on_quit_and_return, test_goodbye_frame,
          test_host_forgets_a_departed_guest, test_returning_through_another_slot_retries,
-         test_host_crash_returns_guest_to_title, test_host_closes_or_restarts_the_world, test_short_outage_and_waiting_guest_stay,
+         test_host_crash_returns_guest_to_title, test_host_closes_or_restarts_the_world, test_wrong_world_is_left, test_wrong_world_gets_no_character, test_short_outage_and_waiting_guest_stay,
          test_leave_is_safe, test_export_and_import, test_import_restores_the_whole_character, test_wiring]
 
 

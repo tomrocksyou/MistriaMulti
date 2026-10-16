@@ -17,7 +17,7 @@ extern UpdateWindow, GetModuleFileNameW, GetStockObject, GetEnvironmentVariableW
 extern FindFirstFileW, FindNextFileW, FindClose, GetLocalTime, lstrlenW
 extern SHGetKnownFolderPath, CoTaskMemFree
 extern WinHttpOpen, WinHttpConnect, WinHttpOpenRequest, WinHttpSendRequest, WinHttpReceiveResponse
-extern WinHttpQueryHeaders, WinHttpReadData, WinHttpCloseHandle
+extern WinHttpQueryHeaders, WinHttpReadData, WinHttpCloseHandle, WinHttpSetTimeouts, GetSystemTimeAsFileTime
 extern BCryptOpenAlgorithmProvider, BCryptHash, BCryptCloseAlgorithmProvider
 
 section .data
@@ -27,18 +27,18 @@ WSTR cls_static, "STATIC"
 WSTR cls_button, "BUTTON"
 WSTR title, "MistriaMulti"
 WSTR txt_check, "Check for updates"
-WSTR txt_update, "Update"
+WSTR txt_update, "Update MistriMulti"
 WSTR txt_save, "Save Solo"
 WSTR txt_close, "Close"
 WSTR txt_start, "Looking for the game..."
 fmt_game_missing: dw __utf16__(`Fields of Mistria was not found.\r\n\r\nPass the game folder as the first argument, or install the game through Steam.`), 0
 fmt_status: dw __utf16__(`Game folder:\r\n%s\r\n\r\nMod installed:   %s\r\nLatest version:  %s\r\nTools:           %s\r\n\r\n`), 0
-WSTR msg_unknown, "Press Check for updates."
+WSTR msg_unknown, "Press Update MistriMulti."
 WSTR msg_uptodate, "You are up to date."
-WSTR msg_available, "An update is available. Press Update."
-WSTR msg_tools, "The mod is current, but a program (launcher, helper or this manager) has a newer version. Press Update."
+WSTR msg_available, "An update is available. Press Update MistriMulti."
+WSTR msg_tools, "The mod is current, but a program (launcher, helper or this manager) has a newer version. Press Update MistriMulti."
 WSTR msg_newer, "The version installed here is newer than the published one. There is nothing to update."
-WSTR msg_notinstalled, "Not installed yet. Press Update to install."
+WSTR msg_notinstalled, "Not installed yet. Press Update MistriMulti to install."
 WSTR msg_offline, "Could not reach the update server (is the repository public yet?)."
 WSTR msg_badlist, "The update list is not valid, or was cut off. Nothing was changed."
 WSTR msg_hash, "A downloaded file failed its checksum. Nothing was changed."
@@ -47,10 +47,11 @@ WSTR msg_needcheck, "Check for updates first."
 WSTR msg_writefail, "Could not write a file next to the game or this program. Nothing was changed."
 WSTR msg_swapfail, "Could not replace a file (is the game or the launcher running?). Everything was put back as it was."
 WSTR msg_nogame, "Fields of Mistria was not found, so the mod cannot be updated. Pass the game folder as the first argument."
+WSTR msg_pending, "An update that was installed from inside the game still needs the MOMI step.\r\n\r\nClose the game, press Open MOMI, select MistriaMulti and click Install."
 WSTR msg_current, "Everything is already up to date."
 fmt_done: dw __utf16__(`Updated to %s.\r\n\r\nFiles installed: %d (mod %d, programs %d).`), 0
 fmt_done_self: dw __utf16__(`\r\n\r\nMistriMulti.exe itself was updated. Close this window and open MistriMulti.exe again to use the new version.`), 0
-fmt_done_momi: dw __utf16__(`\r\n\r\nNext: press Open MOMI, select MistriaMulti and click Install, then start the game.`), 0
+fmt_done_momi: dw __utf16__(`\r\n\r\nNext: close the game, press Open MOMI (it asks once where MOMI is), select MistriaMulti and click Install, then start the game.`), 0
 fmt_saved: dw __utf16__(`Saved %d file(s) to:\r\n%s`), 0
 WSTR msg_nosaves, "No solo saves were found to back up."
 WSTR msg_nodocs, "Could not find your Documents folder."
@@ -73,7 +74,7 @@ WSTR def_host, "raw.githubusercontent.com"
 WSTR def_prefix, "/tomrocksyou/MistriaMulti/main"
 WSTR latest_path, "release/latest.txt"
 WSTR txt_none, "not installed"
-WSTR txt_unknown, "(press Check for updates)"
+WSTR txt_unknown, "(press Update MistriMulti)"
 WSTR suffix_maybe, "\Maybe.toml"
 WSTR suffix_manifest, "\mods\mistrimulti\manifest.toml"
 WSTR cand_1, ":\SteamLibrary\steamapps\common\Fields of Mistria"
@@ -85,6 +86,41 @@ WSTR fmt_cat, "%s%s"
 needle_version db 'version = "'
 needle_version_len equ $ - needle_version
 WSTR txt_unavail, "unavailable"
+WSTR s_daily, "--daily"
+WSTR s_update, "--update"
+WSTR res_fmt, `state=%S\r\nversion=%s\r\nmessage=%s\r\nerror=%d\r\n`
+WSTR res_fmt_tmp, "%s.tmp"
+res_empty dw 0
+st_checking db 'checking',0
+st_downloading db 'downloading',0
+st_installing db 'installing',0
+st_done db 'done',0
+st_failed db 'failed',0
+st_needs db 'needs_momi',0
+WSTR rs_checking, "Looking for the latest release."
+WSTR rs_downloading, "Downloading the update."
+WSTR rs_installing, "Installing the update."
+WSTR rs_current, "MistriMulti is up to date."
+WSTR rs_newer, "The installed version is newer than the published one. Nothing was changed."
+WSTR rs_programs, "Updated the MistriMulti programs. Restart the game to use them."
+WSTR rs_momi, "Running MOMI's installer."
+WSTR rs_momiok, "Updated, and MOMI installed the new mod files. Restart the game."
+WSTR rs_momibad, "Updated, but MOMI's installer reported a problem. Close the game and press Install in MOMI."
+WSTR rs_momiwait, "Updated. MOMI's installer is still running; wait for it to finish, then restart the game."
+WSTR rs_needs, "Updated. Close the game and press Install in MOMI, then start the game."
+WSTR rs_net, "Could not reach the update server. Nothing was changed."
+WSTR rs_list, "The update list is not valid. Nothing was changed."
+WSTR rs_download, "A download failed or did not match its checksum. Nothing was changed."
+WSTR rs_replace, "Could not replace a file (the game may be using it). Everything was put back."
+WSTR rs_untouched, "The mod files were not touched (the game was not found)."
+WSTR dl_cfg, "%s\update.cfg"
+WSTR dl_json, "%s\update.json"
+WSTR dl_tmp, "%s\update.json.tmp"
+WSTR dl_fmt, `{"v":1,"latest":"%s","checked":%u}`
+dl_off db 'check=off'
+dl_off_len equ $ - dl_off
+dl_checked db '"checked":'
+dl_checked_len equ $ - dl_checked
 hexdigits db '0123456789abcdef'
 align 4
 guid_docs dd 0xFDD39AD0
@@ -137,6 +173,16 @@ m_pathlen resq 1
 tmp_ptr resq 1
 done_msg resw 1024
 copied resd 1
+ft_now resq 1
+res_path resq 1
+res_have_ver resd 1
+res_wide resw 1500
+res_ascii resb 1600
+res_tmp resw 1100
+chk_code resd 1                      ; why do_check found no list: 0 ok, 20 no network, 21 invalid list
+upd_code resd 1                      ; why do_update changed nothing: 13 no game, 21, 22 download or checksum, 23 could not write or replace
+http_tmo resd 1                    ; milliseconds for every WinHTTP step, 0 = the system defaults
+upd_ok resd 1                      ; 1 when do_update finished installing
 
 section .text
 global start
@@ -327,6 +373,15 @@ FN http_get
     test rax, rax
     jz .fail
     mov rbx, rax
+    mov edx, [http_tmo]
+    test edx, edx
+    jz .notmo
+    mov rcx, rbx
+    mov r8d, edx
+    mov r9d, edx
+    mov [rsp+32], rdx
+    call WinHttpSetTimeouts
+.notmo:
     mov rcx, rbx
     mov rdx, r12
     mov r8d, [srv_port]
@@ -557,6 +612,7 @@ FN swap_in
 END_FN
 
 FN do_check
+    mov dword [chk_code], 0
     mov qword [manifest_len], 0
     mov dword [ent_n], 0
     call list_url
@@ -600,6 +656,7 @@ FN do_check
     lea rcx, [msg_notinstalled]
     jmp .show
 .bad:
+    mov dword [chk_code], 21
     mov qword [manifest_len], 0
     mov dword [ent_n], 0
     lea rcx, [txt_unavail]
@@ -610,6 +667,7 @@ FN do_check
     lea rcx, [msg_badlist]
     jmp .show
 .offline:
+    mov dword [chk_code], 20
     lea rcx, [txt_unavail]
     lea rdx, [latest_ver]
     call wcopy
@@ -695,6 +753,10 @@ FN do_update
     call set_state
     jmp .d
 .swap:
+    lea rcx, [st_installing]
+    lea rdx, [rs_installing]
+    xor r8d, r8d
+    call res_write
     xor r13d, r13d                  ; sweep 0: everything except manifest.toml; sweep 1: manifest.toml last
 .sweep:
     xor r12d, r12d
@@ -755,6 +817,7 @@ FN do_update
     inc r12d
     jmp .fin
 .finished:
+    mov dword [upd_ok], 1
     call read_installed
     mov eax, [n_mod]
     add eax, [n_bin]
@@ -790,34 +853,429 @@ FN do_update
     call set_state
     jmp .d
 .badlist:
+    mov dword [upd_code], 21
     lea rcx, [msg_badlist]
     call set_state
     jmp .d
 .nogame:
+    mov dword [upd_code], 13
     call cleanup_staged
     lea rcx, [msg_nogame]
     call set_state
     jmp .d
 .dlfail:
+    mov dword [upd_code], 22
     call cleanup_staged
     lea rcx, [msg_dlfail]
     call set_state
     jmp .d
 .hashfail:
+    mov dword [upd_code], 22
     call cleanup_staged
     lea rcx, [msg_hash]
     call set_state
     jmp .d
 .writefail:
+    mov dword [upd_code], 23
     call cleanup_staged
     lea rcx, [msg_writefail]
     call set_state
     jmp .d
 .swapfail:
+    mov dword [upd_code], 23
     call rollback_all
     call cleanup_staged
     lea rcx, [msg_swapfail]
     call set_state
+.d:
+END_FN
+
+; The one button: check, update when there is something to update, then the MOMI step. Every outcome is a plain sentence.
+FN do_oneclick
+    mov dword [upd_ok], 0
+    mov dword [n_mod], 0
+    call do_check
+    cmp qword [manifest_len], 0
+    je .d                           ; offline or invalid list: do_check said so
+    call version_state
+    cmp eax, 3
+    je .d                           ; the installed version is newer: nothing to do
+    cmp eax, 2
+    jne .go
+    cmp dword [tools_stale], 0
+    je .after                       ; up to date (a pending MOMI step may still be due)
+.go:
+    call do_update
+    cmp dword [upd_ok], 0
+    je .d
+.after:
+    call momi_pending_check
+    mov r12d, eax
+    cmp dword [n_mod], 0
+    jne .step
+    test r12d, r12d
+    jz .d                           ; only programs changed and nothing pending: MOMI has nothing new to install
+    lea rcx, [msg_pending]
+    call set_state
+.step:
+    call momi_after_update
+    call momi_pending_clear
+.d:
+END_FN
+
+; --daily <mod data folder> [<host> <port> <https 0/1> <path prefix>]   (started hidden by the launcher at every game start)
+; At most one check a day, silent, short timeouts: reads the latest release list, writes <mod data folder>\update.json
+; {"v":1,"latest":"x.y.z","checked":<unix seconds>} for the mod's badge. A line "check=off" in <mod data folder>\update.cfg turns it
+; off. Any failure ends quietly without touching anything. Nothing is installed.
+FN daily_check
+    mov rax, [argv]
+    mov r12, [rax+16]
+    lea rcx, [wpath1]
+    lea rdx, [dl_cfg]
+    mov r8, r12
+    call wsprintfW
+    lea rcx, [wpath1]
+    lea rdx, [file_buf]
+    mov r8d, 2000
+    call read_file
+    cmp rax, 9
+    jl .nocfg
+    mov rdx, rax
+    lea rcx, [file_buf]
+    lea r8, [dl_off]
+    mov r9d, dl_off_len
+    call find_bytes
+    test rax, rax
+    jnz .done
+.nocfg:
+    lea rcx, [ft_now]
+    call GetSystemTimeAsFileTime
+    mov rax, [ft_now]
+    xor edx, edx
+    mov rcx, 10000000
+    div rcx
+    mov rcx, 11644473600
+    sub rax, rcx
+    mov r13, rax                    ; now, unix seconds
+    lea rcx, [wpath1]
+    lea rdx, [dl_json]
+    mov r8, r12
+    call wsprintfW
+    lea rcx, [wpath1]
+    lea rdx, [file_buf]
+    mov r8d, 2000
+    call read_file
+    cmp rax, 12
+    jl .go
+    mov rdx, rax
+    lea rcx, [file_buf]
+    lea r8, [dl_checked]
+    mov r9d, dl_checked_len
+    call find_bytes
+    test rax, rax
+    jz .go
+    lea rcx, [rax+dl_checked_len]
+    xor eax, eax
+    xor r8d, r8d
+.dg:
+    movzx edx, byte [rcx]
+    sub edx, '0'
+    cmp edx, 9
+    ja .dge
+    imul rax, rax, 10
+    add rax, rdx
+    inc rcx
+    inc r8d
+    cmp r8d, 11
+    jb .dg
+    jmp .go                         ; absurd number: check again
+.dge:
+    cmp r13, rax
+    jb .go                          ; "checked" lies in the future: check again
+    mov rdx, r13
+    sub rdx, rax
+    cmp rdx, 86400
+    jb .done                        ; checked within the last day
+.go:
+    mov dword [http_tmo], 5000
+    mov qword [manifest_len], 0
+    mov dword [ent_n], 0
+    call list_url
+    mov rcx, [ent_host]
+    lea rdx, [wurl]
+    call http_get
+    test eax, eax
+    jz .done
+    mov rcx, [http_len]
+    cmp rcx, 30000
+    ja .done
+    mov rdx, rcx
+    lea rsi, [http_buf]
+    lea rdi, [manifest_buf]
+    rep movsb
+    mov byte [rdi], 0
+    mov [manifest_len], rdx
+    call manifest_validate
+    test eax, eax
+    jz .done
+    lea rcx, [done_msg]
+    lea rdx, [dl_fmt]
+    lea r8, [latest_ver]
+    mov r9d, r13d
+    call wsprintfW
+    mov r14d, eax
+    lea rcx, [http_buf]
+    lea rdx, [done_msg]
+    mov r8d, 400
+    call wide_to_ascii
+    lea rcx, [wpath2]
+    lea rdx, [dl_tmp]
+    mov r8, r12
+    call wsprintfW
+    lea rcx, [wpath2]
+    call ensure_dirs
+    lea rcx, [wpath2]
+    lea rdx, [http_buf]
+    mov r8d, r14d
+    call write_file
+    test eax, eax
+    jz .done
+    lea rcx, [wpath1]
+    lea rdx, [dl_json]
+    mov r8, r12
+    call wsprintfW
+    lea rcx, [wpath2]
+    lea rdx, [wpath1]
+    mov r8d, 1                      ; MOVEFILE_REPLACE_EXISTING
+    call MoveFileExW
+.done:
+END_FN
+
+
+; Writes the result file (atomically: <file>.tmp, then rename):  state=<s>  version=<x.y.z>  message=<plain words>  error=<code>
+; rcx = state (ASCII), rdx = message (wide), r8d = error code. Does nothing when no result file was asked for.
+FN res_write
+    cmp qword [res_path], 0
+    je .d
+    mov r12, rcx
+    mov r13, rdx
+    mov r14d, r8d
+    lea rcx, [res_wide]
+    lea rdx, [res_fmt]
+    mov r8, r12
+    lea r9, [res_empty]
+    cmp dword [res_have_ver], 0
+    je .nv
+    lea r9, [latest_ver]
+.nv:
+    mov [rsp+32], r13
+    mov eax, r14d
+    mov [rsp+40], rax
+    call wsprintfW
+    mov r15d, eax
+    lea rcx, [res_ascii]
+    lea rdx, [res_wide]
+    mov r8d, 1500
+    call wide_to_ascii
+    lea rcx, [res_tmp]
+    lea rdx, [res_fmt_tmp]
+    mov r8, [res_path]
+    call wsprintfW
+    lea rcx, [res_tmp]
+    lea rdx, [res_ascii]
+    mov r8d, r15d
+    call write_file
+    test eax, eax
+    jz .d
+    lea rcx, [res_tmp]
+    mov rdx, [res_path]
+    mov r8d, 1                      ; MOVEFILE_REPLACE_EXISTING
+    call MoveFileExW
+.d:
+END_FN
+
+; --update <result file> [<game folder> <host> <port> <https 0/1> <path prefix>]   (no window, no questions; the last five are for tests)
+; Updates the mod files and the programs exactly like the Update button and reports in the result file: state=checking | downloading |
+; installing | done | failed | needs_momi. MOMI's installer runs only when the player turned that on earlier (momi-cli.cfg and
+; momi-cli.auto, see momi.inc) and MISTRIMULTI_NO_MOMI is not set; otherwise the state is needs_momi (marker momi-pending is left for
+; the next Update). Exit code 0 on done / needs_momi, else the error: 13 mod files not touched (no game found), 20 no network,
+; 21 invalid list, 22 download or checksum failed, 23 could not write or replace (everything put back).
+; error= is 0, or the same code; for needs_momi it is 0 (no installer run) or 30 installer reported a problem, 31 still running after
+; 5 minutes, 32 could not be started.
+FN update_result
+    mov rax, [argv]
+    mov rcx, [rax+16]
+    mov [res_path], rcx
+    mov dword [res_have_ver], 0
+    lea rcx, [st_checking]
+    lea rdx, [rs_checking]
+    xor r8d, r8d
+    call res_write
+    cmp dword [argc], 8
+    jb .scan
+    mov rax, [argv]
+    mov rcx, [rax+24]
+    lea rdx, [game_dir]
+    call wcopy
+    lea rcx, [game_dir]
+    lea rdx, [suffix_maybe]
+    lea r8, [path_tmp]
+    call join_wide
+    lea rcx, [path_tmp]
+    call file_exists
+    jmp .found
+.scan:
+    mov r12d, [argc]
+    mov dword [argc], 1                 ; find_game then scans the drives instead of reading the first argument
+    call find_game
+    mov [argc], r12d
+.found:
+    mov [have_game], eax
+    test eax, eax
+    jz .nogame
+    call read_installed
+    mov dword [upd_ok], 0
+    mov dword [upd_code], 0
+    mov dword [http_tmo], 30000
+    call do_check
+    cmp qword [manifest_len], 0
+    jne .checked
+    mov r13d, [chk_code]
+    lea rdx, [rs_net]
+    cmp r13d, 20
+    je .fail
+    lea rdx, [rs_list]
+    jmp .fail
+.checked:
+    mov dword [res_have_ver], 1
+    call version_state
+    cmp eax, 3
+    je .newer
+    cmp eax, 2
+    jne .go
+    cmp dword [tools_stale], 0
+    jne .go
+    call momi_pending_check
+    test eax, eax
+    jnz .momi                           ; an earlier in-game update still waits for the MOMI step
+    lea rcx, [st_done]
+    lea rdx, [rs_current]
+    xor r8d, r8d
+    call res_write
+    xor eax, eax
+    jmp .d
+.newer:
+    lea rcx, [st_done]
+    lea rdx, [rs_newer]
+    xor r8d, r8d
+    call res_write
+    xor eax, eax
+    jmp .d
+.go:
+    lea rcx, [st_downloading]
+    lea rdx, [rs_downloading]
+    xor r8d, r8d
+    call res_write
+    call do_update
+    cmp dword [upd_ok], 0
+    jne .updated
+    mov r13d, [upd_code]
+    test r13d, r13d
+    jnz .upd_failed
+    lea rcx, [st_done]                  ; nothing differed
+    lea rdx, [rs_current]
+    xor r8d, r8d
+    call res_write
+    xor eax, eax
+    jmp .d
+.upd_failed:
+    lea rdx, [rs_download]
+    cmp r13d, 22
+    je .fail
+    lea rdx, [rs_replace]
+    cmp r13d, 23
+    je .fail
+    lea rdx, [rs_untouched]
+    jmp .fail
+.updated:
+    cmp dword [n_mod], 0
+    jne .momi
+    lea rcx, [st_done]
+    lea rdx, [rs_programs]
+    xor r8d, r8d
+    call res_write
+    xor eax, eax
+    jmp .d
+.momi:
+    ; the mod files changed (or an earlier update left the MOMI step pending): leave the marker, then run MOMI only if allowed
+    lea rcx, [wpath2]
+    lea rdx, [mo_f_pending]
+    call momi_cfg_path_into
+    lea rcx, [wpath2]
+    call ensure_dirs
+    lea rcx, [wpath2]
+    lea rdx, [mo_v_yes]
+    mov r8d, 2
+    call write_file
+    lea rcx, [mo_e_nomomi]
+    lea rdx, [wpath1]
+    mov r8d, 4
+    call GetEnvironmentVariableW
+    test eax, eax
+    jnz .needs
+    call momi_auto_check
+    test eax, eax
+    jz .needs
+    call momi_find_cli
+    test eax, eax
+    jz .needs
+    lea rcx, [momi_cli_path]
+    call momi_is_cli
+    test eax, eax
+    jz .needs
+    lea rcx, [st_installing]
+    lea rdx, [rs_momi]
+    xor r8d, r8d
+    call res_write
+    mov dword [momi_quiet], 1
+    call momi_run_cli
+    cmp eax, 1
+    je .momi_ok
+    mov r8d, 30
+    lea rdx, [rs_momibad]
+    cmp eax, 2
+    je .needs2
+    mov r8d, 31
+    lea rdx, [rs_momiwait]
+    cmp eax, 3
+    je .needs2
+    mov r8d, 32
+    lea rdx, [rs_needs]
+    jmp .needs2
+.momi_ok:
+    call momi_pending_clear
+    lea rcx, [st_done]
+    lea rdx, [rs_momiok]
+    xor r8d, r8d
+    call res_write
+    xor eax, eax
+    jmp .d
+.needs:
+    xor r8d, r8d
+    lea rdx, [rs_needs]
+.needs2:
+    lea rcx, [st_needs]
+    call res_write
+    xor eax, eax
+    jmp .d
+.nogame:
+    mov r13d, 13
+    lea rdx, [rs_untouched]
+.fail:
+    lea rcx, [st_failed]
+    mov r8d, r13d
+    call res_write
+    mov eax, r13d
 .d:
 END_FN
 
@@ -964,7 +1422,7 @@ FN wndproc
     cmp eax, 1
     je .do_check
     cmp eax, 2
-    je .do_update
+    je .do_oneclick
     cmp eax, 3
     je .do_save
     cmp eax, 4
@@ -999,8 +1457,8 @@ FN wndproc
     call do_check
     xor eax, eax
     jmp .done
-.do_update:
-    call do_update
+.do_oneclick:
+    call do_oneclick
     xor eax, eax
     jmp .done
 .do_save:
@@ -1067,6 +1525,89 @@ start:
     mov [srv_prefix], rcx
     mov dword [srv_override], 1
 .args_done:
+    ; --daily <mod data folder> [<host> <port> <https 0/1> <path prefix>]: the once-a-day update check (no window), see daily_check
+    cmp dword [argc], 3
+    jb .nodaily
+    mov rax, [argv]
+    mov rcx, [rax+8]
+    lea rdx, [s_daily]
+    call wequal
+    test eax, eax
+    jz .nodaily
+    mov dword [srv_override], 0
+    lea rax, [def_host]
+    mov [srv_host], rax
+    lea rax, [def_prefix]
+    mov [srv_prefix], rax
+    mov dword [srv_port], 443
+    mov dword [srv_secure], 1
+    cmp dword [argc], 7
+    jb .dl_run
+    mov rax, [argv]
+    mov rcx, [rax+24]
+    mov [srv_host], rcx
+    mov rcx, [rax+32]
+    call w2i
+    mov [srv_port], eax
+    mov rax, [argv]
+    mov rcx, [rax+40]
+    call w2i
+    mov [srv_secure], eax
+    mov rax, [argv]
+    mov rcx, [rax+48]
+    mov [srv_prefix], rcx
+    mov dword [srv_override], 1
+.dl_run:
+    call daily_check
+    xor ecx, ecx
+    call ExitProcess
+.nodaily:
+    ; --update <result file> [<game folder> <host> <port> <https 0/1> <path prefix>]: see update_result
+    cmp dword [argc], 3
+    jb .noresult
+    mov rax, [argv]
+    mov rcx, [rax+8]
+    lea rdx, [s_update]
+    call wequal
+    test eax, eax
+    jz .noresult
+    mov dword [srv_override], 0
+    lea rax, [def_host]
+    mov [srv_host], rax
+    lea rax, [def_prefix]
+    mov [srv_prefix], rax
+    mov dword [srv_port], 443
+    mov dword [srv_secure], 1
+    cmp dword [argc], 8
+    jb .res_run
+    mov rax, [argv]
+    mov rcx, [rax+32]
+    mov [srv_host], rcx
+    mov rcx, [rax+40]
+    call w2i
+    mov [srv_port], eax
+    mov rax, [argv]
+    mov rcx, [rax+48]
+    call w2i
+    mov [srv_secure], eax
+    mov rax, [argv]
+    mov rcx, [rax+56]
+    mov [srv_prefix], rcx
+    mov dword [srv_override], 1
+.res_run:
+    xor ecx, ecx                       ; app_dir and self_path are needed by the installer (startup_cleanup has not run)
+    lea rdx, [self_path]
+    mov r8d, 520
+    call GetModuleFileNameW
+    lea rcx, [self_path]
+    lea rdx, [app_dir]
+    call wcopy
+    lea rcx, [app_dir]
+    call cut_last_component
+    call update_result
+    mov ecx, eax
+    call ExitProcess
+.noresult:
     ; where this program lives: tools are installed next to it; leftovers of an earlier update are removed
     xor ecx, ecx
     lea rdx, [self_path]
@@ -1140,20 +1681,11 @@ start:
     mov [h_status], rax
     ; buttons
     lea rcx, [cls_button]
-    lea rdx, [txt_check]
+    lea rdx, [txt_update]
     mov r8d, 0x50010000        ; WS_CHILD | WS_VISIBLE | WS_TABSTOP
     mov r9d, 16
     mov r12d, 204
-    mov r13d, 140
-    mov r14d, 28
-    mov r15d, 1
-    call make_child
-    lea rcx, [cls_button]
-    lea rdx, [txt_update]
-    mov r8d, 0x50010000
-    mov r9d, 164
-    mov r12d, 204
-    mov r13d, 100
+    mov r13d, 236
     mov r14d, 28
     mov r15d, 2
     call make_child
@@ -1161,7 +1693,7 @@ start:
     lea rcx, [cls_button]
     lea rdx, [txt_save]
     mov r8d, 0x50010000
-    mov r9d, 272
+    mov r9d, 260
     mov r12d, 204
     mov r13d, 100
     mov r14d, 28
@@ -1170,9 +1702,9 @@ start:
     lea rcx, [cls_button]
     lea rdx, [txt_close]
     mov r8d, 0x50010000
-    mov r9d, 380
+    mov r9d, 368
     mov r12d, 204
-    mov r13d, 100
+    mov r13d, 112
     mov r14d, 28
     mov r15d, 4
     call make_child
@@ -1343,12 +1875,18 @@ start:
     je .st_s
     cmp ax, 'm'
     je .st_m
+    cmp ax, 'a'
+    je .st_a
     jmp .st_next
 .st_c:
     call do_check
     jmp .st_next
 .st_u:
     call do_update
+    jmp .st_next
+.st_a:
+    mov dword [momi_quiet], 1
+    call do_oneclick
     jmp .st_next
 .st_s:
     call do_save
