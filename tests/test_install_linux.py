@@ -589,6 +589,26 @@ class UpdateTests(unittest.TestCase):
         self.upd("--update", stdin="y\n")
         self.assertFalse(proof.exists())
 
+    def test_stale_file_alone_triggers_a_rebuild(self):
+        self.site.publish("0.9.0", MOD_V2)
+        self.upd("--update")
+        (self.mod / "gml/Extra.gml").write_text("left over\n")
+        r = self.upd("--update")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertFalse((self.mod / "gml/Extra.gml").exists())
+        self.assertIn("1 old file(s) removed", r.stdout)
+
+    def test_saved_symlink_is_never_run(self):
+        p, proof = self.cli()
+        link = self.tmp / "evil-cli"
+        link.symlink_to(p)
+        (self.dir / "momi-cli.path").write_text(str(link) + "\n")
+        (self.dir / "momi-cli.auto").write_text("")
+        self.site.publish("0.9.0", MOD_V2)
+        r, f = self.result()
+        self.assertEqual(f["state"], "needs_momi", f)
+        self.assertFalse(proof.exists())
+
     def result(self, *args, extra=None, stdin=""):
         out = self.tmp / "result.txt"
         out.unlink(missing_ok=True)
