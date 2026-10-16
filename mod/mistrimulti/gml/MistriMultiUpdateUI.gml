@@ -1,7 +1,7 @@
 // Title-screen version label and "Update" button (docs/SYNC-UPDATE.md is the launcher side; docs/SYNC-MENU.md has the file bridge).
 //
 // Bottom left of the title screen, right of the game's own "v1.0.8 (modified)" text (TitleMenu.sha_text), the mod shows
-// "MistriMulti 0.4.6", always. When the launcher's daily release check found a newer release, an "Update" button sits next to it.
+// "MistriMulti 0.4.7", always. When the launcher's daily release check found a newer release, an "Update" button sits next to it.
 // Clicking it sends the `update` command to the launcher, which runs the update program and relays its progress in
 // menu/status.json (fields update, us, uv, um, ue, ur: see mistrimulti_update_fields). The label then shows plain words
 // ("Downloading 0.4.7...", "Updated. Close the game and press Install in MOMI", "Installed. Restart the game", or the error).
@@ -10,7 +10,7 @@
 // next to its "tools" text), so it sits right after it whatever its width; the button is a nine-slice child of the label with a
 // text child. If the game's node cannot be found, a plain text slot (MistriMultiHudText.gml) at a fixed place shows the label
 // without a button. Everything is guarded: a failure drops the nodes, logs once and the game goes on.
-function mistrimulti_mod_version() { return "0.4.6"; }
+function mistrimulti_mod_version() { return "0.4.7"; }
 
 // Fixed place of the fallback label (GUI pixels from the left edge), used only when the game's version text node is missing.
 function mistrimulti_updateui_fallback_x() { return 112; }
