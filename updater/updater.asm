@@ -59,6 +59,18 @@ WSTR env_local, "LOCALAPPDATA"
 WSTR env_saves, "MISTRIMULTI_SAVES_DIR"
 WSTR env_docs, "MISTRIMULTI_DOCS_DIR"
 WSTR suffix_saves, "\FieldsOfMistria\saves"
+fmt_logs: dw __utf16__(`Copied %d log file(s) to:\r\n%s\r\n\r\nSend that folder with your bug report.`), 0
+WSTR msg_nologs, "No MistriMulti logs were found. Start the game once, then try again right after the problem happens (logs are rewritten at every start)."
+WSTR fmt_logstamp, "\Logs-%04d%02d%02d-%02d%02d%02d"
+WSTR lg_game, "\FieldsOfMistria\mod_data\mistrimulti\logs\mistrimulti.log"
+WSTR lg_mp, "\FieldsOfMistria\multiplayer\mod_data\mistrimulti\logs\mistrimulti.log"
+WSTR lg_launcher, "\FieldsOfMistria\mod_data\mistrimulti\launcher.log"
+WSTR lg_launcher_mp, "\FieldsOfMistria\multiplayer\mod_data\mistrimulti\launcher.log"
+WSTR lgn_game, "mistrimulti.log"
+WSTR lgn_mp, "multiplayer-mistrimulti.log"
+WSTR lgn_launcher, "launcher.log"
+WSTR lgn_launcher_mp, "multiplayer-launcher.log"
+WSTR txt_logs, "Collect Logs"
 WSTR suffix_backups, "\MistriMulti Backups"
 WSTR fmt_stamp, "\%04d%02d%02d-%02d%02d%02d"
 WSTR fmt_star, "%s\*"
@@ -1298,25 +1310,9 @@ FN do_save
     lea r9, [suffix_saves]
     call wsprintfW
 .have_src:
-    lea rcx, [env_docs]
-    lea rdx, [wpath2]
-    mov r8d, 520
-    call GetEnvironmentVariableW
+    call get_docs_dir
     test eax, eax
-    jnz .have_docs
-    lea rcx, [guid_docs]
-    xor edx, edx
-    xor r8d, r8d
-    lea r9, [tmp_ptr]
-    call SHGetKnownFolderPath
-    test eax, eax
-    jnz .nodocs
-    mov rcx, [tmp_ptr]
-    lea rdx, [wpath2]
-    call wcopy
-    mov rcx, [tmp_ptr]
-    call CoTaskMemFree
-.have_docs:
+    jz .nodocs
     lea rcx, [wpath3]
     lea rdx, [fmt_cat]
     lea r8, [wpath2]
@@ -1409,6 +1405,141 @@ FN do_save
 END_FN
 
 
+; Writes the Documents folder into wpath2. eax 1 if found
+FN get_docs_dir
+    lea rcx, [env_docs]
+    lea rdx, [wpath2]
+    mov r8d, 520
+    call GetEnvironmentVariableW
+    test eax, eax
+    jnz .ok
+    lea rcx, [guid_docs]
+    xor edx, edx
+    xor r8d, r8d
+    lea r9, [tmp_ptr]
+    call SHGetKnownFolderPath
+    test eax, eax
+    jnz .bad
+    mov rcx, [tmp_ptr]
+    lea rdx, [wpath2]
+    call wcopy
+    mov rcx, [tmp_ptr]
+    call CoTaskMemFree
+.ok:
+    mov eax, 1
+    jmp .d
+.bad:
+    xor eax, eax
+.d:
+END_FN
+
+; rcx = path below %LOCALAPPDATA% (wide), rdx = file name to use in the logs folder (wide). Needs wpath1 = LOCALAPPDATA, wurl = folder
+FN copy_one_log
+    mov r12, rdx
+    mov r9, rcx
+    lea rcx, [wpath3]
+    lea rdx, [fmt_cat]
+    lea r8, [wpath1]
+    call wsprintfW
+    lea rcx, [wpath2]
+    lea rdx, [fmt_slash]
+    lea r8, [wurl]
+    mov r9, r12
+    call wsprintfW
+    lea rcx, [wpath3]
+    lea rdx, [wpath2]
+    xor r8d, r8d
+    call CopyFileW
+    test eax, eax
+    jz .d
+    inc dword [copied]
+.d:
+END_FN
+
+; Collect Logs: copies the mod and launcher logs into Documents\MistriMulti Backups\Logs-<time> and opens that folder
+FN do_logs
+    lea rcx, [env_local]
+    lea rdx, [wpath1]
+    mov r8d, 520
+    call GetEnvironmentVariableW
+    test eax, eax
+    jz .nologs
+    call get_docs_dir
+    test eax, eax
+    jz .nodocs
+    lea rcx, [wpath3]
+    lea rdx, [fmt_cat]
+    lea r8, [wpath2]
+    lea r9, [suffix_backups]
+    call wsprintfW
+    lea rcx, [wpath3]
+    xor edx, edx
+    call CreateDirectoryW
+    lea rcx, [st]
+    call GetLocalTime
+    lea rcx, [wpath2]
+    lea rdx, [fmt_logstamp]
+    movzx r8d, word [st]
+    movzx r9d, word [st+2]
+    movzx eax, word [st+6]
+    mov [rsp+32], rax
+    movzx eax, word [st+8]
+    mov [rsp+40], rax
+    movzx eax, word [st+10]
+    mov [rsp+48], rax
+    movzx eax, word [st+12]
+    mov [rsp+56], rax
+    call wsprintfW
+    lea rcx, [wurl]
+    lea rdx, [fmt_cat]
+    lea r8, [wpath3]
+    lea r9, [wpath2]
+    call wsprintfW
+    lea rcx, [wurl]
+    xor edx, edx
+    call CreateDirectoryW
+    mov dword [copied], 0
+    lea rcx, [lg_game]
+    lea rdx, [lgn_game]
+    call copy_one_log
+    lea rcx, [lg_mp]
+    lea rdx, [lgn_mp]
+    call copy_one_log
+    lea rcx, [lg_launcher]
+    lea rdx, [lgn_launcher]
+    call copy_one_log
+    lea rcx, [lg_launcher_mp]
+    lea rdx, [lgn_launcher_mp]
+    call copy_one_log
+    cmp dword [copied], 0
+    je .nologs
+    lea rcx, [done_msg]
+    lea rdx, [fmt_logs]
+    mov r8d, [copied]
+    lea r9, [wurl]
+    call wsprintfW
+    lea rcx, [done_msg]
+    call set_state
+    cmp dword [argc], 8            ; the hidden test mode does not open Explorer
+    jae .d
+    xor ecx, ecx
+    lea rdx, [mo_verb]
+    lea r8, [wurl]
+    xor r9d, r9d
+    mov qword [rsp+32], 0
+    mov qword [rsp+40], 1
+    call ShellExecuteW
+    jmp .d
+.nologs:
+    lea rcx, [msg_nologs]
+    call set_state
+    jmp .d
+.nodocs:
+    lea rcx, [msg_nodocs]
+    call set_state
+.d:
+END_FN
+
 FN wndproc
     ; rcx=hwnd rdx=msg r8=wParam r9=lParam
     cmp edx, 2                 ; WM_DESTROY
@@ -1435,6 +1566,12 @@ FN wndproc
     je .do_steam
     cmp eax, 8
     je .do_momi
+    cmp eax, 9
+    je .do_logs
+    xor eax, eax
+    jmp .done
+.do_logs:
+    call do_logs
     xor eax, eax
     jmp .done
 .do_momi:
@@ -1744,6 +1881,15 @@ start:
     mov r14d, 30
     mov r15d, 8
     call make_child
+    lea rcx, [cls_button]
+    lea rdx, [txt_logs]
+    mov r8d, 0x50010000
+    mov r9d, 176
+    mov r12d, 284
+    mov r13d, 150
+    mov r14d, 30
+    mov r15d, 9
+    call make_child
     ; test hook:  --fetch <ip> <destination folder> <result file> [<bridge folder> <slot>]   (downloads the host's world, writes the result code)
     cmp dword [argc], 5
     jb .nofetch
@@ -1877,6 +2023,8 @@ start:
     je .st_m
     cmp ax, 'a'
     je .st_a
+    cmp ax, 'l'
+    je .st_l
     jmp .st_next
 .st_c:
     call do_check
@@ -1887,6 +2035,9 @@ start:
 .st_a:
     mov dword [momi_quiet], 1
     call do_oneclick
+    jmp .st_next
+.st_l:
+    call do_logs
     jmp .st_next
 .st_s:
     call do_save

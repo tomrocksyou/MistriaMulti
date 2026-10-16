@@ -97,10 +97,12 @@ appears. The check never delays the game and stays silent when you are offline.
 - "That player slot is already in use": press **Try again**.
 - You pressed Cancel in a Host or Join screen: just press **New Game** again.
 - The character editor did not appear after joining: send the log (below); it says why.
-- Logs for bug reports (they are rewritten each time the game starts, so copy them before restarting):
-  - Windows: `%LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti\logs\mistrimulti.log` and, from a multiplayer world,
-    `%LOCALAPPDATA%\FieldsOfMistria\multiplayer\mod_data\mistrimulti\logs\mistrimulti.log`
-  - Linux: the same paths under `~/.local/share/FieldsOfMistria/`
+- Reporting a bug: on Windows press **Collect Logs** in `MistriMulti.exe` right after the problem happens (before you restart the
+  game, the logs are rewritten at every start). It copies the logs into one folder, `Documents\MistriMulti Backups\Logs-<time>`, and
+  opens it. Send that folder with a few words on what you were doing and what you expected.
+  On Linux, or by hand, the logs are `mod_data/mistrimulti/logs/mistrimulti.log` and, from a multiplayer world,
+  `multiplayer/mod_data/mistrimulti/logs/mistrimulti.log` under `%LOCALAPPDATA%\FieldsOfMistria\` (Windows) or
+  `~/.local/share/FieldsOfMistria/` (Linux).
 
 ## What is shared
 

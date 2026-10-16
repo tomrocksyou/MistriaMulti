@@ -201,6 +201,29 @@ def test_basic_flow():
         backups = list((e.docs / "MistriMulti Backups").iterdir())
         check("save solo: backup written to Documents", "Saved 1 file" in out and len(backups) == 1
               and (backups[0] / "game-1-autosave.sav").read_bytes() == b"solo world", out)
+
+        la = local_appdata()          # Wine sets LOCALAPPDATA itself, so use the prefix's own folder
+        rels = ("mod_data/mistrimulti/logs/mistrimulti.log", "multiplayer/mod_data/mistrimulti/logs/mistrimulti.log",
+                "mod_data/mistrimulti/launcher.log")
+        for rel, data in (("mod_data/mistrimulti/logs/mistrimulti.log", b"solo log"),
+                          ("multiplayer/mod_data/mistrimulti/logs/mistrimulti.log", b"mp log"),
+                          ("mod_data/mistrimulti/launcher.log", b"launcher log")):
+            f = la / "FieldsOfMistria" / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(data)
+        out = e.run("l")
+        folders = [d for d in (e.docs / "MistriMulti Backups").iterdir() if d.name.startswith("Logs-")]
+        got = {f.name: f.read_bytes() for f in folders[0].iterdir()} if len(folders) == 1 else {}
+        check("collect logs: logs copied to one folder in Documents", "Copied 3 log file" in out and got == {
+            "mistrimulti.log": b"solo log", "multiplayer-mistrimulti.log": b"mp log", "launcher.log": b"launcher log"}, f"{out} {got}")
+        for d in folders:
+            for f in d.iterdir():
+                f.unlink()
+            d.rmdir()
+        for rel in rels:
+            (la / "FieldsOfMistria" / rel).unlink()
+        out = e.run("l")
+        check("collect logs: says so when there are none", "No MistriMulti logs" in out, out)
     finally:
         e.close()
 
