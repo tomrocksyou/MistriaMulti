@@ -46,8 +46,27 @@ Press **F8** in the game to see the connection status.
 
 ## Update
 
-Download the new zip (or tar.gz), unpack it **in the same place** so it replaces the old `MistriaMulti` folder's files, close the game, run `Install-Mod.bat` (Linux:
-`./install.sh`), then MOMI > **Install** again. Every player must update.
+Every player must have the same version.
+
+**Windows:** close the game, open `MistriMulti.exe` and press **Update MistriMulti**. It downloads the newest release from
+GitHub, checks every file against its checksum and replaces the mod files and the programs (all or nothing: if anything fails,
+nothing is changed and the window says why). Then the mod has to be installed into the game once more:
+
+- Press **Open MOMI** once and choose your MOMI program (it is remembered). After the next update the window opens MOMI for you:
+  select **MistriaMulti** and click **Install**.
+- Optional, saves the last click: in that file dialog choose MOMI's **command-line** program instead (its name contains `-cli`,
+  from the same MOMI download page). After an update the manager then asks "Run MOMI's installer for you?"; Yes runs it, No
+  opens MOMI. It installs every mod in your mods folder. It asks every time, and if MOMI's installer reports a problem you are
+  told to press Install in MOMI.
+
+**Linux / Steam Deck:** close the game, then in a terminal run `~/.local/share/mistrimulti/mistrimulti-update.sh --update` (or
+`mistrimulti-manager update`, or `./install.sh --update` in the unpacked folder). It does the same: downloads, verifies, updates
+the programs in `~/.local/share/mistrimulti` and the mod files in the game's `mods` folder, and tells you to press Install in
+MOMI. To let it run MOMI for you, download MOMI's command-line program (`ModsOfMistriaInstaller-cli-linux`), `chmod +x` it and
+run `./install.sh --momi-cli /path/to/it` once; `--update` then asks before it runs it.
+
+No network, or no release yet: you are told and nothing is changed. The old way (download the new zip or tar.gz, unpack it over
+the old folder, run `Install-Mod.bat` / `./install.sh`, then MOMI > **Install**) still works.
 
 ## If something goes wrong
 
