@@ -1,8 +1,8 @@
 # Update button and release check (title screen)
 
-Status: written against the game's scripts and tested against stand-ins (a fake update program, a fake release server) with the
-real Linux launcher. The Windows launcher is built and reviewed but **its update code has not been run** (no Wine in the
-development container). **Not yet run in the real game.** See "Unverified assumptions" and the "In-game checklist" below.
+Status: written against the game's scripts and tested against stand-ins (a fake update program, a fake release server, a fake
+`curl.exe`) with the real Linux launcher and, under Wine, the real Windows launcher. **Not yet run in the real game, and not with the real
+update program** (it is built by the EasyUpdate package; the contract is below). See "Unverified assumptions" and the "In-game checklist" below.
 
 ## What the player sees
 
@@ -121,10 +121,10 @@ Once a day at most the launcher asks for `latest.txt` of the latest release (the
 | Command | What it covers |
 | --- | --- |
 | `python3 tests/test_updateui.py` | versions (parse / compare / equal to the manifest), hostile or missing status fields, label and button states, click -> one command, every state's words, the 10 s give-up, stale results, click guards, title-only visibility, rebuilds, fallback, `nine_slice` failure, hostile status files, the in-world note, layout |
-| `python3 tests/mutate_updateui.py` | breaks the GML in 12 places and requires a failing test for each |
+| `python3 tests/mutate_updateui.py` | breaks the GML in 16 places and requires a failing test for each |
 | `tests/test_launcher_linux.py` (`test_update_*`, `test_release_check_*`) | the real Linux launcher with a stand-in update program and a fake release server (run in `unshare -n`): run states and their words, failures, silent and crashing programs, hostile result files, one at a time, cancel, no cancel while installing, busy while hosting, timeout, missing program, command fuzz; the daily check: newer / equal / older, remembered for a day, retry rules, opt-out, slow / dead / hostile / oversized servers, no curl, missing manifest, **the game starts at once** |
-| `tests/test_launcher.py` (`test_update_*`, Wine) | the same cases for the Windows launcher with `build/fakeupdate.exe` and a `curl.exe` stand-in. **Written but not run** (no Wine in the development container) |
-| `python3 tests/mutate_updatelauncher.py` | breaks the shared launcher logic (`common/updatecore.inc`) and the Linux platform code in 10 places and requires the Linux tests to fail |
+| `tests/test_launcher.py` (`test_update_*`, `test_release_check_*`, Wine) | the same for the Windows launcher with `build/fakeupdate.exe` (`tests/fakegame/fakeupdate.asm`: writes the result text of `fakeupdate.cfg`, sleeps, exits) and `build/fakecurl.exe` (`fakecurl.asm`, put in the prefix's System32 as `curl.exe`: writes `version 0.4.7` to the `-o` file and records its command line): run states, failures, cancel, timeout, busy, missing program, the remembered answer, opt-out, missing manifest, the exact curl arguments, the URL override |
+| `python3 tests/mutate_updatelauncher.py` | breaks the shared launcher logic (`common/updatecore.inc`) and the Linux platform code in 12 places and requires the Linux tests to fail |
 
 ## Unverified assumptions (the real game was not available)
 
@@ -139,7 +139,8 @@ Once a day at most the launcher asks for `latest.txt` of the latest release (the
 5. The update program's result keys are `state`, `version`, `message`, `error` (`code` also accepted); the Linux program is
    `mistrimulti-manager update --result <file>`, the Windows one `MistriMulti.exe --update <file>` (as agreed with A).
 6. `curl` exists: `curl` on `PATH` (Linux), `%SystemRoot%\System32\curl.exe` (Windows 10 1803+). Missing means no check, silently.
-7. On Windows, `CreateProcessW` of a console program with `CREATE_NO_WINDOW` shows no window; `GetExitCodeProcess` after the wait.
+7. On a real Windows, `CreateProcessW` of a console program with `CREATE_NO_WINDOW` shows no window (under Wine nothing could be seen); the real
+   `curl.exe` accepts the arguments the stand-in recorded and follows the GitHub redirect with `--proto-redir =https` (only Linux curl was tried, against a loopback server).
 8. Under Proton the game command names a Windows path or the exe under the game folder: the installed version is read from
    the directory of the program named on the command line (`.../Fields of Mistria/FieldsOfMistria.exe`).
 

@@ -23,6 +23,7 @@ WINE = "/usr/lib/wine/wine64"
 launcher, helper, fake = (Path(a).resolve() for a in sys.argv[1:4])
 updater_exe = Path(sys.argv[4]).resolve() if len(sys.argv) > 4 else None
 fake_update = Path(sys.argv[5]).resolve() if len(sys.argv) > 5 else None     # build/fakeupdate.exe (the update tests)
+fake_curl = Path(sys.argv[6]).resolve() if len(sys.argv) > 6 else None       # build/fakecurl.exe (put in the prefix's System32 as curl.exe)
 
 
 def wpath(p):
@@ -1049,6 +1050,7 @@ def test_update_cancel_timeout_busy_missing():
         menu_cmd(sb, cmd="update")
         upd_wait(sb, "downloading")
         assert menu_status(sb)["ur"] == 2
+        menu_wait(sb, menu_cmd(sb, cmd="update_cancel"), ("idle",))      # (the program is not tied to the launcher: stop it so Wine can end)
         finish(proc)
     finally:
         sb.cleanup()
@@ -1121,21 +1123,70 @@ def test_release_check_cache():
         t0 = time.monotonic()
         proc = sb.steam(["--slow"])
         assert wait_for(lambda: sb.ran() is not None, 10) and time.monotonic() - t0 < 10
-        assert wait_for(lambda: "ok=0" in (sb.mod / "update_check.txt").read_text(), 30), (sb.mod / "update_check.txt").read_text()
-        assert menu_status(sb)["update"] == "none"
+        time.sleep(3)                                              # (no curl.exe in a Wine prefix: no request is made, the old stamp stays)
+        assert menu_status(sb)["update"] == "none" and "checked=" in (sb.mod / "update_check.txt").read_text()
         finish(proc)
     finally:
         sb.cleanup()
-    print("release check (Windows): remembered answer published, opt-out and missing manifest respected, a failed try is silent and remembered")
+    print("release check (Windows): remembered answer published, opt-out and missing manifest respected, a missing curl.exe is silent and the game is not delayed")
+
+
+
+def test_release_check_with_curl():
+    """The launcher runs %SystemRoot%\\System32\\curl.exe (here build/fakecurl.exe, which writes "version 0.4.7" to the -o file and its own command line to <file>.args)."""
+    sys32 = Path(os.environ.get("WINEPREFIX", "/tmp/wp")) / "drive_c" / "windows" / "system32"
+    curl = sys32 / "curl.exe"
+    shutil.copy(fake_curl, curl)
+    try:
+        now = int(time.time())
+        sb = Sandbox()
+        try:
+            write_manifest(sb)
+            (sb.mod / "update_check.txt").write_text(f"checked={now - 200000}\nok=1\nlatest=0.4.6\n")
+            proc = start_menu_game(sb)
+            assert wait_for(lambda: menu_status(sb)["update"] == "0.4.7", 40), menu_status(sb)
+            args = (sb.mod / "menu" / "latest.dl.args").read_bytes().decode("utf-16-le")
+            for part in ("curl.exe", "-fsSL", "--max-time 5", "--connect-timeout 3", "--max-filesize 65536", "--proto =https", "--proto-redir =https",
+                         'latest.dl"', "https://github.com/tomrocksyou/MistriaMulti/releases/latest/download/latest.txt"):
+                assert part in args, (part, args)
+            stamp = dict(l.split("=", 1) for l in (sb.mod / "update_check.txt").read_text().splitlines() if "=" in l)
+            assert stamp["ok"] == "1" and stamp["latest"] == "0.4.7" and abs(int(stamp["checked"]) - time.time()) < 120, stamp
+            assert not (sb.mod / "menu" / "latest.dl").exists(), "the downloaded list must be removed"
+            finish(proc)
+            # within a day: no second request
+            (sb.mod / "menu" / "latest.dl.args").unlink()
+            proc = start_menu_game(sb)
+            assert wait_for(lambda: menu_status(sb)["update"] == "0.4.7", 40)
+            time.sleep(2)
+            assert not (sb.mod / "menu" / "latest.dl.args").exists(), "asked twice within a day"
+            finish(proc)
+        finally:
+            sb.cleanup()
+        # the URL override of the tests drops the https-only rule; a quote in it is ignored (it would break the command line)
+        for url, expect in (("http://127.0.0.1:9/latest.txt", "http://127.0.0.1:9/latest.txt"), ('http://x/"y', "https://github.com/")):
+            sb = Sandbox()
+            try:
+                write_manifest(sb)
+                proc = start_menu_game(sb, env=dict(sb.env(), MISTRIMULTI_RELEASE_URL=url))
+                assert wait_for(lambda: (sb.mod / "menu" / "latest.dl.args").exists(), 40)
+                args = (sb.mod / "menu" / "latest.dl.args").read_bytes().decode("utf-16-le")
+                assert expect in args and (("--proto" not in args) == (url.startswith("http://127"))), args
+                finish(proc)
+            finally:
+                sb.cleanup()
+    finally:
+        curl.unlink(missing_ok=True)
+    print("release check (Windows): curl.exe from System32 with the quiet, bounded arguments; the answer is published and remembered for a day; the override is honoured")
 
 
 ALL = [test_host, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune, test_configure, test_fuzz,
        test_discovery_responder, test_scan, test_world_server, test_world_info, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password,
        test_menu_standby, test_menu_host_and_stop, test_menu_scan_and_addresses, test_menu_join, test_menu_join_world_info, test_menu_world_note_lifetime, test_menu_command_validation,
        test_menu_helper_missing, test_menu_overrides_launcher_cfg,
-       test_update_run, test_update_failures_and_momi, test_update_cancel_timeout_busy_missing, test_release_check_cache]
+       test_update_run, test_update_failures_and_momi, test_update_cancel_timeout_busy_missing, test_release_check_cache,
+       test_release_check_with_curl]
 only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_password runs just those
 for fn in ALL:
-    if (not only or fn.__name__ in only) and (fake_update is not None or not fn.__name__.startswith(("test_update", "test_release"))):
+    if (not only or fn.__name__ in only) and (fake_update is not None or not fn.__name__.startswith(("test_update", "test_release"))) and (fake_curl is not None or fn.__name__ != "test_release_check_with_curl"):
         fn()
 print("PASS")

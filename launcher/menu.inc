@@ -1486,8 +1486,8 @@ FN plat_up_kill
 END_FN
 
 FN plat_up_read
-    lea rcx, [p1]
-    lea rdx, [up_wres]
+    lea rcx, [up_wres]
+    lea rdx, [p1]
     call wcopy
     call plat_load
 END_FN
@@ -1576,8 +1576,8 @@ FN plat_chk_kill
 END_FN
 
 FN plat_chk_read
-    lea rcx, [p1]
-    lea rdx, [ck_wout]
+    lea rcx, [ck_wout]
+    lea rdx, [p1]
     call wcopy
     call plat_load
 END_FN

@@ -16,3 +16,7 @@ nasm -f win64 ../tests/fakegame/fakeupdate.asm -o fakeupdate.obj
 lld-link /nologo /machine:x64 /subsystem:console /entry:start /nodefaultlib /out:fakeupdate.exe fakeupdate.obj \
     /libpath:winlibs kernel32.lib shell32.lib
 echo "Test update program built: build/fakeupdate.exe"
+nasm -f win64 ../tests/fakegame/fakecurl.asm -o fakecurl.obj
+lld-link /nologo /machine:x64 /subsystem:console /entry:start /nodefaultlib /out:fakecurl.exe fakecurl.obj \
+    /libpath:winlibs kernel32.lib
+echo "Test curl built: build/fakecurl.exe"
