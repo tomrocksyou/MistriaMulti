@@ -19,6 +19,8 @@ mod_data/mistrimulti/worlds/<world-key>/
     members.json                              identities that have records
     players/<player-identity>.json            core record (+ .bak)
     players/<player-identity>.progress.json   progress record (+ .bak)
+    players/<player-identity>.h1.json .. .h5.json   earlier characters of this identity in this world (the history)
+    players/<player-identity>.swap.json       the current character, parked for the length of a swap
     commits/<save name>.json                  records committed with a host save (+ .bak)
     commits/discarded.json                    records replaced by the last rollback
 ```
@@ -61,7 +63,7 @@ runtime for the session; the guest sends it as `intent` in `profile_request`, `"
 | Entry | The host has no record of this identity in this world | The host has a record |
 | --- | --- | --- |
 | **Load Game > Multiplayer** (the downloaded worlds) | the character editor, as a new player | the record is restored, **no editor** |
-| **New Game > Multiplayer > Join a game** | the character editor | the game asks: **Keep mine** (restore, no editor) or **New character** (the editor) |
+| **New Game > Multiplayer > Join a game** | the character editor | the game asks: **Keep mine** (restore, no editor; with earlier characters in this world a second question lists them, see below) or **New character** (the editor) |
 
 The editor of a new character starts from the game's defaults (the default look, the name "Guest", the default pronouns and
 birthday), never from the host's character that the guest's game loaded and never from an earlier character of this install.
@@ -71,13 +73,74 @@ editor, as a convenience copy of the last character this install made; **nothing
 legacy `character.json` stay on disk untouched; they cannot override a world. (They used to be applied to every world.)
 
 Answering **New character** does not delete anything. The host's old records stay in place while the guest is in the editor (a crash
-there loses nothing and the next join finds the old character); on the answer the host copies them to
-`players/<identity>.replaced.json` and `players/<identity>.progress.replaced.json`, hands the guest a fresh start (core and
-progress, nothing of the old progress is merged in) and the new character's first upload replaces the primary files, after
-which the old ones are also the `.bak`. A second replacement overwrites the `.replaced.json` copies. Wire protocol: after
-`profile_request` with `intent: "new"` and an existing record, the host answers `profile_exists` instead of the record, the
-guest asks, then sends `profile_choice {world, uid, keep}` (1 or 0) and the host answers with the record or `profile_start`.
-The host acts only on a choice for a question it asked this session (same slot, epoch and identity); anything else is ignored.
+there loses nothing and the next join finds the old character); on the answer the host keeps a copy of them as a **generation of the
+history** (next section), hands the guest a fresh start (core and progress, nothing of the old progress is merged in) and the new
+character's first upload replaces the primary files, after which the old ones are also the `.bak`. Wire protocol: after
+`profile_request` with `intent: "new"` and an existing record, the host answers `profile_exists {chars}` instead of the record, the
+guest asks, then sends `profile_choice {world, uid, keep, gen}` (`keep` 1 = the current character, 2 = the earlier character `gen`,
+0 = a new one) and the host answers with the record or `profile_start`. The host acts only on a choice for a question it asked this
+session (same slot, epoch and identity); anything else is ignored.
+
+### Choosing between your characters (history)
+
+Only **a player's own** characters in **that world** are ever listed: the history is keyed by the identity and the world key, so
+neither the host's character nor another player's can appear. Code: `MistriMultiCharPicker.gml`.
+
+- **Keeping.** Every character that "New character" replaces is parked in `players/<identity>.h<N>.json` (`N` = 1..5), one file per
+  generation, written as a temporary file and renamed. A file holds `{v, seq, core, progress}`: the complete core and progress
+  records as they were stored (the same envelopes as `<identity>.json` and `.progress.json`) and a counter `seq` (higher = more
+  recent). Five generations are kept; a sixth reuses the slot of the oldest, so nothing has to be deleted. The name, day and gold
+  that the question shows are read from the record, so there is no separate index to get out of step; a slot file that fails the
+  records' own validation is not offered and not loaded. Two copies of the same character (the guest left the editor unfinished and
+  chose "New character" again, or a swap failed halfway) have the same signature (revisions, day, name) and are stored and offered
+  once.
+- **The question.** `profile_exists` carries `chars`: the current character first (`id` 0), then the earlier ones newest first
+  (`id` = slot), each `{id, name, day, gold}` (about 100 bytes each, far below the 8 KiB event limit). After **Keep mine**, a guest
+  whose list has more than one entry gets a second popup (`MultipleChoicePopup`, "Your characters here") with one row per
+  character, e.g. `Cy (now), Spring 21, Y2, 300g`, and **New character** last: at most 1 + 5 + 1 = 7 rows, the same number as the
+  join menu's list of hosts (4 hosts + 3) in the same popup type, which is the limit assumed to fit. A guest with one character is
+  not asked twice. Closing the popup without choosing asks again.
+- **The swap.** Choosing an earlier character sends `keep: 2, gen: N`. The host (`mistrimulti_history_swap`) reads and validates the
+  slot, copies the current records to `<identity>.swap.json`, applies the one-partner rule to the chosen record, stores it as the
+  current core and progress record (the usual `.bak` + temporary file + rename, with the chosen record's revision, so the guest's
+  next upload continues it) and writes the former current character into the chosen slot. A failure at any step leaves every
+  character in some file (the current files, the `.bak`, a slot, `swap.json`); a failure on the last step tries another slot. The
+  host then sends the record (`profile_record`) as for "Keep mine"; the swap runs once per question even if the answer has to be
+  sent again. If the host cannot load the character it sends `profile_error` and the guest is asked again from the start. The guest
+  checks what the host sends (at most six rows; a name, a number for the day, a number for gold).
+- **Upgrading from 0.4.5**, which kept one replaced character as `<identity>.replaced.json` and `.progress.replaced.json`: the
+  first list or "New character" imports it into the history and renames the two files to `*.imported` (nothing is deleted).
+- **Not in the question:** level, a picture of the character, the last time it was played. Level was left out to keep the row short.
+  A picture would need `ANCHOR.create_ari_node(parent, preset, x, y, scale, clipping_canvas)` (the function the Load Game screen
+  uses) inside the popup, which cannot be placed and clipped without running the game. The day and gold identify a character well
+  enough.
+
+#### Why not the Load Game row?
+
+The owner suggested reusing the Load Game screen's row (portrait, name, farm name, play time, season and day, gold). In the game's
+scripts (`scripts/UI/Anchor/Menus/LoadMenu.gml`) that row is built inline in the menu's `refresh` function from the entries of
+`Setup.load_menu_data` (a save header: `preset`, `name`, `farm_name`, `playtime`, `calendar_time`, `clock_time`, `stats`, `weather`,
+`path`). There is no function that makes a row, the tap handler is the menu's own ("Load game / Delete" for a save file), and the
+game's `Anchor` creates that menu only for `Menu.Load`. Reusing it would mean copying the game's code or changing a menu class whose
+callbacks cannot be replaced, so the picker is a popup list.
+
+### The Load Game list shows the guest's own character
+
+The Load Game list of Multiplayer worlds is built from the downloaded save's header, which holds **the host's** character (name,
+look). `mistrimulti_savespace_rebuild_menu` (MistriMultiSaveSpace.gml) now calls `mistrimulti_charcache_apply` for each entry when the
+space is the multiplayer one and the session mode is `join`: the header's `name` becomes the guest's own name and `preset` the guest's
+own look; the rest (farm name, play time, season and day, gold) stays the save's. The host's list and the solo list are untouched.
+
+- `mod_data/mistrimulti/characters/<world-key>.json`: `{v, world, game, name, look, used}`, written by the guest after the editor, after
+  a restore (Load Game, Keep mine, a swap) and whenever name or look change (checked with each checkpoint, written only when they
+  differ). `used` is `date_current_datetime()`.
+- `mod_data/mistrimulti/characters/worlds.json`: `{v, worlds: {"<game number>": "<world-key>"}}`. A list entry knows the game's world
+  number (`game_ident` in the save manager's manifest, the number in the save's file name, the value of `Game.unique_identifier`),
+  but not the host's identity, the other half of the world key; this map joins them.
+- It never throws (a failure inside the rebuild would make the list mark the save invalid and remove it): the name is set first and
+  alone, then the look is built inside its own `try`. A look the game cannot build keeps the host's portrait with the guest's name; a
+  missing, damaged or foreign file leaves the entry as the game made it. Before the guest has ever played the world nothing is
+  cached and the list shows the host's character, as before.
 
 Other per-player host state (the shared wallet and renown mirror, the one-partner-per-villager claims) is not rebuilt at the moment
 of the answer; it follows the new records as they upload. A replaced player's old romance claims therefore stay registered
@@ -153,11 +216,31 @@ Unverified in the real game: everything below. Use a Windows guest and a host, a
 6. If the editor is invisible: the log says `still not visible after 3 seconds (alpha=...)` and the editor appears; send that line.
 7. No flicker of the host's character while loading (the log no longer repeats `trace ghost: create ... hide ... cleanup`).
 
+### In-game checklist (choosing between your characters, the Load Game list)
+
+Unverified in the real game. A host and a Windows guest; read the guest's log (`Character editor:` lines) and the host's `players/` folder.
+
+1. Guest with one character in the world: New Game > Join > Keep mine: no second question, the character as it was.
+2. Make two more characters (Join > New character > Continue, twice). Join once more > Keep mine: a popup "Your characters here" with
+   the current character first (marked "(now)"), the two earlier ones newest first, **New character** last. Check that the rows fit
+   on the screen, the text is not cut off and the buttons can be tapped (7 rows is the most it is built for).
+3. Pick an earlier character: no editor; the guest has that name, look, inventory, gold and progress (recipes, mail). On the host
+   `players/<id>.json` is that character and the one that was current is in `.h<N>.json`. Join again: the list shows the new order.
+4. Make seven characters in total: the host has five `.h<N>.json` and the first one made is no longer listed.
+5. Join > New character and quit the game inside the editor, twice: the list still shows each character once.
+6. Close the second popup without choosing (escape/back): it comes back after a second.
+7. Load Game > Multiplayer (as the guest) after having played a world: the world's row shows the guest's name and look, not the
+   host's ("Ari", default clothes); farm name, play time, date and gold are the save's. Delete `mod_data/mistrimulti/characters/`:
+   the row shows the host's character again. The host's Load Game list is unchanged.
+8. In the world the guest still has its own character (the list is only a label).
+
 ## Source
 
 `MistriMultiPlayerData.gml` captures, validates, restores and writes engine data.
 `MistriMultiProgress.gml` does the same for the progress record, commits and restores records with the host's save
 and keeps the claim registry of the one-partner rule.
+`MistriMultiCharPicker.gml` keeps the history of a player's replaced characters on the host, swaps one back, builds the guest's
+question and keeps the guest's per-world cache for the Load Game list.
 `MistriMultiPlayerSync.gml` handles the world handshake, record transfer and save
 confirmation. `MistriMultiEvents.gml` orders, acknowledges and reassembles the
 transfers; the assembly networking helper handles transport, fragmentation,

@@ -50,7 +50,7 @@ NPCS_LEN = 4
 
 
 class FeatureNode(GmlNode):
-    extra_files = ("MistriMultiBuildings.gml", "MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml", "MistriMultiProgress.gml", "MistriMultiHearts.gml")
+    extra_files = ("MistriMultiBuildings.gml", "MistriMultiTerrain.gml", "MistriMultiPlayerSync.gml", "MistriMultiIdentity.gml", "MistriMultiProgress.gml", "MistriMultiHearts.gml", "MistriMultiCharPicker.gml")
 
     def builtins(self):
         self.grid = Grid()

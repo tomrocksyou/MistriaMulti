@@ -120,14 +120,16 @@ that fails to restore. The in-game checklist (what these tests cannot show) is i
 ```sh
 python3 tests/test_guestsave.py        # about 35 s
 python3 tests/mutate_guestsave.py      # breaks the GML 27 ways, about 1 minute
-python3 tests/test_guestchar.py        # a guest's character per world and the editor flow, about 10 s
-python3 tests/mutate_guestchar.py      # breaks that code 22 ways
+python3 tests/test_guestchar.py        # a guest's characters per world, the editor flow, the picker and the Load Game list, about 50 s
+python3 tests/mutate_guestchar.py      # breaks that code 43 ways (about 15 minutes)
 ```
 
 `test_guestchar.py` runs the real `MistriMultiCharacter.gml` (with the player-sync and progress files) against a faked character
 editor, popups and menu list: a world that is new to the guest, Load Game into a world with a character, New Game into a world
 with a character (the question, both answers, the backup copies), an editor that is closed, invisible or fails, forged answers,
-the entry path and the ghost fix. `docs/PLAYER-DATA.md` has the in-game checklist.
+the entry path and the ghost fix; and, with `MistriMultiCharPicker.gml`, the history of replaced characters (five generations, rotation,
+swap, a disk that fails at each step, forged choices, the 0.4.5 import), the list popup and the Load Game list built from the
+guest's cache. `docs/PLAYER-DATA.md` has the in-game checklists.
 
 Runs the real `MistriMultiGuestSave.gml` with the player-sync, progress and identity files (the harness of `tests/test_progress.py`):
 the save veto, flush on a save attempt and on the Settings tab, the goodbye frame, rejoining through another slot, a host that

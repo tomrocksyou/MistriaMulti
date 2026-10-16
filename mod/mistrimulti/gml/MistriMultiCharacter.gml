@@ -155,13 +155,13 @@ function mistrimulti_character_watch(r) {
 function mistrimulti_character_send_choice(r) {
     var ask = r.character_ask;
     if (ask == undefined || ask.choice < 0 || ask.sent || !mistrimulti_event_can_emit(1)) return;
-    ask.sent = mistrimulti_event_emit("profile_choice", { world: r.world_key, uid: r.uid, keep: ask.choice }, 0);
+    ask.sent = mistrimulti_event_emit("profile_choice", { world: r.world_key, uid: r.uid, keep: ask.choice, gen: ask.gen }, 0);
 }
 
 function mistrimulti_character_ask(r) {
     var ask = r.character_ask;
     if (ask == undefined) {
-        ask = { epoch: r.epoch, popup: undefined, choice: -1, sent: false, gone: 0 };
+        ask = { epoch: r.epoch, popup: undefined, choice: -1, sent: false, gone: 0, stage: "first", gen: 0 };
         r.character_ask = ask;
     }
     if (ask.popup != undefined) {
@@ -172,15 +172,18 @@ function mistrimulti_character_ask(r) {
         ask.popup = undefined;
     }
     if (mistrimulti_character_hold(r) != "") return;
+    // After "Keep mine" a player with earlier characters in this world chooses between them (MistriMultiCharPicker.gml).
+    if (ask.stage == "pick") { mistrimulti_charpicker_ask(r, ask); return; }
     var mcp = new MultipleChoicePopup(mistrimulti_menu_t("You have a character here"));
-    mcp.option(mistrimulti_menu_t("Keep mine"), mistrimulti_character_chosen, [1, ask.epoch]);
+    mcp.option(mistrimulti_menu_t("Keep mine"), mistrimulti_charpicker_keep, [ask.epoch]);
     mcp.option(mistrimulti_menu_t("New character"), mistrimulti_character_chosen, [0, ask.epoch]);
     ask.popup = mcp;
     ask.gone = 0;
     mistrimulti_character_log("this world already has a character of yours; asked whether to keep it or make a new one.");
 }
 
-function mistrimulti_character_chosen(keep, epoch) {
+// keep: 1 the current character, 2 an earlier one (gen = its number), 0 a new character.
+function mistrimulti_character_chosen(keep, epoch, gen = 0) {
     var r = __mistrimulti_runtime();
     var ask = r.character_ask;
     if (!is_struct(ask) || ask.epoch != epoch || epoch != r.epoch) {
@@ -188,8 +191,9 @@ function mistrimulti_character_chosen(keep, epoch) {
         return;
     }
     ask.choice = keep;
-    r.character_phase = keep == 1 ? "keep" : "edit";
-    mistrimulti_character_log(keep == 1 ? "answer: keep the existing character." : "answer: make a new character (the old one stays on the host until the new one is saved).");
+    ask.gen = gen;
+    r.character_phase = keep >= 1 ? "keep" : "edit";
+    mistrimulti_character_log(keep == 2 ? "answer: continue with earlier character " + string(gen) + "." : keep == 1 ? "answer: keep the existing character." : "answer: make a new character (the old one stays on the host until the new one is saved).");
 }
 
 // The game calls this when the guest taps Continue (after the editor has faded out).
@@ -227,6 +231,7 @@ function mistrimulti_character_complete() {
         r.look_signature = "";
         mistrimulti_update_look();
         mistrimulti_player_checkpoint();
+        mistrimulti_charcache_remember();
         mistrimulti_character_log("complete: " + string(ARI.name) + " is now in the world.");
     } catch (e) {
         mistrimulti_character_log("completing failed (" + string(e) + "); the editor opens again.");

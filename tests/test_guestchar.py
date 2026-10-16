@@ -15,6 +15,7 @@ the in-game checklist, and the "Character editor:" lines in the game's log say w
 import json
 import re
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import gml_subset as gml
@@ -39,7 +40,7 @@ function mistrimulti_player_capture() {
     for (var i = 0; i < NpcId.LEN; i++) {
         array_push(relations, { hearts: NPCS[i].heart_points, status: T2R.read(npc_id_to_string(i) + "_status") ?? "undefined" });
     }
-    return { v: 1, uid: r.uid, world: r.world_key, day: string(CALENDAR.time), gold: ARI.gold, relations: relations,
+    return { v: 1, uid: r.uid, world: r.world_key, day: string(CALENDAR.time), gold: ARI.gold, stats: { gold: ARI.gold }, relations: relations,
         character: { name: string(ARI.name), look: ARI.animation_assets().serialize() } };
 }
 
@@ -109,6 +110,7 @@ class CharNode(P.ProgressNode):
         self.open_fails = 0           # start_character_creation throws this many times
         self.build_fails = False      # build_obj_ari_par_from throws
         self.popups_open = 0
+        self.widened, self.writes, self.fail_write_at = [], 0, None
         self.presets = [Preset("host look")]
         ari = self.engine.ari
         ari.update(name="Host", pronouns=GStruct(eng="they"), birthday=111, end_of_day_status=None, preset_index_selected=0,
@@ -127,8 +129,26 @@ class CharNode(P.ProgressNode):
             "string_copy": lambda s, start, n: s[int(start) - 1:int(start) - 1 + int(n)], "PAUSE_STATUS": 0,
             "LOAD_SEQUENCE": GStruct(is_active=lambda: False), "mmapi_log_flush": lambda m: None,
             "mistrimulti_event_blobs_pending": lambda: 0,
+            "string_upper": lambda s: s.upper(), "real": float, "date_current_datetime": lambda: 45000.5,
+            "season_to_string": lambda i: ["spring", "summer", "fall", "winter"][int(i)], "get_seasons": lambda t: (int(t) // 28) % 4,
+            "get_days": lambda t: int(t) % 28, "get_years": lambda t: int(t) // 112,
+            "mistrimulti_widen_choices": lambda mcp: self.widened.append(mcp),
+            "save_text_file": self.save_counted, "file_rename": self.rename_counted,
         })
         return b
+
+    def save_counted(self, path, text):
+        """Every write goes through here so that a test can let the Nth write of the host fail (a full disk, a crash)."""
+        self.writes += 1
+        if self.fail_write_at is not None and self.writes == self.fail_write_at:
+            raise gml.GmlError("disk full at write " + str(self.writes))
+        self.fs.save(path, text)
+
+    def rename_counted(self, old, new):
+        self.writes += 1
+        if self.fail_write_at is not None and self.writes == self.fail_write_at:
+            raise gml.GmlError("rename failed at write " + str(self.writes))
+        self.fs.rename(old, new)
 
     def count_update(self):
         self.updates += 1
@@ -273,6 +293,17 @@ def host_file(host, name):
     return P.plain(host, "players/" + ALICE.replace(":", "_") + name)
 
 
+def slots(host):
+    """The history on the host: slot number -> the slot file."""
+    found = {n: host_file(host, f".h{n}.json") for n in range(1, 6)}
+    return {n: f for n, f in found.items() if f is not None}
+
+
+def names_of(host):
+    """The names of the history's characters, newest first."""
+    return [f["core"]["data"]["character"]["name"] for f in sorted(slots(host).values(), key=lambda f: -f["seq"])]
+
+
 # ---- tests --------------------------------------------------------------------------------------------------------------------
 
 def test_new_world_starts_fresh():
@@ -338,7 +369,7 @@ def test_new_game_into_a_world_with_a_character_asks():
     world.run(2000)
     assert alice.editors == [] and alice.engine.ari["name"] == "Alice the first" and alice.rt["character_pending"] is False
     assert alice.state["almanac"]["sold"]["carrot"] == 7, "Keep mine restores everything of the old character"
-    assert host_file(host, ".replaced.json") is None and host_name(host) == "Alice the first"
+    assert slots(host) == {} and host_name(host) == "Alice the first"
     assert alice.log("keep the existing") and not alice.log("opening")
     # New character: the old record stays until the new one is saved, and a copy is kept next to it.
     alice = restart(world, 1, "new")
@@ -348,16 +379,17 @@ def test_new_game_into_a_world_with_a_character_asks():
     assert alice.editor.preset["tag"] == "default" and alice.engine.ari["name"] == "Guest", "a new character starts from the defaults"
     assert alice.rt["player_ready"] is True and alice.rt["character_phase"] == "edit"
     assert host_file(host, ".json") == old_core and host_file(host, ".progress.json") == old_progress, "still the old records while the editor is open"
-    assert host_file(host, ".replaced.json") == old_core and host_file(host, ".progress.replaced.json") == old_progress
+    kept = slots(host)
+    assert list(kept) == [1] and kept[1]["core"] == old_core and kept[1]["progress"] == old_progress, "the old character is a generation of the history"
     world.run(8000)
     assert host_file(host, ".json") == old_core and alice.rt["character_pending"] is True, "waiting for the editor changes nothing"
     finish(world, alice, "Alice the third")
     assert host_name(host) == "Alice the third" and host_file(host, ".json.bak")["data"]["character"]["name"] == "Alice the first"
-    assert host_file(host, ".replaced.json") == old_core, "the replaced record is kept"
+    assert slots(host)[1]["core"] == old_core, "the replaced record is kept"
     new_progress = host_file(host, ".progress.json")
     assert new_progress["revision"] == 1 and new_progress["data"]["sections"]["almanac"]["sold"].get("carrot") != 7
     assert alice.state["almanac"]["sold"].get("carrot") != 7, "the new character has none of the old character's progress"
-    assert host_file(host, ".progress.replaced.json")["data"]["sections"]["almanac"]["sold"]["carrot"] == 7
+    assert slots(host)[1]["progress"]["data"]["sections"]["almanac"]["sold"]["carrot"] == 7
     # ... and from now on the new character is the one that comes back.
     alice = restart(world, 1, "load")
     run_until(world, lambda: alice.rt["player_ready"], 30000, "ready")
@@ -486,10 +518,419 @@ def test_forged_choices_are_ignored():
                  {"world": WORLD, "uid": P.BOB, "keep": 0}, {"world": WORLD, "uid": ALICE, "keep": "0"}, {"world": WORLD, "uid": ALICE}):
         alice.call("mistrimulti_event_emit", "profile_choice", data, 0)
     world.run(4000)
-    assert host_file(host, ".replaced.json") is None and (host_file(host, ".json"), host_file(host, ".progress.json")) == before
+    assert slots(host) == {} and (host_file(host, ".json"), host_file(host, ".progress.json")) == before
     assert host.rt["player_sessions"][1]["replaced"] is False
     no_errors(world)
     print("PASS: a choice that was not asked for, or is malformed or forged, changes nothing on the host")
+
+
+# ---- choosing between the characters of a world (MistriMultiCharPicker.gml) -----------------------------------------------------
+
+def new_character(world, name, gold, day):
+    """The guest joins through New Game, answers 'New character' and makes a character."""
+    alice = restart(world, 1, "new")
+    run_until(world, lambda: alice.question() is not None, 30000, "the question")
+    alice.question().tap("New character")
+    run_until(world, lambda: alice.editor is not None, 30000, "the editor")
+    alice.engine.ari["gold"] = gold
+    alice.engine.calendar["time"] = day
+    finish(world, alice, name)
+    return alice
+
+
+def ask_pick(world):
+    """New Game, 'Keep mine': the question that lists the characters. Returns the guest and that question."""
+    alice = restart(world, 1, "new")
+    run_until(world, lambda: alice.question() is not None, 30000, "the first question")
+    alice.question().tap("Keep mine")
+    run_until(world, lambda: alice.question() is not None and len(alice.mcps) == 2, 30000, "the list of characters")
+    return alice, alice.question()
+
+
+def three_characters(seed):
+    """A world where the guest has made 'Alice the first', then 'Bea', then 'Cy' (current)."""
+    world, host, alice = first_world(seed)
+    new_character(world, "Bea", 200, 130)
+    new_character(world, "Cy", 300, 160)
+    return world, host
+
+
+def option(q, start):
+    return next(o[0] for o in q.options if o[0].startswith(start))
+
+
+def test_history_keeps_five_generations():
+    world, host, alice = first_world(11)
+    assert slots(host) == {}
+    for n, name in enumerate(["Bea", "Cy", "Di", "Eve", "Fay", "Gus"]):
+        new_character(world, name, 100 * (n + 2), 100 + 30 * n)
+        assert host_name(host) == name
+    # Seven characters were made: the current one and the five newest earlier ones are kept; the oldest is rotated out.
+    assert names_of(host) == ["Fay", "Eve", "Di", "Cy", "Bea"], names_of(host)
+    assert sorted(slots(host)) == [1, 2, 3, 4, 5] and "Alice the first" not in names_of(host)
+    assert len({f["seq"] for f in slots(host).values()}) == 5
+    for f in slots(host).values():
+        assert f["progress"]["data"]["sections"] and f["core"]["data"]["character"]["name"]
+    # Listing does not touch the current record.
+    before = host_file(host, ".json")
+    alice, q = ask_pick(world)
+    assert host_file(host, ".json") == before
+    assert len(q.options) == 7, "current + five earlier characters + New character: the most the popup is built for"
+    no_errors(world)
+    print("PASS: the host keeps up to five earlier characters per identity and world, newest first; the sixth rotates the oldest out")
+
+
+def test_picker_lists_own_characters():
+    world, host = three_characters(12)
+    alice, q = ask_pick(world)
+    labels = [o[0] for o in q.options]
+    assert len(labels) == 4 and labels[3] == "New character", labels
+    assert labels[0] == "Cy (now), Spring 21, Y2, 300g" or labels[0].startswith("Cy (now), ") and labels[0].endswith(", 300g"), labels
+    assert labels[1].startswith("Bea, ") and labels[1].endswith(", 200g"), labels
+    assert labels[2].startswith("Alice the fi, ") and labels[2].endswith("g") and "Y1" in labels[2]
+    assert len({labels[0], labels[1], labels[2]}) == 3
+    assert all(len(label) <= 36 for label in labels), "rows stay short"
+    assert alice.widened, "the popup's buttons are widened like the other long lists"
+    assert not any("Host" in label for label in labels), "only this player's characters"
+    assert alice.rt["character_pending"] is True and alice.editors == []
+    assert alice.log("choosing between 3 characters") and alice.log("asked which of the 3")
+    q.tap("New character")
+    run_until(world, lambda: alice.editor is not None, 30000, "the editor")
+    assert alice.engine.ari["name"] == "Guest" and host_name(host) == "Cy"
+    print("PASS: after 'Keep mine' the guest is offered its own characters of this world (current first, labelled) and 'New character' last")
+
+
+def test_no_list_for_a_single_character():
+    world, host, alice = first_world(13)
+    alice = restart(world, 1, "new")
+    run_until(world, lambda: alice.question() is not None, 30000, "question")
+    alice.question().tap("Keep mine")
+    run_until(world, lambda: alice.rt["player_ready"], 30000, "restored at once")
+    assert len(alice.mcps) == 1 and alice.engine.ari["name"] == "Alice the first"
+    print("PASS: a guest with one character is not asked twice: 'Keep mine' continues with it")
+
+
+def snapshot(host):
+    """Every character the host holds anywhere under players/: name -> the files that hold it."""
+    found = {}
+    for path, text in host.fs.files.items():
+        if "/players/" not in path or text is None:
+            continue
+        try:
+            record = json.loads(text)
+        except ValueError:
+            continue
+        stack = [record]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, dict):
+                if isinstance(x.get("character"), dict) and "name" in x["character"]:
+                    found.setdefault(x["character"]["name"], set()).add(path.rsplit("/", 1)[1])
+                stack.extend(x.values())
+            elif isinstance(x, list):
+                stack.extend(x)
+    return found
+
+
+def test_pick_an_earlier_character_swaps():
+    world, host = three_characters(14)
+    # Each character has progress of its own.
+    path = "data/worlds/" + WORLD + "/players/" + ALICE.replace(":", "_") + ".progress.json"
+    record = json.loads(host.fs.files[path])
+    record["data"]["sections"]["almanac"]["sold"]["carrot"] = 5
+    host.fs.files[path] = json.dumps(record)                    # Cy's progress
+    cy_core, cy_progress = host_file(host, ".json"), host_file(host, ".progress.json")
+    first = next(f for f in slots(host).values() if f["core"]["data"]["character"]["name"] == "Alice the first")
+    alice, q = ask_pick(world)
+    q.tap(option(q, "Alice the fi"))
+    run_until(world, lambda: alice.rt["player_ready"], 30000, "the chosen character is restored")
+    world.run(3000)
+    assert alice.editors == [] and alice.engine.ari["name"] == "Alice the first" and alice.rt["character_pending"] is False
+    assert alice.log("earlier character") and not alice.log("opening")
+    assert host_name(host) == "Alice the first" and host_file(host, ".json")["data"] == first["core"]["data"]
+    assert host_file(host, ".json")["revision"] == first["core"]["revision"]
+    assert host_file(host, ".progress.json")["data"] == first["progress"]["data"]
+    assert alice.state["almanac"]["sold"].get("carrot") != 5, "the progress of the chosen character, not of the one that was current"
+    # The former current character took the chosen one's place: nothing was lost and nothing is duplicated.
+    assert sorted(names_of(host)) == ["Bea", "Cy"], names_of(host)
+    swapped = next(f for f in slots(host).values() if f["core"]["data"]["character"]["name"] == "Cy")
+    assert swapped["core"] == cy_core and swapped["progress"]["data"] == cy_progress["data"]
+    # The chosen character plays on: the next upload continues its revision.
+    alice.engine.ari["gold"] = 777
+    world.run(8000)
+    assert host_file(host, ".json")["data"]["gold"] == 777 and host_file(host, ".json")["revision"] > first["core"]["revision"]
+    # And back again.
+    alice, q = ask_pick(world)
+    assert q.options[0][0].startswith("Alice the fi (now)") and q.options[1][0].startswith("Cy") and len(q.options) == 4
+    q.tap(q.options[1][0])
+    run_until(world, lambda: alice.rt["player_ready"], 30000, "Cy is back")
+    world.run(2000)
+    assert alice.engine.ari["name"] == "Cy" and alice.state["almanac"]["sold"]["carrot"] == 5 and sorted(names_of(host)) == ["Alice the first", "Bea"]
+    assert next(f for f in slots(host).values() if f["core"]["data"]["character"]["name"] == "Alice the first")["core"]["data"]["gold"] == 777
+    no_errors(world)
+    print("PASS: choosing an earlier character makes it current (record, progress, revision) and demotes the current one into its slot; choosing back restores everything")
+
+
+def test_pick_the_current_character():
+    world, host = three_characters(23)
+    before = (host_file(host, ".json"), host_file(host, ".progress.json"), dict(slots(host)))
+    alice, q = ask_pick(world)
+    q.tap(option(q, "Cy (now)"))
+    run_until(world, lambda: alice.rt["player_ready"], 30000, "the current character is restored")
+    world.run(2000)
+    assert alice.engine.ari["name"] == "Cy" and alice.editors == [] and alice.log("keep the existing")
+    assert (host_file(host, ".json"), host_file(host, ".progress.json"), dict(slots(host))) == before, "nothing is swapped"
+    no_errors(world)
+    print("PASS: choosing the current character in the list continues with it and changes nothing on the host")
+
+
+def test_pick_keeps_everything_when_writes_fail():
+    """The host's disk fails at each single step of a swap: no character is ever lost, the guest is told and can try again."""
+    outcomes = set()
+    for step in range(1, 16):
+        world, host, alice = first_world(100 + step)
+        new_character(world, "Bea", 200, 130)
+        alice, q = ask_pick(world)
+        label = option(q, "Alice the fi")
+        host.writes, host.fail_write_at = 0, step
+        q.tap(label)
+        world.run(6000)
+        host.fail_write_at = None
+        assert {"Alice the first", "Bea"} <= set(snapshot(host)), (step, snapshot(host))
+        if alice.log("host could not load"):
+            outcomes.add("failed")
+            # The question starts again from the top; once the disk works the swap can be made.
+            run_until(world, lambda: alice.question() is not None and alice.question() is not q, 20000, "asked again")
+            alice.question().tap("Keep mine")
+            run_until(world, lambda: len(alice.mcps) >= 3 and alice.question() is not None, 30000, "the list again")
+            q2 = alice.question()
+            q2.tap(option(q2, "Alice the fi") if host_name(host) == "Bea" else q2.options[0][0])
+        else:
+            outcomes.add("swapped")
+        run_until(world, lambda: alice.rt["player_ready"], 30000, "restored")
+        world.run(1500)
+        assert alice.engine.ari["name"] == "Alice the first", (step, alice.engine.ari["name"])
+        assert host_name(host) == "Alice the first" and "Bea" in names_of(host) and set(names_of(host)) <= {"Alice the first", "Bea"}, (step, names_of(host))
+        # Whatever a failed write left behind (a second copy of the current character) is not offered twice.
+        alice, q = ask_pick(world)
+        assert [o[0][:4] for o in q.options] == ["Alic", "Bea,", "New "], (step, [o[0] for o in q.options])
+    assert outcomes == {"failed", "swapped"}, outcomes
+    print("PASS: a disk that fails at any step of a swap loses no character; the guest is told and asks again")
+
+
+def test_swap_is_not_repeated_when_the_answer_is_retried():
+    world, host = three_characters(15)
+    alice, q = ask_pick(world)
+    original = host.interp.functions["mistrimulti_player_send"]
+    state = {"fail": 1}
+
+    def flaky(*args):
+        if args and args[0] == "profile_record" and state["fail"] > 0:
+            state["fail"] -= 1
+            return False
+        return original(*args)
+    host.interp.functions["mistrimulti_player_send"] = flaky
+    q.tap(option(q, "Bea"))
+    run_until(world, lambda: alice.rt["player_ready"], 30000, "restored after a retried send")
+    world.run(2000)
+    assert state["fail"] == 0 and alice.engine.ari["name"] == "Bea" and host_name(host) == "Bea"
+    assert sorted(names_of(host)) == ["Alice the first", "Cy"], "swapped once, not back again"
+    print("PASS: a choice whose answer has to be sent again swaps once only")
+
+
+def test_forged_generation_choices():
+    world, host = three_characters(16)
+    before = (host_file(host, ".json"), host_file(host, ".progress.json"), dict(slots(host)))
+    alice, q = ask_pick(world)
+    for gen in (None, 0, 6, 1.5, "1", -1, 99):
+        data = {"world": WORLD, "uid": ALICE, "keep": 2}
+        if gen is not None:
+            data["gen"] = gen
+        alice.call("mistrimulti_event_emit", "profile_choice", data, 0)
+        world.run(1500)
+        assert (host_file(host, ".json"), host_file(host, ".progress.json"), dict(slots(host))) == before, gen
+    session = host.rt["player_sessions"][1]
+    assert session["asking"] is True and session["swapped"] is False
+    alice.call("mistrimulti_event_emit", "profile_choice", {"world": WORLD, "uid": ALICE, "keep": 3, "gen": 1}, 0)
+    world.run(1500)
+    assert (host_file(host, ".json"), dict(slots(host))) == (before[0], before[2]) and session["asking"] is True
+    # An empty slot: the host refuses and says so.
+    empty = next(n for n in range(1, 6) if n not in slots(host))
+    alice.call("mistrimulti_event_emit", "profile_choice", {"world": WORLD, "uid": ALICE, "keep": 2, "gen": empty}, 0)
+    world.run(1500)
+    assert host_file(host, ".json") == before[0] and "could not be loaded" in alice.rt["player_error"]
+    # A damaged slot file is not offered and not loaded.
+    path = "data/worlds/" + WORLD + "/players/" + ALICE.replace(":", "_") + ".h1.json"
+    host.fs.files[path] = '{"v": 1, "seq": 9, "core": {"revision": 1, "data": {"v": 1}}}'
+    alice2, q2 = ask_pick(world)
+    assert len(q2.options) == 3, [o[0] for o in q2.options]
+    print("PASS: a forged, malformed or stale character number changes nothing on the host; a damaged history file is not offered")
+
+
+def test_unfinished_new_character_is_not_listed_twice():
+    world, host, alice = first_world(17)
+    new_character(world, "Bea", 200, 130)
+    # The game closes inside the editor; the guest joins again and chooses 'New character' again, twice.
+    for _ in range(3):
+        alice = restart(world, 1, "new")
+        run_until(world, lambda: alice.question() is not None, 30000, "question")
+        alice.question().tap("New character")
+        run_until(world, lambda: alice.editor is not None, 30000, "the editor")
+    assert sorted(names_of(host)) == ["Alice the first", "Bea"] and host_name(host) == "Bea", names_of(host)
+    assert len(slots(host)) == 2, "Bea was not stored once per attempt"
+    alice = restart(world, 1, "new")
+    run_until(world, lambda: alice.question() is not None, 30000, "question")
+    alice.question().tap("Keep mine")
+    run_until(world, lambda: len(alice.mcps) == 2 and alice.question() is not None, 30000, "list")
+    assert [o[0][:4] for o in alice.question().options] == ["Bea ", "Alic", "New "], [o[0] for o in alice.question().options]
+    print("PASS: leaving the editor unfinished and choosing 'New character' again does not duplicate a character in the history or the list")
+
+
+def test_character_of_version_045_is_in_the_history():
+    world, host, alice = first_world(18)
+    new_character(world, "Bea", 200, 130)
+    # 0.4.5 kept the one replaced character as .replaced.json: move the history's only entry there.
+    slot = host_file(host, ".h1.json")
+    base = "data/worlds/" + WORLD + "/players/" + ALICE.replace(":", "_")
+    host.fs.files[base + ".replaced.json"] = json.dumps(slot["core"])
+    host.fs.files[base + ".progress.replaced.json"] = json.dumps(slot["progress"])
+    del host.fs.files[base + ".h1.json"]
+    alice, q = ask_pick(world)
+    assert [o[0][:4] for o in q.options] == ["Bea ", "Alic", "New "]
+    assert base + ".replaced.json" not in host.fs.files and base + ".replaced.json.imported" in host.fs.files
+    assert base + ".progress.replaced.json.imported" in host.fs.files
+    assert names_of(host) == ["Alice the first"]
+    print("PASS: the character that 0.4.5 kept as .replaced.json becomes a generation of the history (the old files are renamed, not deleted)")
+
+
+# ---- the Load Game list (MistriMultiSaveSpace.gml, MistriMultiCharPicker.gml) -----------------------------------------------------
+
+SAVE_SPACE = (GML_DIR / "MistriMultiSaveSpace.gml").read_text(encoding="utf-8")
+
+
+class Loader:
+    def __init__(self, header):
+        self.header, self.invalid = header, False
+        self.struct = GStruct(load_file=self.load_file, mark_invalid=self.mark_invalid)
+
+    def load_file(self, name):
+        return self.header if name == "header" else GStruct(version="0.12.0")
+
+    def mark_invalid(self):
+        self.invalid = True
+
+
+def list_node(world, mode, fail_look=False, game_ident=777):
+    """The title screen's Load Game list, built by mistrimulti_savespace_rebuild_menu with one world in it."""
+    alice = world.games[1].node
+    deserialized, pushed, removed = [], [], []
+
+    def deserialize(preset):
+        deserialized.append(preset)
+        if fail_look and "assets" in preset:            # the cached look; the save's own look builds
+            raise gml.GmlError("unknown asset")
+        return GStruct(tag="built from " + str(preset.get("tag", "cache")))
+    header = GStruct(name="Ari", farm_name="Farm", preset=GStruct(tag="host look"), playtime=1, stats=GStruct(gold=1))
+    loader = Loader(header)
+    bundle = GStruct(loader=loader.struct, game_ident=game_ident)
+    manifest = GStruct(get=lambda path: bundle, remove=lambda path: removed.append(path))
+    builtins = {"mmapi_log_info": lambda *a: None, "mmapi_log_error": lambda *a: None, "mmapi_log_flush": lambda *a: None,
+                "mistrimulti_data_dir": lambda: "data", "file_exists": alice.fs.exists, "try_read_json_file": alice.fs.read,
+                "List": lambda: GStruct(push=pushed.append), "version_is_ahead": lambda a, b: False,
+                "string_to_version": lambda s: s, "player_animation_assets_deserialize": deserialize,
+                "zero_eleven_six_hair_patch": lambda p: None, "mmapi_warn_rate_limited": lambda *a: alice.warnings.append(a[-1]),
+                "Setup": GStruct(save_manager=GStruct(get_saves_ordered=lambda: GArray(["save"]), manifest=manifest))}
+    interp = gml.Interpreter(builtins)
+    interp.load(SAVE_SPACE, "MistriMultiSaveSpace.gml")
+    interp.load((GML_DIR / "MistriMultiCharPicker.gml").read_text(encoding="utf-8"), "MistriMultiCharPicker.gml")
+    interp.load('function mistrimulti_valid_look(look) { return is_struct(look) && is_array(look[$ "assets"]); }', "stub")
+    space = interp.call("__mistrimulti_savespace")
+    space.update(active=mode is not None, mode=mode or "")
+    interp.call("mistrimulti_savespace_rebuild_menu")
+    return SimpleNamespace(header=header, pushed=pushed, loader=loader, removed=removed, deserialized=deserialized)
+
+
+def test_load_list_shows_the_guests_own_character():
+    world, host, alice = first_world(19)
+    # After the editor the guest's character of this world is remembered for the Load Game list.
+    assert json.loads(alice.fs.files["data/characters/worlds.json"]) == {"v": 1, "worlds": {"777": WORLD}}
+    cached = json.loads(alice.fs.files["data/characters/" + WORLD + ".json"])
+    assert cached["name"] == "Alice the first" and cached["world"] == WORLD and cached["game"] == "777" and cached["used"] == 45000.5
+    assert "assets" in cached["look"]
+    # The list of a guest: its own name and look. The farm name and the rest stay the game's.
+    shown = list_node(world, "join")
+    assert shown.header["name"] == "Alice the first" and shown.header["preset"]["tag"] == "built from default"
+    assert shown.header["farm_name"] == "Farm  [Multi]" and shown.pushed == [shown.header] and not shown.loader.invalid and shown.removed == []
+    # A host's list, the solo list and a world that has no remembered character are the game's.
+    for mode, ident in (("host", 777), (None, 777), ("join", 12345)):
+        other = list_node(world, mode, game_ident=ident)
+        assert other.header["name"] == "Ari" and other.header["preset"]["tag"] == "built from host look" and len(other.deserialized) == 1, (mode, ident)
+    print("PASS: the Load Game list of a guest shows its own character of the world (name and look); the host's list, the solo list and unknown worlds are the game's")
+
+
+def test_load_list_never_breaks_a_save():
+    world, host, alice = first_world(20)
+    # A look the game cannot build: the name is still right, the portrait stays, the save is not marked invalid.
+    shown = list_node(world, "join", fail_look=True)
+    assert shown.header["name"] == "Alice the first" and shown.header["preset"]["tag"] == "built from host look"
+    assert not shown.loader.invalid and shown.removed == [] and shown.pushed == [shown.header]
+    # Damaged or foreign cache files change nothing and break nothing.
+    path = "data/characters/" + WORLD + ".json"
+    for text in ("not json", '{"v": 2}', '{"v": 1, "world": "other", "name": "X"}', json.dumps({"v": 1, "world": WORLD, "name": "x" * 65}),
+                 json.dumps({"v": 1, "world": WORLD, "name": 5})):
+        alice.fs.files[path] = text
+        shown = list_node(world, "join")
+        assert shown.header["name"] == "Ari" and not shown.loader.invalid and shown.pushed == [shown.header], text
+    alice.fs.files[path] = json.dumps({"v": 1, "world": WORLD, "name": "Name only"})     # no usable look
+    shown = list_node(world, "join")
+    assert shown.header["name"] == "Name only" and shown.header["preset"]["tag"] == "built from host look" and len(shown.deserialized) == 1
+    alice.fs.files["data/characters/worlds.json"] = '{"v": 1, "worlds": {"777": 5}}'
+    assert list_node(world, "join").header["name"] == "Ari"
+    del alice.fs.files["data/characters/worlds.json"]
+    assert list_node(world, "join").header["name"] == "Ari"
+    print("PASS: the list never fails because of the cache: a look that cannot be built keeps the name, damaged or foreign files are ignored")
+
+
+def test_character_cache_follows_the_character():
+    world, host, alice = first_world(21)
+    path = "data/characters/" + WORLD + ".json"
+    # A restore (Load Game) writes it too.
+    alice = restart(world, 1, "load")
+    alice.fs.files.pop(path)
+    alice.fs.files.pop("data/characters/worlds.json")
+    run_until(world, lambda: alice.rt["player_ready"], 30000, "ready")
+    world.run(1000)
+    assert json.loads(alice.fs.files[path])["name"] == "Alice the first" and "data/characters/worlds.json" in alice.fs.files
+    # An unchanged character does not rewrite the files; a changed one does.
+    cache = alice.fs.files[path]
+    alice.fs.files[path] = cache + " "
+    world.run(12000)
+    alice.call("mistrimulti_charcache_remember")
+    assert alice.fs.files[path] == cache + " ", "unchanged: not rewritten"
+    alice.engine.ari["name"] = "Alice renamed"
+    world.run(8000)
+    assert json.loads(alice.fs.files[path])["name"] == "Alice renamed"
+    # A new character in the same world replaces it.
+    alice = new_character(world, "Bea", 200, 130)
+    assert json.loads(alice.fs.files[path])["name"] == "Bea"
+    # A guest in the editor has no character yet: nothing is written. The host never writes it.
+    fresh = make_world(22)
+    node = fresh.games[1].node
+    run_until(fresh, lambda: node.editor is not None, 30000, "editor")
+    fresh.run(2000)
+    assert "data/characters/worlds.json" not in node.fs.files and "data/characters/worlds.json" not in host.fs.files
+    print("PASS: the guest's character is remembered per world after the editor and after a restore, rewritten only when it changes, never by the host")
+
+
+def test_picker_wiring():
+    assert 'mistrimulti_savespace_mode() == "join") mistrimulti_charcache_apply(header, load_bundle[$ "game_ident"]);' in SAVE_SPACE
+    sync = (GML_DIR / "MistriMultiPlayerSync.gml").read_text(encoding="utf-8")
+    assert "mistrimulti_history_summary(data.uid, saved)" in sync and "mistrimulti_history_swap(data.uid, slot)" in sync
+    char = (GML_DIR / "MistriMultiCharacter.gml").read_text(encoding="utf-8")
+    assert "gen: ask.gen" in char and "mistrimulti_charpicker_keep" in char and "mistrimulti_charpicker_ask(r, ask)" in char
+    picker = (GML_DIR / "MistriMultiCharPicker.gml").read_text(encoding="utf-8")
+    assert not re.search(r"mmapi_(?:on|guard|filter|override)\(", picker), "no new hooks"
+    print("PASS: the picker is wired: summary and swap on the host, the list in the question, the cache in the Load Game list")
 
 
 # ---- the entry path (MistriMultiSaveSpace.gml, MistriMultiBoot.gml) ------------------------------------------------------------
@@ -563,7 +1004,13 @@ def test_wiring():
     print("PASS: wiring: events registered, character tick and debug call present, no new hooks")
 
 
-TESTS = [test_new_world_starts_fresh, test_same_world_again_has_no_editor, test_new_game_into_a_world_with_a_character_asks,
+TESTS = [test_history_keeps_five_generations, test_picker_lists_own_characters, test_no_list_for_a_single_character,
+         test_pick_an_earlier_character_swaps, test_pick_the_current_character, test_pick_keeps_everything_when_writes_fail,
+         test_swap_is_not_repeated_when_the_answer_is_retried, test_forged_generation_choices,
+         test_unfinished_new_character_is_not_listed_twice, test_character_of_version_045_is_in_the_history,
+         test_load_list_shows_the_guests_own_character, test_load_list_never_breaks_a_save, test_character_cache_follows_the_character,
+         test_picker_wiring,
+         test_new_world_starts_fresh, test_same_world_again_has_no_editor, test_new_game_into_a_world_with_a_character_asks,
          test_new_game_without_a_character_has_no_question, test_question_closed_without_answer_is_asked_again,
          test_editor_closed_without_continue_opens_again, test_invisible_editor_is_shown_and_logged,
          test_failures_are_logged_and_retried, test_record_during_editing_is_ignored, test_forged_choices_are_ignored,

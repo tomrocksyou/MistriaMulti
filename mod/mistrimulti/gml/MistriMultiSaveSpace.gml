@@ -54,6 +54,8 @@ function mistrimulti_savespace_rebuild_menu() {
                 header.load_bundle = load_bundle;
                 header.path = path;
                 header.farm_name = string(header.farm_name) + (__mistrimulti_savespace().active ? "  [Multi]" : "  [Single]");
+                // A guest sees its own character of the world in the list, not the host's that the downloaded save holds.
+                if (__mistrimulti_savespace().active && mistrimulti_savespace_mode() == "join") mistrimulti_charcache_apply(header, load_bundle[$ "game_ident"]);
                 Setup.load_menu_data.push(header);
             } catch (e) { fail = true; }
         }
