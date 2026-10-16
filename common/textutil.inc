@@ -217,3 +217,55 @@ FN wf_valid_name
     xor eax, eax
 .d:
 END_FN
+
+; rcx = ASCII save name that wf_valid_name accepted -> eax = the game id in it (the digits after "game-"), 0 when it does not fit 31 bits.
+; The id is the game's Game.unique_identifier (SaveManager reads it from this name), so it names the world a save belongs to.
+FN wf_name_id
+    lea rsi, [rcx+5]
+    xor eax, eax
+    xor ecx, ecx
+.l: movzx edx, byte [rsi+rcx]
+    sub edx, '0'
+    cmp edx, 9
+    ja .e
+    imul rax, rax, 10
+    add rax, rdx
+    cmp rax, 0x7fffffff
+    ja .no
+    inc ecx
+    cmp ecx, 12
+    jb .l
+.e: jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+; rcx = ASCII text of menu/world.txt (NUL ended) -> eax = the number after "id=" at its start (1..2147483647), else 0
+FN wf_parse_world
+    xor eax, eax
+    cmp byte [rcx], 'i'
+    jne .d
+    cmp byte [rcx+1], 'd'
+    jne .d
+    cmp byte [rcx+2], '='
+    jne .d
+    lea rsi, [rcx+3]
+    xor ecx, ecx
+.l: movzx edx, byte [rsi+rcx]
+    sub edx, '0'
+    cmp edx, 9
+    ja .e
+    imul rax, rax, 10
+    add rax, rdx
+    cmp rax, 0x7fffffff
+    ja .no
+    inc ecx
+    cmp ecx, 12
+    jb .l
+.e: test ecx, ecx
+    jnz .d
+.no:
+    xor eax, eax
+.d:
+END_FN

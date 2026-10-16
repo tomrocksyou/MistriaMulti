@@ -37,6 +37,7 @@ section .data
 n_menudir db '/menu/x',0
 n_menucmd db '/menu/cmd.txt',0
 n_menustat db '/menu/status.json',0
+n_menuworld db '/menu/world.txt',0
 k_seq db 4,'seq='
 k_cmd db 4,'cmd='
 c_scan db 'scan',0
@@ -52,6 +53,9 @@ j_m5 db ',"session":"',0
 j_m6 db '","helper":',0
 j_m7 db ',"scan":',0
 j_m8 db ',"port":',0
+j_hw db ',"hw":',0
+j_hf db ',"hf":',0
+j_dw db ',"dw":',0
 j_m9 db ',"addrs":[',0
 j_m10 db '],"hosts":[',0
 j_m11 db ']}',0
@@ -102,6 +106,14 @@ sv_t_room resb 16
 sv_tmp resb 48
 sv_ipbuf resb 20
 sv_json resb 4096
+sv_hw resd 1                           ; guest: the host's current world (game id; 0 = unknown), from its signed header
+sv_hf resd 1                           ; guest: bit 0 the host named a world, bit 1 that world is saved on the host
+sv_dw resd 1                           ; guest: the game id of the world file that was downloaded
+wh_id resd 1                           ; host: the world the mod says is being played (menu/world.txt, 0 = no file: any newest save)
+wh_found resd 1                        ; host: a save of that world exists (or, with no world.txt, any save)
+wh_buf resb 64
+wh_disc_bits resd 1
+wh_disc_at resq 1
 
 section .text
 ; ---------------- status file ----------------
@@ -145,6 +157,18 @@ FN sv_status_write
     lea rcx, [j_m8]
     call pb_str
     mov ecx, [cfg_port]
+    call pb_int
+    lea rcx, [j_hw]
+    call pb_str
+    mov ecx, [sv_hw]
+    call pb_int
+    lea rcx, [j_hf]
+    call pb_str
+    mov ecx, [sv_hf]
+    call pb_int
+    lea rcx, [j_dw]
+    call pb_str
+    mov ecx, [sv_dw]
     call pb_int
     lea rcx, [j_m9]
     call pb_str
@@ -264,7 +288,98 @@ FN sv_status_tick
 END_FN
 
 ; ---------------- start / stop of a session ----------------
+; The mod's note about the world the host plays now (menu/world.txt, written by MistriMultiMenu.gml): read by the world server and the
+; discovery answer. No file = the old behaviour (the newest save). It belongs to a session, so a stop or a new session deletes it.
+FN wh_forget
+    lea rcx, [p1]
+    lea rdx, [mod_dir]
+    lea r8, [n_menuworld]
+    call path2
+    lea rcx, [p1]
+    call sys_unlink
+    mov dword [wh_id], 0
+    mov dword [wh_disc_bits], 0
+    mov qword [wh_disc_at], 0
+END_FN
+
+FN sv_world_clear
+    mov dword [sv_hw], 0
+    mov dword [sv_hf], 0
+    mov dword [sv_dw], 0
+END_FN
+
+; Reads menu/world.txt ("id=<game id>") into wh_id (0 when absent or invalid)
+FN wh_load
+    mov dword [wh_id], 0
+    lea rcx, [p1]
+    lea rdx, [mod_dir]
+    lea r8, [n_menuworld]
+    call path2
+    cmp eax, -1
+    je .d
+    lea rcx, [p1]
+    lea rdx, [wh_buf]
+    mov r8d, 40
+    call read_file
+    test rax, rax
+    jle .d
+    lea rcx, [wh_buf]
+    mov byte [rcx+rax], 0
+    call wf_parse_world
+    mov [wh_id], eax
+.d:
+END_FN
+
+; The host's world as the server and the discovery answer see it: wh_id, and the save to send (ws_name, ws_path, ws_size) which is the
+; newest save OF THAT WORLD when the mod named one -> eax 1 if there is one (wh_found)
+FN wh_state
+    call wh_load
+    call world_find_newest
+    mov [wh_found], eax
+END_FN
+
+; Puts the world info into the world header being built in wf_hdr: byte 6 flags (bit 0 world named, bit 1 saved), u32 id at 44. Signed later.
+FN wh_fill_hdr
+    mov eax, [wh_id]
+    test eax, eax
+    jz .d
+    mov [wf_hdr+44], eax
+    mov al, 1
+    cmp dword [wh_found], 0
+    je .set
+    or al, 2
+.set:
+    mov [wf_hdr+6], al
+.d:
+END_FN
+
+; Discovery answer: flags bit 2 = the host named its current world, bit 3 = that world is saved (at most one look at the disk a second)
+FN wh_disc_flags
+    call ticks_ms
+    mov rcx, rax
+    sub rcx, [wh_disc_at]
+    cmp rcx, 1000
+    jb .have
+    mov [wh_disc_at], rax
+    call wh_state
+    xor eax, eax
+    cmp dword [wh_id], 0
+    je .store
+    mov eax, 4
+    cmp dword [wh_found], 0
+    je .store
+    or eax, 8
+.store:
+    mov [wh_disc_bits], eax
+.have:
+    movzx eax, byte [disc_resp+5]
+    and eax, 3
+    or eax, [wh_disc_bits]
+    mov [disc_resp+5], al
+END_FN
+
 FN sess_stop
+    call wh_forget
     call stop_helper
     call disc_stop
     mov dword [cfg_mode], 0
@@ -321,6 +436,7 @@ END_FN
 ; Hosting: sv_t_port / sv_t_pass / sv_t_room were validated by the caller.
 FN sv_host
     call sess_stop
+    call sv_world_clear
     mov dword [cfg_mode], 1
     mov dword [cfg_player], 0
     mov dword [cfg_port], 7777
@@ -389,6 +505,7 @@ END_FN
 ; Joining: sv_t_host, sv_t_port, sv_t_pass and sv_t_room were validated by the caller.
 FN sv_join
     call sess_stop
+    call sv_world_clear
     mov dword [cfg_mode], 2
     mov dword [cfg_port], 7777
     cmp byte [sv_t_port], 0
@@ -577,7 +694,13 @@ FN sv_join_step
     lea rdx, [p1]
     call world_fetch
     mov r12d, eax
-    test eax, eax
+    mov eax, [wf_host_id]               ; which world the host plays now / which one arrived: the mod compares them before it enters
+    mov [sv_hw], eax
+    mov eax, [wf_host_flags]
+    mov [sv_hf], eax
+    mov eax, [wf_got_id]
+    mov [sv_dw], eax
+    test r12d, r12d
     jnz .worldfail
     mov dword [sv_phase], 0
     mov ecx, ST_READY
@@ -773,6 +896,7 @@ FN sv_poll
     jmp .step
 .stop:
     call sess_stop
+    call sv_world_clear
     mov ecx, ST_IDLE
     xor edx, edx
     call sv_set
@@ -801,6 +925,8 @@ FN menu_prepare
     call path2
     lea rcx, [p1]
     call sys_unlink                     ; a command left over from an earlier run must not be applied
+    call sv_world_clear
+    call wh_forget                      ; and neither must a world note of an earlier run
     lea rcx, [p1]
     lea rdx, [exe_dir]
     lea r8, [n_helper]

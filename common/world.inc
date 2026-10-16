@@ -30,6 +30,9 @@ wf_one resd 1
 wf_halg resq 1
 wf_digest resb 32
 wf_connect_ms resd 1
+wf_host_flags resd 1                   ; from the host's signed header: bit 0 the host named its current world, bit 1 that world is saved
+wf_host_id resd 1                      ; the game id of the host's current world (0 = the host did not say)
+wf_got_id resd 1                       ; the game id in the name of the world file that was downloaded (0 = none)
 wf_path1 resw 1040
 wf_path2 resw 1040
 
@@ -170,10 +173,15 @@ END_FN
 ; ecx = host IPv4 (network order), rdx = destination folder (wide). Downloads the host's world into that folder; needs
 ; world_use_session first (the host releases the world only to a joined player).
 ; Returns 0 ok, 1 cannot connect, 2 host has no world to give, 3 invalid reply, 4 checksum mismatch, 5 cannot write, 6 out of memory,
-; 7 refused (no joined session, wrong proof, or a host that does not speak the authenticated protocol)
+; 7 refused (no joined session, wrong proof, or a host that does not speak the authenticated protocol),
+; 8 the host is playing a world it has not saved yet (nothing downloadable matches it)
+; Afterwards wf_host_flags / wf_host_id say which world the host plays now and wf_got_id which world was downloaded.
 FN world_fetch
     mov r12d, ecx
     mov r13, rdx
+    mov dword [wf_host_flags], 0
+    mov dword [wf_host_id], 0
+    mov dword [wf_got_id], 0
     xor r15d, r15d                     ; memory block
     mov qword [wf_sock], 0
     mov rcx, [wf_keypath]
@@ -246,12 +254,21 @@ FN world_fetch
     call wa_check_header               ; nothing below is believed unless the host proved the session key too
     test eax, eax
     jz .refused
+    movzx eax, byte [wf_hdr+6]         ; the signed world info of the host (zero from a host that predates it)
+    mov [wf_host_flags], eax
+    mov eax, [wf_hdr+44]
+    mov [wf_host_id], eax
     movzx eax, byte [wf_hdr+5]
     test eax, eax
     jz .status_ok
+    cmp eax, 4
+    je .unsaved
     cmp eax, 1
     jne .bad
     mov r14d, 2
+    jmp .close
+.unsaved:
+    mov r14d, 8
     jmp .close
 .status_ok:
     mov r14d, [wf_hdr+8]
@@ -313,6 +330,9 @@ FN world_fetch
     call MoveFileExW
     test eax, eax
     jz .nowrite
+    lea rcx, [wf_hdr+48]
+    call wf_name_id
+    mov [wf_got_id], eax
     xor r14d, r14d
     jmp .close
 .nowrite:

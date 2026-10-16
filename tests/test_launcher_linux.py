@@ -584,6 +584,19 @@ def test_world_server():
             sb.cleanup()
 
 
+def test_world_info():
+    """The world info extension against the real launcher (cases shared with the Windows test): the host's menu/world.txt."""
+    sb = Sandbox()
+    try:
+        sb.config("mode=host\r\nport=47883\r\n")
+        proc = sb.steam(["--slow"])
+        assert wait_for(lambda: (sb.mod / "bridge_0" / "status.json").exists())
+        worldserver_cases.check_world_info(sb.mp, sb.mod / "bridge_0", sb.mod / "menu" / "world.txt", wait_for, True)
+        finish(proc)
+    finally:
+        sb.cleanup()
+
+
 def test_world_round_trip():
     """The manager's download client against the real launcher serving a world (several sizes, in one hosting session)."""
     if manager is None:
@@ -1518,6 +1531,69 @@ def test_menu_join_failures():
         pair.close()
 
 
+def test_menu_world_note_and_join():
+    """The host's note about the world it plays (menu/world.txt) decides which save a guest gets, and the guest's status says which world
+    the host plays now and which one arrived (hw, hf, dw) so the mod can compare them before it enters. A note belongs to a session."""
+    pair = MenuPair().start()
+    host, guest = pair.host, pair.guest
+    try:
+        (host.mp / "game-9-autosave.sav").write_bytes(b"THE NEWER WORLD " * 100)
+        os.utime(host.mp / "game-7-autosave.sav", (1_700_000_000, 1_700_000_000))
+        os.utime(host.mp / "game-9-autosave.sav", (1_700_000_900, 1_700_000_900))
+        note = host.mod / "menu" / "world.txt"
+
+        def join_again():
+            """Leave, then join again (the host still counts the old session for a few seconds: 'slot in use' is retried)."""
+            for _ in range(8):
+                menu_wait(guest, menu_cmd(guest, cmd="stop"), ("idle",))
+                st = menu_wait(guest, menu_cmd(guest, cmd="join", host="127.0.0.1"), ("ready", "error"))
+                if st["err"] != 23:
+                    return st
+                time.sleep(2)
+            return st
+        note.write_text("id=7\n")                                  # a note left from "an earlier session" ...
+        seq = menu_cmd(host, cmd="host")
+        menu_wait(host, seq, ("hosting",))
+        assert not note.exists(), "hosting starts a new session: the old note is gone"
+        # no note yet (the host is not in a world): the newest save, as before; the status carries no world info
+        st = join_again()
+        assert st["state"] == "ready" and (st["hw"], st["hf"], st["dw"]) == (0, 0, 9), st
+        assert (guest.mp / "game-9-autosave.sav").exists() and not (guest.mp / "game-7-autosave.sav").exists()
+        # the mod says the host plays world 7 (saved): the guest gets world 7 although world 9 is newer
+        note.write_text("id=7\n")
+        st = join_again()
+        assert st["state"] == "ready" and (st["hw"], st["hf"], st["dw"]) == (7, 3, 7), st
+        assert (guest.mp / "game-7-autosave.sav").read_bytes() == b"THE HOSTS WORLD " * 300
+        # the scan shows the same facts before anyone joins: named (4) and saved (8)
+        flags = []
+
+        def scanned():
+            seq = menu_cmd(guest, cmd="scan")
+            flags[:] = [h["flags"] for h in menu_wait(guest, seq, ("idle",))["hosts"]]
+            return flags == [12]
+        assert wait_for(scanned, 20), ("the scan shows a named, saved world as flags 4 + 8", flags)
+        # a brand new world that was never saved: nothing downloadable matches it -> error 48 (the mod explains), world info still reported
+        note.write_text("id=31337\n")
+        st = join_again()
+        assert st["state"] == "error" and st["err"] == 48 and st["session"] == "none" and (st["hw"], st["hf"], st["dw"]) == (31337, 1, 0), st
+        assert json.loads((guest.mod / "control.json").read_text())["enabled"] is False
+        # once the host saved it (the mod's own save), the next join gets it
+        (host.mp / "game-31337-autosave.sav").write_bytes(b"BRAND NEW " * 50)
+        st = join_again()
+        assert st["state"] == "ready" and (st["hw"], st["hf"], st["dw"]) == (31337, 3, 31337), st
+        # stop: the guest's info is cleared; the host's stop deletes the note
+        seq = menu_cmd(guest, cmd="stop")
+        st = menu_wait(guest, seq, ("idle",))
+        assert (st["hw"], st["hf"], st["dw"]) == (0, 0, 0), st
+        seq = menu_cmd(host, cmd="stop")
+        menu_wait(host, seq, ("idle",))
+        assert not note.exists(), "stop deletes the world note"
+        print("menu world note: no note = newest save; a note picks that world's save (hw/hf/dw reported), an unsaved world -> 48, "
+              "the note belongs to a session (host/stop delete it)")
+    finally:
+        pair.close()
+
+
 def test_menu_command_validation():
     sb = Sandbox()
     try:
@@ -1621,11 +1697,11 @@ def test_menu_overrides_launcher_cfg():
 
 ALL = [test_host, test_time_stamps, test_helper_args, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune,
        test_configure, test_fuzz, test_discovery_responder, test_scan, test_scan_tailscale, test_world_server,
-       test_world_round_trip, test_guest_refreshes_world, test_helper_dies_with_launcher, test_steam_probe_and_identity,
+       test_world_info, test_world_round_trip, test_guest_refreshes_world, test_helper_dies_with_launcher, test_steam_probe_and_identity,
        test_data_dir_discovery_and_proton, test_exit_codes_and_signals,
        test_manager_host_and_steam_setup, test_manager_join, test_manager_join_interactive, test_manager_save_solo,
        test_password, test_manager_password,
-       test_menu_standby, test_menu_host_and_stop, test_menu_helper_arguments, test_menu_scan_and_join, test_menu_join_failures,
+       test_menu_standby, test_menu_host_and_stop, test_menu_helper_arguments, test_menu_scan_and_join, test_menu_join_failures, test_menu_world_note_and_join,
        test_menu_command_validation, test_menu_helper_missing, test_menu_overrides_launcher_cfg]
 only = [n for n in os.environ.get("ONLY", "").split(",") if n]       # ONLY=test_host,test_fuzz runs just those
 for fn in ALL:

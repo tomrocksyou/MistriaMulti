@@ -219,6 +219,7 @@ python3 tests/test_menu.py                                                # GML 
 unshare -n sh -c '<bring lo up>; python3 tests/test_menu.py build/mistrimulti-launcher build/mistrimulti-helper-linux build/fakegame-linux'
 python3 tests/test_launcher_linux.py ...   # test_menu_*: standby, host/stop, scan and join, failures, command validation
 python3 tests/test_launcher.py ...         # test_menu_*: the same for the Windows launcher under Wine
+python3 tests/mutate_joinflow.py [--asm]    # breaks the cancel paths, the world check, the world note and (with --asm, in `unshare -n`) the launcher side on purpose
 ```
 
 What the first one proves: every screen of the flow in order, input validation (addresses, rooms, passwords, injected lines),
