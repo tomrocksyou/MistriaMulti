@@ -1,6 +1,7 @@
 # How to play MistriaMulti
 
 Co-op for Fields of Mistria: one player hosts their farm, friends join it. Everyone needs the same MistriaMulti version.
+Supported game versions: 1.0.6 and 1.0.8 (on any other version the badge says the mod needs an update).
 
 ## What you need
 
@@ -35,14 +36,21 @@ Start the game from Steam as usual.
 
 - **Host:** New Game (or Load Game) > **Multiplayer** > **Host a game** > **Start hosting** (you can set a password first).
   The game shows your addresses: give your friends the one that starts with `100.` (Tailscale). Press **Start playing**.
-  Sleep once (save) before friends join: they get your world as of your last save.
+  A **new** world saves itself as soon as you can move at home ("your new world is saved. Friends can join now"). For an older
+  world, friends get your world as of your last save, so sleep once first. If a friend sees "The host has started a new world but has
+  not saved it yet", just sleep or save once and have them press **Join again**.
   When you start a **new** world you also choose how hearts with villagers work: each player's own (recommended) or shared.
   Dating and marriage are always per player, and two players can't date or marry the same villager.
 - **Join:** New Game > **Multiplayer** > **Join a game**. Pick the host from the list, or choose **Type an address** and type
   the host's `100.` address. Type the password if asked. The host's world downloads and opens.
+  **A character per world:** on **New Game** you make a new character for that world in the game's character editor (your solo
+  characters are never used or changed). If you already have a character in that world you are asked **Keep mine** or **New
+  character**; if you have several, a list lets you pick one. On **Load Game** you carry on with the character you already have
+  there, with no editor. A new character gets the same first tools and seeds a new player gets.
+- **Hosts only, for testing:** press **Ctrl+F6** in a world to unlock the mines early for everyone (see `docs/DEVTOOLS.md`).
 
 Singleplayer stays separate: choosing **Singleplayer** uses your normal saves, which multiplayer never touches.
-Press **F8** in the game to see the connection status.
+The badge at the bottom right shows the connection status (F8 shows it too).
 
 ## Update
 
@@ -70,7 +78,7 @@ the old folder, run `Install-Mod.bat` / `./install.sh`, then MOMI > **Install**)
 
 ### Update from inside the game
 
-On the title screen, bottom left, next to the game's own version, the game shows **MistriMulti 0.4.6** (your installed version). Once a day the
+On the title screen, bottom left, next to the game's own version, the game shows **MistriMulti** and your installed version (new in 0.4.7). Once a day the
 launcher quietly asks whether a newer release exists (this needs `curl`, which Windows 10 and later and SteamOS have). When there is one, an
 **Update** button appears next to the version. Click it: the text shows what happens (`Downloading 0.4.7...`), then either `Installed. Restart the game`
 or `Updated. Close the game and press Install in MOMI`, or a plain error with the button back for another try. Every player still has to update. In a
@@ -87,6 +95,8 @@ appears. The check never delays the game and stays silent when you are offline.
 - A friend cannot find or reach the host: check that both are logged in to Tailscale and on the same Tailscale network, and
   type the host's `100.` address by hand. Windows may ask whether `mistrimulti-helper.exe` may use the network: allow it.
 - "That player slot is already in use": press **Try again**.
+- You pressed Cancel in a Host or Join screen: just press **New Game** again.
+- The character editor did not appear after joining: send the log (below); it says why.
 - Logs for bug reports (they are rewritten each time the game starts, so copy them before restarting):
   - Windows: `%LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti\logs\mistrimulti.log` and, from a multiplayer world,
     `%LOCALAPPDATA%\FieldsOfMistria\multiplayer\mod_data\mistrimulti\logs\mistrimulti.log`
@@ -95,8 +105,9 @@ appears. The check never delays the game and stays silent when you are offline.
 ## What is shared
 
 Tested in the real game: both players' characters, time and weather, sleeping and the new day, hoeing, watering and planting,
-chests, the shipping bin and one shared gold purse, picking things up in town, leaving and rejoining with your own inventory.
-Written but not yet tried in the real game: each other on the map, the mines, animals and buildings, quests and cutscenes.
+chests, the shipping bin, one shared gold purse and one shared town rank, picking things up in town, the other player on the map,
+story cutscenes, the mines (same floors), a character per world, and leaving and rejoining.
+Written but not yet tried in the real game: animals and the insides of barns, coops and the greenhouse.
 Villagers walk the same schedule on every screen but can be a few steps apart. Story cutscenes are watched by everybody
 themselves (skip them with the game's own skip button if you like): what a scene changes in the world counts once, and
 rewards are paid once per player. This is an experimental mod: back up saves you
