@@ -17,6 +17,7 @@ function mistrimulti_player_reset_session() {
     r.character_pending = true;
     r.character_phase = "";
     r.character_ask = undefined;
+    r.character_chars = [];
 }
 
 // Event kinds. Handshakes are small targeted events; whole player records travel as blobs, so a
@@ -116,6 +117,7 @@ function mistrimulti_player_checkpoint() {
         r.player_revision++;
     }
     r.player_signature = signature;
+    if (r.mode == "join") mistrimulti_charcache_remember();
     return true;
 }
 
@@ -157,10 +159,11 @@ function mistrimulti_player_request(player, data) {
     var asking = saved != undefined && data[$ "intent"] == "new";
     var success = saved == undefined
         ? mistrimulti_event_emit("profile_start", { peer_epoch: peer.epoch, uid: data.uid, world: r.world_key }, player)
-        : (asking ? mistrimulti_event_emit("profile_exists", { peer_epoch: peer.epoch, uid: data.uid, world: r.world_key }, player)
+        : (asking ? mistrimulti_event_emit("profile_exists", { peer_epoch: peer.epoch, uid: data.uid, world: r.world_key,
+                chars: mistrimulti_history_summary(data.uid, saved) }, player)
             : mistrimulti_player_send("profile_record", player, peer.epoch, saved.revision, saved.data));
     if (success) r.player_sessions[player] = { uid: data.uid, epoch: peer.epoch,
-        revision: saved == undefined ? 0 : saved.revision, asking: asking, replaced: false };
+        revision: saved == undefined ? 0 : saved.revision, asking: asking, replaced: false, swapped: false };
     return success;
 }
 
@@ -170,10 +173,23 @@ function mistrimulti_player_choice(player, data) {
     var peer = r.peers[player];
     if (r.mode != "host" || !r.player_ready || player == 0 || !is_struct(peer)) return true;
     var session = r.player_sessions[player];
-    if (data[$ "world"] != r.world_key || data[$ "uid"] != peer[$ "uid"] || !is_real(data[$ "keep"])) return true;
+    if (data[$ "world"] != r.world_key || data[$ "uid"] != peer[$ "uid"] || !is_real(data[$ "keep"]) || data.keep < 0 || data.keep > 2) return true;
     if (!is_struct(session) || session.epoch != peer[$ "epoch"] || session.uid != data.uid || session.asking != true) return true;
     var saved = mistrimulti_player_load(data.uid);
-    if (data.keep >= 1 && saved != undefined) {
+    if (data.keep == 2) {
+        // An earlier character of this world becomes the current one (once: a send that is retried must not swap back).
+        var slot = data[$ "gen"];
+        if (!session.swapped) {
+            if (!is_real(slot) || slot != floor(slot) || slot < 1 || slot > mistrimulti_history_limit() || !mistrimulti_history_swap(data.uid, slot)) {
+                return mistrimulti_event_emit("profile_error", { peer_epoch: peer.epoch, message: "That character could not be loaded." }, player);
+            }
+            session.swapped = true;
+        }
+        saved = mistrimulti_player_load(data.uid);
+        if (saved == undefined) return mistrimulti_event_emit("profile_error", { peer_epoch: peer.epoch, message: "The host player record needs recovery." }, player);
+        session.revision = saved.revision;
+        if (!mistrimulti_player_send("profile_record", player, peer.epoch, saved.revision, saved.data)) return false;
+    } else if (data.keep == 1 && saved != undefined) {
         if (!mistrimulti_player_send("profile_record", player, peer.epoch, saved.revision, saved.data)) return false;
     } else {
         // Start over. The old records stay where they are (the new ones replace them with the first upload and the old
@@ -187,17 +203,9 @@ function mistrimulti_player_choice(player, data) {
     return true;
 }
 
+// The old character goes into the history of this identity in this world (MistriMultiCharPicker.gml); the current records stay.
 function mistrimulti_player_keep_replaced(uid) {
-    var r = __mistrimulti_runtime();
-    try {
-        var core = mistrimulti_player_load(uid);
-        var path = mistrimulti_player_path(uid);
-        if (core != undefined) save_text_file(string_copy(path, 1, string_length(path) - 5) + ".replaced.json", json_stringify(core));
-        var progress = mistrimulti_progress_load(uid);
-        if (progress != undefined) save_text_file(string_copy(path, 1, string_length(path) - 5) + ".progress.replaced.json", json_stringify(progress));
-    } catch (e) {
-        mmapi_warn_rate_limited("mistrimulti_replaced", "mistrimulti", "The replaced character could not be copied aside: " + string(e));
-    }
+    mistrimulti_history_demote(uid);
 }
 
 // profile_request (guest -> host) and the host's answers (targeted at one guest by the event layer).
@@ -216,9 +224,11 @@ function mistrimulti_player_event(player, data, ctx) {
             mmapi_log_warn("mistrimulti", "The host has no character of yours in this world: you create a new one.");
         } else if (kind == "profile_exists" && data[$ "uid"] == r.uid && data[$ "world"] == r.world_key) {
             if (r.character_phase == "") r.character_phase = "ask";
+            r.character_chars = mistrimulti_charpicker_clean(data[$ "chars"]);
             r.player_error = "";
         } else if (kind == "profile_error") {
             r.player_error = string(data[$ "message"]);
+            mistrimulti_charpicker_failed(r);
         } else if (kind == "profile_saved" && data[$ "world"] == r.world_key && data[$ "revision"] == r.player_revision) {
             r.player_saved_revision = r.player_revision;
             r.player_error = "";
@@ -285,6 +295,7 @@ function mistrimulti_player_receive_record(player, upload, text, meta) {
         r.player_saved_revision = revision;
         r.player_signature = json_stringify(mistrimulti_player_capture());
         r.player_error = "";
+        mistrimulti_charcache_remember();
         return true;
     } catch (e) {
         r.player_error = "A player record could not be processed.";

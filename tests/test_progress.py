@@ -405,7 +405,7 @@ function mistrimulti_player_fresh() {
 
 
 class ProgressNode(GmlNode):
-    extra_files = ("MistriMultiIdentity.gml", "MistriMultiPlayerData.gml", "MistriMultiPlayerSync.gml", "MistriMultiProgress.gml", "MistriMultiHearts.gml")
+    extra_files = ("MistriMultiIdentity.gml", "MistriMultiPlayerData.gml", "MistriMultiPlayerSync.gml", "MistriMultiProgress.gml", "MistriMultiHearts.gml", "MistriMultiCharPicker.gml")
 
     def builtins(self):
         self.fs = FILESYSTEMS.setdefault(self.slot, FileSystem())
