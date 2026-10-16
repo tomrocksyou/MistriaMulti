@@ -2187,7 +2187,6 @@ start:
     xor edx, edx
     call sv_set
 .run:
-    call sv_daily_check
     mov dword [sv_serving], 1
     call launch_game
     call sess_stop

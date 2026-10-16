@@ -969,25 +969,7 @@ def test_menu_overrides_launcher_cfg():
         sb.cleanup()
 
 
-def test_daily_update_check():
-    """At every start the launcher runs  MistriMulti.exe --daily "<mod data>"  hidden, and never waits for it."""
-    sb = Sandbox()
-    try:
-        shutil.copy(fake, sb.bin / "MistriMulti.exe")          # the stand-in records its command line and sleeps 3 s
-        started = time.time()
-        proc = start_menu_game(sb)
-        assert time.time() - started < 20, "the launcher waited for the update check"
-        assert wait_for(lambda: (sb.bin / "ran.txt").exists(), 15), "the launcher did not start MistriMulti.exe --daily"
-        line = (sb.bin / "ran.txt").read_bytes().decode("utf-16-le").strip()
-        assert ' --daily "' in line and line.endswith('\\FieldsOfMistria\\mod_data\\mistrimulti"'), line
-        assert menu_status(sb)["state"] == "idle"
-        finish(proc)
-        print("daily check: the launcher starts MistriMulti.exe --daily with the mod data folder, hidden, without waiting")
-    finally:
-        sb.cleanup()
-
-
-ALL = [test_daily_update_check, test_host, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune, test_configure, test_fuzz,
+ALL = [test_host, test_join_and_identity_reuse, test_fallbacks, test_direct_and_wrong_exe, test_backup_prune, test_configure, test_fuzz,
        test_discovery_responder, test_scan, test_world_server, test_world_info, test_guest_refreshes_world, test_helper_dies_with_launcher, test_password,
        test_menu_standby, test_menu_host_and_stop, test_menu_scan_and_addresses, test_menu_join, test_menu_join_world_info, test_menu_world_note_lifetime, test_menu_command_validation,
        test_menu_helper_missing, test_menu_overrides_launcher_cfg]

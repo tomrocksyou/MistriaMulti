@@ -38,7 +38,6 @@ WSTR n_manager, "MistriMulti.exe"
 WSTR f_mgrcmd, `"%s\\MistriMulti.exe" %s "%s"`
 WSTR s_optscan, "--scan"
 WSTR s_optaddrs, "--addrs"
-WSTR s_optdaily, "--daily"
 k_seq db 4,'seq='
 k_cmd db 4,'cmd='
 c_scan db 'scan',0
@@ -439,38 +438,6 @@ FN sv_run_manager
     jmp .d
 .no:
     xor eax, eax
-.d:
-END_FN
-
-; Starts  MistriMulti.exe --daily "<mod data folder>"  hidden and does NOT wait for it (it checks the latest release at most once a
-; day, with short timeouts, and writes update.json for the mod's badge; a line "check=off" in update.cfg turns it off). The game
-; never waits for it and a failure changes nothing.
-FN sv_daily_check
-    lea rcx, [p1]
-    lea rdx, [f_slash]
-    lea r8, [exe_dir]
-    lea r9, [n_manager]
-    call wsprintfW
-    lea rcx, [p1]
-    call file_exists
-    test eax, eax
-    jz .d
-    lea rcx, [cmd_buf]
-    lea rdx, [f_mgrcmd]
-    lea r8, [exe_dir]
-    lea r9, [s_optdaily]
-    lea rax, [mod_dir]
-    mov [rsp+32], rax
-    call wsprintfW
-    lea rcx, [cmd_buf]
-    lea rdx, [exe_dir]
-    xor r8d, r8d
-    mov r9d, 0x08000000
-    call spawn
-    test rax, rax
-    jz .d
-    mov rcx, rax
-    call CloseHandle
 .d:
 END_FN
 

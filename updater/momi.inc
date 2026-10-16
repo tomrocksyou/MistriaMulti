@@ -19,6 +19,11 @@ WSTR mo_v_yes, "yes"
 WSTR mo_f_cfg, "%s\FieldsOfMistria\mod_data\mistrimulti\momi.cfg"
 WSTR mo_f_cfgcli, "%s\FieldsOfMistria\mod_data\mistrimulti\momi-cli.cfg"
 WSTR mo_f_q, `"%s"`
+WSTR mo_f_pending, "%s\FieldsOfMistria\mod_data\mistrimulti\momi-pending"
+WSTR mo_f_auto, "%s\FieldsOfMistria\mod_data\mistrimulti\momi-cli.auto"
+WSTR mo_e_nomomi, "MISTRIMULTI_NO_MOMI"
+mo_c_auto: dw __utf16__(`Also run MOMI's installer automatically after updates that start without a question (for example from inside the game)?\r\n\r\nIt rewrites the game's data file, so only say Yes if you keep the game closed while updating.`), 0
+WSTR mo_c_auto_t, "MistriMulti: always run MOMI's installer?"
 WSTR mo_verb, "open"
 mo_filter: dw __utf16__("Programs (*.exe)"), 0, __utf16__("*.exe"), 0, 0
 WSTR mo_title, "Choose the Mods of Mistria (MOMI) program, the one with a window (or its command-line program)"
@@ -449,6 +454,7 @@ FN momi_after_update
     call momi_consent
     test eax, eax
     jz .declined
+    call momi_ask_auto
     call momi_run_cli
     cmp eax, 1
     je .ok
@@ -497,5 +503,79 @@ FN momi_after_update
     lea rcx, [mo_r_declined]
 .say:
     call momi_say_version
+.d:
+END_FN
+
+; The marker an in-game update leaves when the mod files changed but MOMI could not run (the game was open). eax 1 if it exists
+FN momi_pending_check
+    lea rcx, [mo_f_pending]
+    call momi_cfg_path
+    test eax, eax
+    jz .d
+    lea rcx, [wpath2]
+    call file_exists
+.d:
+END_FN
+
+FN momi_pending_clear
+    lea rcx, [mo_f_pending]
+    call momi_cfg_path
+    test eax, eax
+    jz .d
+    lea rcx, [wpath2]
+    call DeleteFileW
+.d:
+END_FN
+
+; rcx = output (wide), rdx = file name format: the same file as momi_cfg_path, written to rcx. eax 1 ok
+FN momi_cfg_path_into
+    mov r12, rcx
+    mov r13, rdx
+    mov rcx, rdx
+    call momi_cfg_path
+    test eax, eax
+    jz .d
+    mov rcx, r12
+    lea rdx, [wpath2]
+    cmp r12, rdx
+    je .same
+    call wcopy
+.same:
+    mov eax, 1
+.d:
+END_FN
+
+; Did the player allow MOMI's installer to run without a question (momi-cli.auto)? eax 1 / 0
+FN momi_auto_check
+    lea rcx, [mo_f_auto]
+    call momi_cfg_path
+    test eax, eax
+    jz .d
+    lea rcx, [wpath2]
+    call file_exists
+.d:
+END_FN
+
+; After a Yes to the question: ask once whether to run it without asking in future (updates started without a window)
+FN momi_ask_auto
+    cmp dword [momi_quiet], 0
+    jne .d
+    mov rcx, [h_wnd]
+    lea rdx, [mo_c_auto]
+    lea r8, [mo_c_auto_t]
+    mov r9d, 0x24
+    call MessageBoxW
+    cmp eax, 6
+    jne .d
+    lea rcx, [mo_f_auto]
+    call momi_cfg_path
+    test eax, eax
+    jz .d
+    lea rcx, [wpath2]
+    call ensure_dirs
+    lea rcx, [wpath2]
+    lea rdx, [mo_v_yes]
+    mov r8d, 2
+    call write_file
 .d:
 END_FN

@@ -563,14 +563,14 @@ def test_momi():
 
 def clear_momi_cfg():
     d = local_appdata() / "FieldsOfMistria" / "mod_data" / "mistrimulti"
-    saved = {n: (d / n).read_bytes() for n in ("momi.cfg", "momi-cli.cfg") if (d / n).exists()}
-    for n in ("momi.cfg", "momi-cli.cfg"):
+    saved = {n: (d / n).read_bytes() for n in ("momi.cfg", "momi-cli.cfg", "momi-cli.auto", "momi-pending") if (d / n).exists()}
+    for n in ("momi.cfg", "momi-cli.cfg", "momi-cli.auto", "momi-pending"):
         (d / n).unlink(missing_ok=True)
     return d, saved
 
 
 def restore_momi_cfg(d, saved):
-    for n in ("momi.cfg", "momi-cli.cfg"):
+    for n in ("momi.cfg", "momi-cli.cfg", "momi-cli.auto", "momi-pending"):
         (d / n).unlink(missing_ok=True)
     for n, data in saved.items():
         d.mkdir(parents=True, exist_ok=True)
@@ -724,9 +724,113 @@ def test_daily_check():
         e.close()
 
 
+def update_run(e, port=None, game=None, extra_env=None, name="result.txt"):
+    """MistriMulti.exe --update <file>: returns (exit code, the result file as a dict)."""
+    out = e.tmp / name
+    out.unlink(missing_ok=True)
+    cmd = [str(e.exe)] if on_windows else ["xvfb-run", "-a", WINE, str(e.exe)]
+    args = ["--update", wpath(out), wpath(game or e.game), "127.0.0.1", str(port if port is not None else e.port), "0", "/p"]
+    res = subprocess.run(cmd + args, capture_output=True, timeout=120,
+                         env=dict(os.environ, WINEDEBUG="-all", WINEPREFIX=PREFIX, **(extra_env or {})))
+    fields = {}
+    if out.exists():
+        for line in out.read_bytes().decode("utf-8").splitlines():
+            k, _, v = line.partition("=")
+            fields[k] = v
+        assert not (e.tmp / (name + ".tmp")).exists(), "the temporary result file was left behind"
+    return res.returncode, fields
+
+
+def test_result_update():
+    """MistriMulti.exe --update <file>: the non-interactive update the in-game button calls (format: docs/RELEASES.md)."""
+    if not fake.exists():
+        print("skip: --update result file (build/fakegame.exe not built)")
+        return
+    cfg_dir, saved = clear_momi_cfg()
+    e = tools_env(installed="0.1.0")
+    try:
+        momi = e.tmp / "MOMI"
+        momi.mkdir()
+        cli = momi / "ModsOfMistriaInstaller-cli.exe"
+        shutil.copy(fake, cli)
+        ran = e.game / "ran.txt"
+        e.mod["mod/mistrimulti/gml/A.gml"] = b"function a() { return 5; }\n"
+        e.publish()
+        # 1. nothing allowed: files updated, MOMI not run, the marker is left
+        code, r = update_run(e)
+        check("result: mod and programs updated, MOMI needed", code == 0 and r.get("state") == "needs_momi" and r.get("version") == "0.2.0"
+              and r.get("error") == "0" and "Install in MOMI" in r.get("message", "") and 'version = "0.2.0"' in installed_version(e), (code, r))
+        check("result: the marker is left", (cfg_dir / "momi-pending").exists())
+        check("result: nothing staged, programs installed", not e.leftovers() and (e.tools / "mistrimulti-helper.exe").read_bytes() == e.bins["mistrimulti-helper.exe"])
+        # 2. a second run: nothing new, but the MOMI step is still pending
+        code, r = update_run(e)
+        check("result: still pending is reported again", code == 0 and r.get("state") == "needs_momi", (code, r))
+        # 3. the CLI is configured but there is no standing permission: not run, whatever the environment says
+        env = {"MISTRIMULTI_MOMI_CLI_EXE": wpath(cli), "MISTRIMULTI_MOMI_CONSENT": "yes"}
+        code, r = update_run(e, extra_env=env)
+        check("result: a configured CLI without standing permission is not run", r.get("state") == "needs_momi" and not ran.exists(), (code, r))
+        # 4. standing permission (momi-cli.auto): run, exit 0 -> done, marker cleared
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "momi-cli.auto").write_bytes(b"y\0")
+        code, r = update_run(e, extra_env=env)
+        check("result: with standing permission MOMI's installer runs and the state is done", code == 0 and r.get("state") == "done"
+              and "MOMI installed" in r.get("message", "") and ran.exists() and not (cfg_dir / "momi-pending").exists(), (code, r))
+        ran.unlink()
+        # 5. MISTRIMULTI_NO_MOMI keeps it from running (the game is open)
+        e.set_installed("0.1.0")
+        code, r = update_run(e, extra_env=dict(env, MISTRIMULTI_NO_MOMI="1"))
+        check("result: MISTRIMULTI_NO_MOMI never runs MOMI", r.get("state") == "needs_momi" and not ran.exists(), (code, r))
+        # 6. the installer fails: needs_momi with error 30
+        e.set_installed("0.1.0")
+        bad = momi / "ModsOfMistriaInstaller-cli-fail.exe"
+        shutil.copy(fake, bad)
+        code, r = update_run(e, extra_env={"MISTRIMULTI_MOMI_CLI_EXE": wpath(bad)})
+        check("result: a failing installer is needs_momi / error 30", code == 0 and r.get("state") == "needs_momi" and r.get("error") == "30", (code, r))
+        ran.unlink(missing_ok=True)
+        # 7. up to date, nothing pending
+        (cfg_dir / "momi-pending").unlink(missing_ok=True)
+        code, r = update_run(e)
+        check("result: up to date is done", code == 0 and r.get("state") == "done" and "up to date" in r.get("message", ""), (code, r))
+        # 8. only a program changed: done, no marker
+        e.bins["mistrimulti-helper.exe"] = b"MZ another helper " * 50
+        e.publish()
+        code, r = update_run(e)
+        check("result: programs only is done", code == 0 and r.get("state") == "done" and not (cfg_dir / "momi-pending").exists(), (code, r))
+        # 9. failures
+        code, r = update_run(e, port=1)
+        check("result: no network is failed / 20", code == 20 and r.get("state") == "failed" and r.get("error") == "20", (code, r))
+        e.publish(raw="version 0.2.0\n")
+        code, r = update_run(e)
+        check("result: invalid list is failed / 21", code == 21 and r.get("state") == "failed", (code, r))
+        e.mod["mod/mistrimulti/gml/A.gml"] = b"function a() { return 6; }\n"
+        e.publish()
+        e.put("mod/mistrimulti/gml/A.gml", b"evil")
+        e.set_installed("0.1.0")
+        before = e.snapshot()
+        code, r = update_run(e)
+        check("result: checksum failure is failed / 22 and changes nothing", code == 22 and e.snapshot() == before, (code, r))
+        e.publish()
+        (e.game / "mods/mistrimulti/gml/A.gml.old" / "keep").mkdir(parents=True)
+        (e.game / "mods/mistrimulti/gml/A.gml.old" / "keep" / "x").write_bytes(b"x")
+        (e.game / "mods/mistrimulti/gml/A.gml").write_bytes(b"old a")
+        e.set_installed("0.1.0")
+        before = e.snapshot()
+        code, r = update_run(e)
+        check("result: a file that cannot be replaced is failed / 23, everything put back", code == 23 and e.snapshot() == before, (code, r))
+        shutil.rmtree(e.game / "mods/mistrimulti/gml/A.gml.old")
+        e.set_installed("0.9.0")
+        code, r = update_run(e)
+        check("result: a newer installed mod is left alone (done)", code == 0 and r.get("state") == "done", (code, r))
+        code, r = update_run(e, game=e.tmp / "nogame")
+        check("result: no game folder is failed / 13", code == 13 and r.get("state") == "failed", (code, r))
+    finally:
+        e.close()
+        restore_momi_cfg(cfg_dir, saved)
+
+
 def main():
     for t in (test_basic_flow, test_not_installed, test_versions, test_tools_and_self_update, test_mod_and_tools_together,
-              test_startup_cleanup, test_failure_paths, test_hostile_downloads, test_hostile_lists, test_production_urls, test_momi, test_one_button, test_daily_check):
+              test_startup_cleanup, test_failure_paths, test_hostile_downloads, test_hostile_lists, test_production_urls, test_momi, test_one_button, test_daily_check, test_result_update):
         print(f"--- {t.__name__}")
         t()
     print("PASS")
