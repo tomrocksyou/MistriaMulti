@@ -77,7 +77,7 @@ Written by the mod as `cmd.tmp`, then renamed. `key=value` lines, LF or CRLF, at
 | key | meaning |
 | --- | --- |
 | `seq` | 1..999999; the launcher applies a command only when `seq` differs from the last one it applied. The mod starts from a clock-based number so a restart of the mod cannot reuse one |
-| `cmd` | `host`, `join`, `scan` or `stop`; anything else only moves `seq` |
+| `cmd` | `host`, `join`, `scan`, `stop`, and (title screen Update button, `docs/SYNC-UPDATE.md`) `update` and `update_cancel`; anything else only moves `seq` |
 | `host` | join: the host's IPv4 address (`a.b.c.d`) |
 | `port` | optional, 1..65535, default 7777 (the game port of the host: the scan reports it) |
 | `password` | optional, 1..64 printable ASCII characters, no spaces |
@@ -117,6 +117,10 @@ Rewritten after every change and at least once a second:
 - `addrs` (host): this computer's addresses, Tailscale first. `hosts`: at most 12 found by the last scan, `flags` as in the
   discovery reply (bit 0 custom room code, bit 1 needs a password, bit 2 the host named the world it plays, bit 3 that world is saved), `name` cleaned (printable ASCII, `"` and `\` replaced by `_`).
 - The mod validates every field (`mistrimulti_menu_clean`); a damaged file is ignored, the last good one is kept.
+- Added with the Update button (`docs/SYNC-UPDATE.md`; the mod treats missing fields as "no update, no run"): `update` (`"0.4.7"` when a newer release
+  is known, else `"none"`), `us` (`none`, `checking`, `downloading`, `installing`, `done`, `failed`, `needs_momi`), `uv` (version), `um` (the update
+  program's message, cleaned), `ue` (error code: 61 busy, 62 program missing, 63 no result, 64 failed, 66 too long, or the program's own), `ur` (run counter).
+  `cmd=update` starts the update program (it never changes `state` / `err` / `session`); `cmd=update_cancel` stops a run that is not installing yet.
 
 ### Error codes (`err`; the words are in `mistrimulti_menu_error_text`)
 
@@ -297,6 +301,7 @@ The real-game test showed no badge at all: the mod runtime has no `draw_*` funct
 | `unshare -n ... python3 tests/test_menu.py <launcher> <helper> <fakegame>` | plus an end-to-end test: GML menu <-> real Linux launcher + helper <-> a real host: host with password, scan, wrong password, right password, world download, leave, badge Online |
 | `tests/test_launcher_linux.py` (`test_menu_*`, `test_world_info`) | standby, nothing listening, host/stop, helper arguments, scan and join with a real host, failures, command validation, helper missing, `launcher.cfg` compatibility; **the world note: which save is served, signed world info, status 4, discovery flags 4/8, junk notes, hw/hf/dw in the guest's status, the note's lifetime** |
 | `tests/test_launcher.py` (`test_menu_*`, `test_world_info`, Wine) | the same for the Windows launcher; `--addrs` and `--scan` of `MistriMulti.exe`; a real Windows host helper with a password; the same world-info cases (shared in `tests/worldserver_cases.py`) and the Windows guest reading the signed world info |
+| `tests/test_updateui.py`, `tests/test_launcher_linux.py` (`test_update_*`, `test_release_check_*`), `tests/test_launcher.py` | the title screen's version label, Update button, update run and daily release check: see `docs/SYNC-UPDATE.md` |
 
 Sandbox note: tests that open ports run in a private network namespace (`unshare -n`, `lo` up), as `scripts`/`runall.sh` do.
 

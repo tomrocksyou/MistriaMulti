@@ -8,6 +8,9 @@
 ;   status.json  written by the launcher about once a second and after every change: heartbeat, the last seq it applied,
 ;                state (idle|hosting|joining|downloading|ready|error|scanning), err (a number the mod turns into plain words),
 ;                this computer's addresses (host) and the hosts found by the last scan.
+; Two more commands belong to the title screen's "Update" button (common/updatecore.inc, docs/SYNC-UPDATE.md): cmd=update runs the
+; update program next to the launcher (mistrimulti-manager update --result <file>) and relays its progress in status.json (us, uv, um, ue,
+; ur); cmd=update_cancel stops it. The same file also carries `update`, the answer of the daily release check.
 ; Nothing listens and no helper runs until the player picks Host or Join: standby opens no port at all. Hosting starts the
 ; transport helper plus the discovery answer (UDP 7776) and the world server (TCP 7775); Join starts the helper as a guest, waits
 ; for the host's authenticated WELCOME (so a wrong password is reported before anything is downloaded), then downloads the world.
@@ -42,6 +45,31 @@ k_seq db 4,'seq='
 k_cmd db 4,'cmd='
 c_scan db 'scan',0
 c_stop db 'stop',0
+c_update db 'update',0
+c_ucancel db 'update_cancel',0
+n_updcfg db '/update.cfg',0
+n_updchk db '/update_check.txt',0
+n_updres db '/menu/update.txt',0
+n_chkdl db '/menu/latest.dl',0
+s_manifest_rel db '/mods/mistrimulti/manifest.toml',0
+n_manager db '/mistrimulti-manager',0
+s_up_update db 'update',0
+s_up_result db '--result',0
+s_curl db 'curl',0
+s_cu_f db '-fsSL',0
+s_cu_t db '--max-time',0
+s_cu_t4 db '5',0
+s_cu_ct db '--connect-timeout',0
+s_cu_ct2 db '3',0
+s_cu_mf db '--max-filesize',0
+s_cu_mf2 db '65536',0
+s_cu_p db '--proto',0
+s_cu_p2 db '=https',0
+s_cu_pr db '--proto-redir',0
+s_cu_o db '-o',0
+s_env_relurl db 'MISTRIMULTI_RELEASE_URL',0
+s_env_uplimit db 'MISTRIMULTI_UPDATE_TIMEOUT_MS',0
+s_rel_url db 'https://github.com/tomrocksyou/MistriaMulti/releases/latest/download/latest.txt',0
 s_statusfile db '/status.json',0
 f_auth db '"auth":',0
 f_reject db '"reject":',0
@@ -111,6 +139,13 @@ sv_hf resd 1                           ; guest: bit 0 the host named a world, bi
 sv_dw resd 1                           ; guest: the game id of the world file that was downloaded
 wh_id resd 1                           ; host: the world the mod says is being played (menu/world.txt, 0 = no file: any newest save)
 wh_found resd 1                        ; host: a save of that world exists (or, with no world.txt, any save)
+up_pid resq 1
+ck_pid resq 1
+up_respath resb 1100
+ck_out resb 1100
+up_gamedir resb 1100
+ck_argv resq 24
+up_argv resq 6
 wh_buf resb 64
 wh_disc_bits resd 1
 wh_disc_at resq 1
@@ -170,6 +205,9 @@ FN sv_status_write
     call pb_str
     mov ecx, [sv_dw]
     call pb_int
+    call up_json_make                   ; ,"update":..,"us":..,"uv":..,"um":..,"ue":..,"ur":.. (common/updatecore.inc)
+    lea rcx, [up_json]
+    call pb_str
     lea rcx, [j_m9]
     call pb_str
     xor r12d, r12d
@@ -732,7 +770,7 @@ FN sv_scan_now
 END_FN
 
 ; ---------------- commands ----------------
-; Reads and deletes cmd.txt. eax: 0 nothing new, 1 host, 2 join, 3 scan, 4 stop, 9 anything else (answered, not acted on).
+; Reads and deletes cmd.txt. eax: 0 nothing new, 1 host, 2 join, 3 scan, 4 stop, 5 update, 6 update_cancel, 9 anything else (answered, not acted on).
 FN sv_read_cmd
     lea rcx, [p1]
     lea rdx, [mod_dir]
@@ -810,6 +848,18 @@ FN sv_read_cmd
     mov edx, 4
     test eax, eax
     jnz .got
+    lea rcx, [sv_t_cmd]
+    lea rdx, [c_update]
+    call a_equal
+    mov edx, 5
+    test eax, eax
+    jnz .got
+    lea rcx, [sv_t_cmd]
+    lea rdx, [c_ucancel]
+    call a_equal
+    mov edx, 6
+    test eax, eax
+    jnz .got
     mov edx, 9
 .got:
     mov eax, edx
@@ -861,7 +911,17 @@ FN sv_poll
     je .scan
     cmp eax, 4
     je .stop
+    cmp eax, 5
+    je .update
+    cmp eax, 6
+    je .ucancel
     call sv_status_write                ; unknown command: only the answer (seq) changes
+    jmp .step
+.update:
+    call up_cmd_update                  ; never touches the session state: it only fills the update fields
+    jmp .step
+.ucancel:
+    call up_cmd_cancel
     jmp .step
 .host:
     call sv_valid_common
@@ -902,6 +962,8 @@ FN sv_poll
     call sv_set
 .step:
     call sv_join_step
+    call up_step                        ; a running update program (common/updatecore.inc)
+    call chk_step                       ; the daily release check, in the background, after the game started
     call sv_status_tick
 END_FN
 
@@ -968,3 +1030,265 @@ FN menu_init
     mov eax, 1
 .d:
 END_FN
+
+; ---------------- update run and release check: the Linux side (common/updatecore.inc is the logic) ----------------
+FN plat_ms
+    call ticks_ms
+END_FN
+
+FN plat_unix
+    xor ecx, ecx
+    lea rdx, [ts_buf]
+    call sys_clock_gettime
+    mov rax, [ts_buf]
+END_FN
+
+; p1 = a path. eax 1 if it is a regular file and its first 8000 bytes are in file_buf (NUL terminated), cfg_len set
+FN plat_load
+    lea rcx, [p1]
+    call path_kind
+    cmp eax, 1
+    jne .no
+    lea rcx, [p1]
+    lea rdx, [file_buf]
+    mov r8d, 8000
+    call read_file
+    test rax, rax
+    jle .no
+    mov [cfg_len], rax
+    lea rcx, [file_buf]
+    mov byte [rcx+rax], 0
+    mov eax, 1
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_cfg_read
+    lea rcx, [p1]
+    lea rdx, [mod_dir]
+    lea r8, [n_updcfg]
+    call path2
+    call plat_load
+END_FN
+
+FN plat_cache_read
+    lea rcx, [p1]
+    lea rdx, [mod_dir]
+    lea r8, [n_updchk]
+    call path2
+    call plat_load
+END_FN
+
+FN plat_cache_write                    ; rcx data, rdx length
+    mov r12, rcx
+    mov r13, rdx
+    lea rcx, [p1]
+    lea rdx, [mod_dir]
+    lea r8, [n_updchk]
+    call path2
+    lea rcx, [p1]
+    mov rdx, r12
+    mov r8, r13
+    call write_file
+END_FN
+
+; <game folder>/mods/mistrimulti/manifest.toml, the game folder being where the game program named on the command line lives
+FN plat_manifest_read
+    cmp qword [game_idx], 0
+    je .no
+    mov rcx, [game_idx]
+    call arg_n
+    test rax, rax
+    jz .no
+    mov r12, rax
+    mov rcx, rax
+    call str_len
+    cmp rax, 900
+    ja .no
+    lea rcx, [up_gamedir]
+    mov rdx, r12
+    call str_copy
+    lea rcx, [up_gamedir]
+    call cut_last_component
+    cmp byte [up_gamedir], 0
+    jne .have
+    mov word [up_gamedir], '.'          ; a bare program name: the current folder
+.have:
+    lea rcx, [p1]
+    lea rdx, [up_gamedir]
+    lea r8, [s_manifest_rel]
+    call path2
+    call plat_load
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_up_limit                       ; test hook: MISTRIMULTI_UPDATE_TIMEOUT_MS=<1..999999> shortens the run time limit
+    lea rcx, [s_env_uplimit]
+    call env_get
+    test rax, rax
+    jz .no
+    mov rcx, rax
+    call a2i
+    cmp eax, 1
+    jge .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_up_prepare
+    lea rcx, [up_respath]
+    lea rdx, [mod_dir]
+    lea r8, [n_updres]
+    call path2
+    lea rcx, [up_respath]
+    call sys_unlink                     ; a result of an earlier run must not be read as this run's
+END_FN
+
+; Starts  <launcher folder>/mistrimulti-manager update --result <file>  (stdin, stdout, stderr: /dev/null). eax 1 if it was started.
+; It is not tied to the launcher's life (no death signal): an update that has begun may finish even when the game closes.
+FN plat_up_start
+    lea rcx, [p1]
+    lea rdx, [exe_dir]
+    lea r8, [n_manager]
+    call path2
+    cmp eax, -1
+    je .no
+    lea rcx, [p1]
+    mov edx, 1                          ; X_OK
+    call sys_access
+    test rax, rax
+    jnz .no
+    lea rax, [p1]
+    mov [up_argv], rax
+    lea rax, [s_up_update]
+    mov [up_argv+8], rax
+    lea rax, [s_up_result]
+    mov [up_argv+16], rax
+    lea rax, [up_respath]
+    mov [up_argv+24], rax
+    mov qword [up_argv+32], 0
+    call open_devnull
+    mov r13, rax
+    mov [rsp+32], r13
+    mov qword [rsp+40], 0
+    lea rcx, [p1]
+    lea rdx, [up_argv]
+    mov r8, r13
+    mov r9, r13
+    call spawn
+    test rax, rax
+    js .no
+    mov [up_pid], rax
+    mov eax, 1
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_up_poll
+    mov rcx, [up_pid]
+    call proc_poll
+END_FN
+
+FN plat_up_kill
+    mov rcx, [up_pid]
+    call proc_kill
+END_FN
+
+FN plat_up_read
+    lea rcx, [p1]
+    lea rdx, [up_respath]
+    call str_copy
+    call plat_load
+END_FN
+
+; Starts  curl -fsSL --max-time 5 ... -o <menu/latest.dl> <release list URL>  (a short, quiet try; it dies with the launcher).
+; MISTRIMULTI_RELEASE_URL replaces the URL (for tests); the https-only rule is then dropped so a test server on loopback works.
+%macro ARG 2
+    lea rax, [%2]
+    mov [ck_argv+%1*8], rax
+%endmacro
+FN plat_chk_start
+    lea rcx, [ck_out]
+    lea rdx, [mod_dir]
+    lea r8, [n_chkdl]
+    call path2
+    lea rcx, [ck_out]
+    call sys_unlink
+    lea rcx, [s_env_relurl]
+    call env_get
+    mov r12, rax                        ; the override, or 0
+    ARG 0, s_curl
+    ARG 1, s_cu_f
+    ARG 2, s_cu_t
+    ARG 3, s_cu_t4
+    ARG 4, s_cu_ct
+    ARG 5, s_cu_ct2
+    ARG 6, s_cu_mf
+    ARG 7, s_cu_mf2
+    test r12, r12
+    jnz .override
+    ARG 8, s_cu_p
+    ARG 9, s_cu_p2
+    ARG 10, s_cu_pr
+    ARG 11, s_cu_p2
+    ARG 12, s_cu_o
+    ARG 13, ck_out
+    ARG 14, s_rel_url
+    mov qword [ck_argv+120], 0
+    jmp .go
+.override:
+    ARG 8, s_cu_o
+    ARG 9, ck_out
+    mov [ck_argv+80], r12
+    mov qword [ck_argv+88], 0
+.go:
+    call open_devnull
+    mov r13, rax
+    mov [rsp+32], r13
+    mov qword [rsp+40], 3               ; die with the launcher, search PATH for curl
+    lea rcx, [s_curl]
+    lea rdx, [ck_argv]
+    mov r8, r13
+    mov r9, r13
+    call spawn
+    test rax, rax
+    js .no
+    mov [ck_pid], rax
+    mov eax, 1
+    jmp .d
+.no:
+    xor eax, eax
+.d:
+END_FN
+
+FN plat_chk_poll
+    mov rcx, [ck_pid]
+    call proc_poll
+END_FN
+
+FN plat_chk_kill
+    mov rcx, [ck_pid]
+    call proc_kill
+END_FN
+
+FN plat_chk_read
+    lea rcx, [p1]
+    lea rdx, [ck_out]
+    call str_copy
+    call plat_load
+END_FN
+
+FN plat_chk_clean
+    lea rcx, [ck_out]
+    call sys_unlink
+END_FN
+
+%include "updatecore.inc"

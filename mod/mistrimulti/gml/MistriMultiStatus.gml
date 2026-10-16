@@ -147,7 +147,9 @@ function mistrimulti_badge_tick() {
         mmapi_log_info("mistrimulti", "Badge: " + status.text + " (" + status.why + ") [" + n.why + " | " + __mistrimulti_menu().why + "]");
         mmapi_log_flush("mistrimulti");
     }
-    var ok = mistrimulti_hudtext_set("badge", status.text, mistrimulti_status_color(status.level), "popup", "right", "bottom", -6, title ? -16 : -4);
+    // In a world the badge also names a newer release (on the title screen the Update button next to the version says it).
+    var shown_text = title ? status.text : status.text + mistrimulti_update_note();
+    var ok = mistrimulti_hudtext_set("badge", shown_text, mistrimulti_status_color(status.level), "popup", "right", "bottom", -6, title ? -16 : -4);
     if (ok && !n.drawn) {
         n.drawn = true;
         mmapi_log_info("mistrimulti", "Status badge: on screen for the first time (ANCHOR text node)");

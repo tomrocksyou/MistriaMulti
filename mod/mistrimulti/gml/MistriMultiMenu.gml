@@ -78,6 +78,7 @@ function mistrimulti_menu_clean(raw) {
         hb: raw.hb, seq: raw.seq, state: raw.state, err: raw.err, session: "none", helper: raw[$ "helper"] == 1,
         scan: is_real(raw[$ "scan"]) ? raw.scan : 0, port: is_real(raw[$ "port"]) ? raw.port : 7777, addrs: [], hosts: [],
         hw: is_real(raw[$ "hw"]) ? floor(raw.hw) : 0, hf: is_real(raw[$ "hf"]) ? floor(raw.hf) : 0, dw: is_real(raw[$ "dw"]) ? floor(raw.dw) : 0,
+        upd: mistrimulti_update_fields(raw),      // the release check and the update program's progress (MistriMultiUpdateUI.gml)
     };
     if (is_string(raw[$ "session"])) st.session = raw.session;
     if (is_array(raw[$ "addrs"])) {

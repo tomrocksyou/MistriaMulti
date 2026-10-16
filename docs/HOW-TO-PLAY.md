@@ -49,6 +49,18 @@ Press **F8** in the game to see the connection status.
 Download the new zip (or tar.gz), unpack it **in the same place** so it replaces the old `MistriaMulti` folder's files, close the game, run `Install-Mod.bat` (Linux:
 `./install.sh`), then MOMI > **Install** again. Every player must update.
 
+### Update from inside the game
+
+On the title screen, bottom left, next to the game's own version, the game shows **MistriMulti 0.4.6** (your installed version). Once a day the
+launcher quietly asks whether a newer release exists (this needs `curl`, which Windows 10 and later and SteamOS have). When there is one, an
+**Update** button appears next to the version. Click it: the text shows what happens (`Downloading 0.4.7...`), then either `Installed. Restart the game`
+or `Updated. Close the game and press Install in MOMI`, or a plain error with the button back for another try. Every player still has to update. In a
+world, the Multiplayer badge (and F8) say `update available (0.4.7)`. You cannot start an update while you host or join; the button only exists on the title screen.
+
+To switch the daily check off, create a text file named `update.cfg` in the MistriaMulti data folder (next to `launcher.cfg`; Windows
+`%LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti`) with the single line `check=off`. The version still shows, but nothing is requested and no button
+appears. The check never delays the game and stays silent when you are offline.
+
 ## If something goes wrong
 
 - The game starts normally but Multiplayer says it is offline: the Steam launch option is missing or points to a folder that
