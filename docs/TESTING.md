@@ -415,3 +415,5 @@ up) and runs `test_containers`, `test_ranch`, `test_progress`, `test_farm_sync`,
 `test_devtools`, `test_maplive`, `test_menu` (GML parts), `test_trust_gml`,
 `test_event_features`, `test_event_layer` and `test_engine_audit` (without the real game
 scripts), printing PASS or FAIL with the time of each and exiting non-zero on any failure.
+
+Load test of the real helper (CPU, memory, traffic for 1/3/7 guests, lossy proxy): `python3 tests/loadtest_helper.py build/mistrimulti-helper-linux --matrix`; results and caveats in `docs/PERFORMANCE.md`.
