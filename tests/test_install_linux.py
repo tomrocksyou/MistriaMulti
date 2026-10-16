@@ -331,7 +331,7 @@ def tree(path):
     return {str(p.relative_to(path)): (p.read_bytes() if p.is_file() else None) for p in sorted(path.rglob("*"))}
 
 
-FAKE_CLI = "#!/bin/sh\necho \"cwd=$(pwd) exit_on_complete=$EXIT_ON_COMPLETE args=$#\" > \"$MOMI_PROOF\"\necho 'Installed 1 mod'\nexit ${MOMI_RC:-0}\n"
+FAKE_CLI = "#!/bin/sh\necho \"cwd=$(pwd) exit_on_complete=$EXIT_ON_COMPLETE args=$#\" > \"$MOMI_PROOF\"\necho 'Installed 1 mod'\nexit ${FAKE_MOMI_RC:-0}\n"
 
 
 class UpdateTests(unittest.TestCase):
@@ -529,7 +529,7 @@ class UpdateTests(unittest.TestCase):
         p.write_text(FAKE_CLI)
         p.chmod(0o755)
         proof = self.tmp / "proof.txt"
-        self.extra.update({"MOMI_PROOF": str(proof), "MOMI_RC": str(rc)})
+        self.extra.update({"MOMI_PROOF": str(proof), "FAKE_MOMI_RC": str(rc)})
         return p, proof
 
     def test_momi_cli_is_run_only_after_consent(self):
@@ -589,38 +589,104 @@ class UpdateTests(unittest.TestCase):
         self.upd("--update", stdin="y\n")
         self.assertFalse(proof.exists())
 
-    def test_ingame_update_never_runs_momi_and_leaves_a_marker(self):
+    def result(self, *args, extra=None, stdin=""):
+        out = self.tmp / "result.txt"
+        out.unlink(missing_ok=True)
+        r = self.upd("--update", "--result", str(out), *args, extra=extra, stdin=stdin)
+        fields = {}
+        if out.exists():
+            for line in out.read_text().splitlines():
+                k, _, v = line.partition("=")
+                fields[k] = v
+        self.assertFalse((self.tmp / "result.txt.tmp").exists())
+        return r, fields
+
+    def test_result_file_needs_momi_then_done_with_standing_permission(self):
         p, proof = self.cli()
-        self.upd("--momi-cli", str(p))
+        self.upd("--momi-cli", str(p))                                  # remembered, but no standing permission
         self.site.publish("0.9.0", MOD_V2)
-        md = self.tmp / "moddata"
-        r = self.upd("--ingame", str(md), stdin="y\n")
-        self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertFalse(proof.exists(), "the game is running: MOMI is not run")
+        r, f = self.result(stdin="y\n")                                 # an answer on stdin is never read
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((f["state"], f["version"], f["error"]), ("needs_momi", "0.9.0", "0"), f)
+        self.assertIn("Install in MOMI", f["message"])
+        self.assertFalse(proof.exists())
         self.assertTrue((self.dir / "momi-pending").exists())
         self.assertEqual((self.mod / "gml/A.gml").read_bytes(), MOD_V2["gml/A.gml"])
-        r = self.upd("--ingame", str(md))
-        self.assertEqual(r.returncode, 11, r.stdout)                  # nothing to do
-        # the next update (game closed) does the MOMI step even though the files are current
-        r = self.upd("--update", stdin="y\n")
-        self.assertTrue(proof.exists(), r.stdout)
+        # standing permission, but the caller forbids it (the game is open)
+        r, f = self.result(extra={"MISTRIMULTI_NO_MOMI": "1"})
+        self.upd("--momi-cli", str(p), "--always")
+        r, f = self.result(extra={"MISTRIMULTI_NO_MOMI": "1"})
+        self.assertEqual(f["state"], "needs_momi", f)
+        self.assertFalse(proof.exists())
+        # standing permission: the pending step runs although the files are current
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"], f["error"]), (0, "done", "0"), (r.stdout, f))
+        self.assertTrue(proof.exists())
+        self.assertIn("exit_on_complete=true", proof.read_text())
+        self.assertFalse((self.dir / "momi-pending").exists())
+        # nothing new now
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"]), (0, "done"), f)
+        self.assertIn("up to date", f["message"])
+
+    def test_result_file_failing_installer_and_programs_only(self):
+        p, proof = self.cli(rc=4)
+        self.upd("--momi-cli", str(p), "--always")
+        self.site.publish("0.9.0", MOD_V2)
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"], f["error"]), (0, "needs_momi", "30"), f)
+        self.assertIn("exit code 4", f["message"])
+        (self.dir / "momi-pending").unlink()
+        self.site.publish("0.9.1", MOD_V2, progs={b: b"#!/bin/sh\necho newer\n" for b in BINS})
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"]), (0, "done"), f)
+        self.assertIn("programs", f["message"])
         self.assertFalse((self.dir / "momi-pending").exists())
 
-    def test_ingame_exit_codes(self):
-        md = self.tmp / "moddata"
-        r = self.upd("--ingame", str(md), extra={"MISTRIMULTI_RELEASE_BASE": "http://127.0.0.1:1"})
-        self.assertEqual(r.returncode, 20)
+    def test_result_file_failures(self):
+        r, f = self.result(extra={"MISTRIMULTI_RELEASE_BASE": "http://127.0.0.1:1"})
+        self.assertEqual((r.returncode, f["state"], f["error"]), (20, "failed", "20"), f)
+        self.assertIn("Could not reach", f["message"])
         self.site.publish("0.9.0", MOD_V2, raw="junk\n")
-        self.assertEqual(self.upd("--ingame", str(md)).returncode, 21)
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"]), (21, "failed"), f)
         self.site.publish("0.9.0", MOD_V2)
         self.site.files["/mod/mistrimulti/gml/B.gml"] = b"evil"
-        self.assertEqual(self.upd("--ingame", str(md)).returncode, 22)
+        before = self.snapshot()
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"], f["error"]), (22, "failed", "22"), f)
+        self.assertEqual(self.snapshot(), before)
         self.site.publish("0.9.0", MOD_V2, progs=False)
         (self.mod / "manifest.toml").write_text('name = "MistriaMulti"\nversion = "0.10.0"\n')
-        self.assertEqual(self.upd("--ingame", str(md)).returncode, 13)
-        (self.mod / "manifest.toml").write_text('name = "MistriaMulti"\nversion = "0.4.6"\n')
-        self.site.publish("0.4.6", MOD_V1, progs={b: (self.dir / b).read_bytes() for b in BINS})
-        self.assertEqual(self.upd("--ingame", str(md)).returncode, 11)
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"]), (0, "done"), f)
+        self.assertIn("newer", f["message"])
+        shutil.rmtree(self.dir)
+        r, f = self.result()
+        self.assertEqual((r.returncode, f["state"], f["error"]), (13, "failed", "13"), f)
+
+    def test_manager_update_result(self):
+        manager = ROOT / "build" / "mistrimulti-manager"
+        if not manager.exists():
+            self.skipTest("build/mistrimulti-manager is not built")
+        shutil.copy(manager, self.dir / "mistrimulti-manager")
+        self.site.publish("0.9.0", MOD_V2)
+        out = self.tmp / "res.txt"
+        env = dict(os.environ, HOME=str(self.home), MISTRIMULTI_STEAM_RUNNING="0", TMPDIR=str(self.tmp), **self.extra)
+        r = subprocess.run([str(self.dir / "mistrimulti-manager"), "update", "--result", str(out)], env=env, capture_output=True, text=True, timeout=60, cwd=str(self.home))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("state=needs_momi", out.read_text())
+        self.assertEqual((self.mod / "gml/A.gml").read_bytes(), MOD_V2["gml/A.gml"])
+        self.site.publish("0.9.1", dict(MOD_V2, **{"gml/B.gml": b"x\n"}))
+        shutil.copy(manager, self.dir / "mistrimulti-manager")
+        r = subprocess.run([str(self.dir / "mistrimulti-manager"), "update"], env=env, input="n\n", capture_output=True, text=True, timeout=60, cwd=str(self.home))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Latest release: 0.9.1", r.stdout)
+        (self.dir / "mistrimulti-update.sh").unlink()
+        shutil.copy(manager, self.dir / "mistrimulti-manager")
+        r = subprocess.run([str(self.dir / "mistrimulti-manager"), "update"], env=env, capture_output=True, text=True, timeout=60, cwd=str(self.home))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("mistrimulti-update.sh", r.stderr)
 
     def test_daily_check(self):
         md = self.tmp / "moddata"

@@ -6,7 +6,10 @@
 #   ./install.sh --update      download the latest GitHub release and update the programs and the mod files (safe to run again).
 #                              Then it runs MOMI's command-line installer if you set that up and agree, else it tells you what to click.
 #                              The same thing:  mistrimulti-manager update
-#   ./install.sh --momi-cli PATH   remember MOMI's command-line program (ModsOfMistriaInstaller-cli-linux) for --update; "none" forgets it
+#   ./install.sh --momi-cli PATH [--always]   remember MOMI's command-line program (ModsOfMistriaInstaller-cli-linux) for --update;
+#                              with --always it may also run without a question when an update starts without a terminal; "none" forgets both
+#   ./install.sh --update --result FILE   no questions, for programs (the game's Update button): progress and result as state=/version=/message=/error=
+#                              lines in FILE (docs/RELEASES.md). MOMI's installer runs only with --always set earlier and MISTRIMULTI_NO_MOMI unset.
 #   ./install.sh --dry-run     show what would be done, change nothing
 #   ./install.sh --uninstall   put Steam's settings back and remove the program folder
 #   ./install.sh --yes         allow it to run the one `sudo apt-get install` it may need (nasm, binutils)
@@ -30,7 +33,7 @@ BACKUP_SUFFIX=.mistrimulti-backup
 APPLIED_SUFFIX=.mistrimulti-applied
 REPO=tomrocksyou/MistriaMulti
 
-DRY=0 YES=0 UNINSTALL=0 UPDATE=0 DAILY='' MOMICLI='' INGAME=''
+DRY=0 YES=0 UNINSTALL=0 UPDATE=0 DAILY='' MOMICLI='' RESULT='' ALWAYS=0
 while [ $# -gt 0 ]; do
     case $1 in
         --dry-run) DRY=1 ;;
@@ -38,9 +41,10 @@ while [ $# -gt 0 ]; do
         --uninstall) UNINSTALL=1 ;;
         --update) UPDATE=1 ;;
         --daily) [ $# -ge 2 ] || exit 2; DAILY=$2; shift ;;
-        --ingame) [ $# -ge 2 ] || exit 2; INGAME=$2; UPDATE=1; shift ;;
+        --result) [ $# -ge 2 ] || exit 2; RESULT=$2; UPDATE=1; shift ;;
+        --always) ALWAYS=1 ;;
         --momi-cli) [ $# -ge 2 ] || { echo "--momi-cli needs a path (or the word none)" >&2; exit 2; }; MOMICLI=$2; shift ;;
-        -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
     shift
@@ -49,7 +53,8 @@ done
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/mistrimulti-install.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-say() { printf '%s\n' "$*"; }
+LASTMSG=''
+say() { printf '%s\n' "$*"; LASTMSG=$*; }
 act() { if [ "$DRY" = 1 ]; then say "[dry run] would: $*"; else say "$*"; fi; }
 SUMMARY=$TMP/summary
 : > "$SUMMARY"
@@ -367,7 +372,7 @@ valid_cli_name() { case $(basename -- "$1") in *-cli*|*-CLI*|*-Cli*) return 0 ;;
 
 # --momi-cli PATH|none
 do_momi_cli() {
-    if [ "$1" = none ]; then rm -f "$DIR/momi-cli.path"; say "MOMI's command-line program is forgotten. --update will tell you to press Install in MOMI instead."; exit 0; fi
+    if [ "$1" = none ]; then rm -f "$DIR/momi-cli.path" "$DIR/momi-cli.auto"; say "MOMI's command-line program is forgotten. --update will tell you to press Install in MOMI instead."; exit 0; fi
     p=$1
     case $p in /*) ;; *) p=$(pwd)/$p ;; esac
     if [ ! -f "$p" ] || [ -L "$p" ] || [ ! -x "$p" ]; then
@@ -381,17 +386,40 @@ do_momi_cli() {
     mkdir -p "$DIR"
     printf '%s\n' "$p" > "$DIR/momi-cli.path"
     say "Saved: $p"
+    if [ "$ALWAYS" = 1 ]; then
+        : > "$DIR/momi-cli.auto"
+        say "--always: it may also run without a question when an update starts without a terminal (for example from the game's Update button,"
+        say "unless that caller forbids it because the game is open). It rewrites the game's data file, so keep the game closed then."
+    else
+        rm -f "$DIR/momi-cli.auto"
+    fi
     say "After a mod update, ./install.sh --update asks before it runs it (every time)."
     exit 0
+}
+
+# Is MOMI's command-line program set up and still what it was? Sets cli.
+momi_cli_ok() {
+    cli=''
+    [ -f "$DIR/momi-cli.path" ] && read -r cli < "$DIR/momi-cli.path" || true
+    [ -n "$cli" ] && [ -f "$cli" ] && [ ! -L "$cli" ] && [ -x "$cli" ] && valid_cli_name "$cli" && [ -n "$GAMEDIR" ]
+}
+
+# Runs it in the game folder: no arguments (per MOMI's source that installs every mod in the mods folder), EXIT_ON_COMPLETE=true so it
+# does not wait for a key, no input, at most 5 minutes. Output goes to $DIR/momi.log. Sets MOMI_RC (124 = timed out).
+momi_run() {
+    MOMI_RC=0
+    if command -v timeout >/dev/null 2>&1; then
+        (cd "$GAMEDIR" && EXIT_ON_COMPLETE=true timeout 300 "$cli" < /dev/null > "$DIR/momi.log" 2>&1) || MOMI_RC=$?
+    else
+        (cd "$GAMEDIR" && EXIT_ON_COMPLETE=true "$cli" < /dev/null > "$DIR/momi.log" 2>&1) || MOMI_RC=$?
+    fi
 }
 
 # The MOMI step: $1 = 1 when the mod files changed. Runs MOMI's command-line installer only if the player chose it and agrees.
 momi_step() {
     if [ "$1" != 1 ]; then say 'MOMI: nothing to do (the mod files did not change).'; return 0; fi
-    cli=''
-    [ -f "$DIR/momi-cli.path" ] && read -r cli < "$DIR/momi-cli.path" || true
     ran=0
-    if [ -n "$cli" ] && [ -f "$cli" ] && [ ! -L "$cli" ] && [ -x "$cli" ] && valid_cli_name "$cli" && [ -n "$GAMEDIR" ]; then
+    if momi_cli_ok; then
         say ''
         say "MOMI must now rebuild the game's data. MOMI's command-line installer is set up: $cli"
         say "It installs every mod in your mods folder (not only the ones ticked in the MOMI window). Close Fields of Mistria first."
@@ -401,12 +429,8 @@ momi_step() {
         case $ans in
             y|Y|yes|YES)
                 say 'Running MOMI (it can take a minute) ...'
-                rc=0
-                if command -v timeout >/dev/null 2>&1; then
-                    (cd "$GAMEDIR" && EXIT_ON_COMPLETE=true timeout 300 "$cli" < /dev/null > "$DIR/momi.log" 2>&1) || rc=$?
-                else
-                    (cd "$GAMEDIR" && EXIT_ON_COMPLETE=true "$cli" < /dev/null > "$DIR/momi.log" 2>&1) || rc=$?
-                fi
+                momi_run
+                rc=$MOMI_RC
                 say 'What MOMI said (last lines of '"$DIR/momi.log"'):'
                 tail -n 15 "$DIR/momi.log" 2>/dev/null | sed 's/^/    /' || true
                 if [ "$rc" = 0 ]; then
@@ -425,28 +449,35 @@ momi_step() {
     fi
 }
 
-ec() { if [ -n "$INGAME" ]; then exit "$1"; else exit 1; fi; }
+# result file (--result): small key=value lines, replaced atomically
+RES_VER=''
+res() { [ -n "$RESULT" ] || return 0; printf 'state=%s\nversion=%s\nmessage=%s\nerror=%s\n' "$1" "$RES_VER" "$2" "${3:-0}" > "$RESULT.tmp" 2>/dev/null && mv -f "$RESULT.tmp" "$RESULT" 2>/dev/null || true; }
+# a failure: the last thing said is the message; the exit status is the code with --result, else 1
+ec() { res failed "$LASTMSG" "$1"; if [ -n "$RESULT" ]; then exit "$1"; else exit 1; fi; }
 
 do_update() {
     if [ ! -d "$DIR" ]; then
         say "MistriaMulti is not installed here yet ($DIR is missing). Run ./install.sh first; it also sets the Steam launch option."
-        exit 1
+        ec 13
     fi
     say 'MistriaMulti update'
     if [ "$DRY" = 1 ]; then say '(dry run: nothing will be changed)'; fi
     find_steam
     find_game
     say 'Looking for the latest release on GitHub ...'
+    res checking 'Looking for the latest release.'
     rc=0; fetch "$URL_LIST" "$TMP/latest.txt" 30000 10 60 || rc=$?
     if [ "$rc" = 2 ]; then say 'Neither curl nor wget is installed, so nothing can be downloaded. Nothing was changed.'; ec 20; fi
     if [ "$rc" != 0 ]; then
-        say 'Could not reach GitHub (no network, or no release published yet). Nothing was changed.'
         say "You can also download the new MistriaMulti-<version>-Linux.tar.gz by hand from https://github.com/$REPO/releases and run its ./install.sh."
+        say 'Could not reach GitHub (no network, or no release published yet). Nothing was changed.'
         ec 20
     fi
     if ! check_list "$TMP/latest.txt"; then say 'The update list is not valid, or was cut off. Nothing was changed.'; ec 21; fi
     latest=$LIST_VERSION
+    RES_VER=$latest
     say "Latest release: $latest"
+    res downloading 'Downloading the update.'
 
     # ---- mod files: download what differs, verify, assemble a complete new folder
     MODCHANGED=0 MODNOTE=''
@@ -516,6 +547,7 @@ do_update() {
     fi
 
     # ---- apply (everything was downloaded and verified)
+    res installing 'Installing the update.'
     if [ "$DRY" = 1 ]; then
         say "[dry run] would update the programs:${PROGS:- (none)}"
         [ -n "$dest" ] && say "[dry run] would update the mod files in $dest ($MODCOUNT changed, $MODSTALE removed)"
@@ -547,14 +579,26 @@ do_update() {
     if [ -n "$MODNOTE" ]; then say "$MODNOTE"
     elif [ "$MODCHANGED" = 1 ]; then say "Mod files updated in $dest ($MODCOUNT changed, $MODSTALE old file(s) removed)."
     else say 'Mod files: already up to date.'; fi
-    if [ -n "$INGAME" ]; then
-        # started from the game's Update button: the game is running, so MOMI is NOT run (it rewrites the game's data file);
-        # a marker makes the next Update (manager / ./install.sh --update) do the MOMI step.
-        [ "$MODCHANGED" = 1 ] && : > "$DIR/momi-pending"
-        if [ -n "$MODNOTE" ]; then exit 13; fi
-        if [ "$MODCHANGED" = 1 ]; then exit 0; fi
-        if [ "$PROGCHANGED" -gt 0 ]; then exit 12; fi
-        exit 11
+    if [ -n "$RESULT" ]; then
+        # No questions. The mod files changed (or an earlier update left the marker): MOMI has to rebuild the game's data. Its command-line
+        # installer runs only when the player allowed that without a question (--momi-cli ... --always) and MISTRIMULTI_NO_MOMI is unset
+        # (the caller sets it while the game is open: MOMI rewrites the game's data file). Otherwise the answer is needs_momi.
+        if [ -n "$MODNOTE" ]; then res done "$MODNOTE" 0; exit 0; fi
+        pend=0
+        if [ "$MODCHANGED" = 1 ]; then : > "$DIR/momi-pending"; pend=1; elif [ -f "$DIR/momi-pending" ]; then pend=1; fi
+        if [ "$pend" = 1 ]; then
+            if [ -z "${MISTRIMULTI_NO_MOMI:-}" ] && [ -f "$DIR/momi-cli.auto" ] && momi_cli_ok; then
+                res installing "Running MOMI's installer."
+                momi_run
+                if [ "$MOMI_RC" = 0 ]; then rm -f "$DIR/momi-pending"; res done "Updated, and MOMI installed the new mod files. Restart the game." 0; exit 0; fi
+                if [ "$MOMI_RC" = 124 ]; then res needs_momi "Updated. MOMI's installer took too long; close the game and press Install in MOMI." 31; exit 0; fi
+                res needs_momi "Updated, but MOMI's installer reported a problem (exit code $MOMI_RC). Close the game and press Install in MOMI." 30; exit 0
+            fi
+            res needs_momi 'Updated. Close the game and press Install in MOMI, then start the game.' 0
+            exit 0
+        fi
+        if [ "$PROGCHANGED" -gt 0 ]; then res done 'Updated the MistriaMulti programs. Restart the game to use them.' 0; else res done 'MistriaMulti is up to date.' 0; fi
+        exit 0
     fi
     if [ -z "$MODNOTE" ]; then
         if [ -f "$DIR/momi-pending" ] && [ "$MODCHANGED" != 1 ]; then say 'An earlier update (from the game) still needs the MOMI step.'; MODCHANGED=1; fi
