@@ -253,6 +253,77 @@ The only gap is a crash between a reward being given and the record (the ledger 
 **inventory is in the core record**, a separate upload every five seconds): a guest that dies in those seconds can lose or, rarely,
 repeat one reward. The ledger moves before the reward is given, so the usual outcome is the loss.
 
+## Starter kit of a new character
+
+**The finding (real game, mod 0.4.5).** A new guest character created in an already-started world walked outside on day 1 and
+never got the first-day cutscene in which the player receives the first hoe and seeds; the host, who played that sequence, had them.
+
+**Cause.** The game hands the first tools and seeds out in the `given_items` of a first-day scene (the data of the scene; the
+scripts only show the mechanism: `Mist.clean_up_scene` -> `mist_give_items_after_scene`, once per watching). The host's scene is in
+`MIST.scene_history`, and the guest's game is a copy of the host's world, so a new character *inherits* that history: the progress
+default for the `seen` section keeps the host's scenes on purpose ("a new player does not replay a cutscene that has had its effects
+on the world"). The game therefore never offers the scene again, and the story sync, which would apply a missed world scene silently
+and with its items, sees the scene as already in the guest's history and pays nothing. The rewards ledger adds the same rule for
+quests ("a new character is not owed the past"). Net effect: scene effects for the world arrived, the scene's *personal* part, the
+first tools and seeds, did not.
+
+**Which early scenes, quests and items matter.** From `TestSuite.gml`'s `main_story` (the game's own order of the first day) and
+`Taxi.gml` / `Mist.gml`: `prologue` (run by `Taxi.enter_world(run_prologue)`; its end opens the character editor and then runs)
+`day_zero`, then the scenes the first day triggers: `farm_introduction` (Hayden's scene on the farm: `obj_hayden` reads it), then
+`adeline_quest_board` (starts the story quest `greet_the_townsfolk`). The scripts do not say which of them give items: that is in
+the cutscene data files (`given_items` per scene, with item id, quantity, infusion and requirements) that the scripts load at run
+time and that were not available here. Further sources that were read: `NewGame.gml` (`starting_inventory`, `starting_armor`,
+`starting_spells`, `base_gold`: all already applied to a new guest by `mistrimulti_player_fresh`, which reads the same data keys),
+the almanac/recipes defaults (applied by the progress defaults), `ARI.tutorials_seen` (all false for a new character), and each scene's
+`post_scene_tutorial` (the popup the game shows after the scene, `Mist.clean_up_scene`). No tool or seed appears anywhere in the
+scripts as an id except test code and the `lightweight_hoe_copper` helper, so **no item id is hard-coded here**.
+
+**Decision per scene.**
+
+| Scene | What a player who watches it gets | New guest |
+| --- | --- | --- |
+| `prologue` | character editor (the guest has their own), the start of the story | not replayed; its data is read, anything it gives is part of the kit |
+| `day_zero` | wake-up scene that ends in the player's house; effects: spell/mana if the data says | not replayed; spell and mana from the data are part of the kit |
+| `farm_introduction` | the first tools, seeds, the tool tutorial (`post_scene_tutorial`) | **kit**: its `given_items`, baths, spell, mana; its tutorial popup once the editor is done |
+| `adeline_quest_board` | the first story quest | the quest comes from the story mirror as before; its items are part of the kit **only if the host already ran it** |
+| `the_unusual_tree_pt_1` and everything later | the story | not owed (the existing rule); unchanged |
+
+Watching the scene again (option a) was rejected: its triggers (room area, quest task, day) and requirements are data that cannot be
+verified, replaying a world scene a second time double-applies its object removals and quest steps, and the guest would still be
+without tools if any condition did not hold. Granting the data of the scene (option b) needs no trigger. The mod's own *view*
+mechanism is unchanged for later story scenes.
+
+**Design (`mistrimulti_story_kit_*` in `MistriMultiStory.gml`).**
+
+* `mistrimulti_player_fresh` (a new character: first join, Load Game with no record, or 'New character') raises `r.kit_owed`.
+* `mistrimulti_progress_fresh` (the new character's progress start, which runs after the core start) clears the flag and calls
+  `mistrimulti_story_kit_grant()` after the progress defaults were applied (the defaults would otherwise wipe the ledger).
+  The flag lives only in the session: a core record restored with a lost progress record (an old character) does not raise it,
+  so an old character's inventory is never topped up.
+* `kit_grant` takes the scenes of `mistrimulti_story_kit_scenes()` (`prologue`, `day_zero`, `farm_introduction`,
+  `adeline_quest_board`) that are in `MIST.scene_history` now (scenes not there yet reach the guest the usual way: the game offers
+  them, or the story sync applies them with their items, once) and, for each, gives what the game's cleanup gives: `given_items`
+  through the game's own `mist_give_items_after_scene` (item ids, quantities, infusions, requirements; the bed when the pockets
+  are full), `baths`, the spell and the mana, and queues `post_scene_tutorial`. A scene with `requires_story_mode` is skipped when
+  the story mode is off.
+* **Ledger.** The world fact `mm_kit` (JSON list of the scenes covered, `[]` when nothing was owed) is written *before* anything is
+  given, so a failure loses a gift rather than repeating it, and a second call does nothing. It travels in the progress section
+  `story_rewards` as `kit` (see `docs/SYNC-PROGRESS.md`); a restored record replaces it, a record from before the kit has none,
+  and no path other than a new character's start ever calls the grant. So a rejoin, Load Game or a record restore never gives
+  the kit again.
+* **Tutorial popup.** Queued in `r.kit_tutorials`; the story tick (guest, every second) shows one with the game's own
+  `await_popup(spawn_tutorial, [t])` once the editor is closed and no scene runs, and not if `tutorials_seen[t]` is set.
+
+| Case | Result |
+| --- | --- |
+| New guest, day 1 or any later day | the first-day scenes in the host's history give their items once |
+| New guest, the host has not run the first day yet | `[]` is recorded; the guest plays the scene, or the story sync applies it with its items, as for anyone |
+| Guest rejoins, Load Game, 'Keep mine' | the record is restored, nothing is given |
+| Guest picks 'New character' | progress and core start fresh, the kit is given again (the old character stays in `.replaced.json`) |
+| Core record without a progress record (migration) | an old character: nothing is given |
+| Record from before the kit | no `kit`: nothing is given (a character made earlier without tools can pick 'New character') |
+| The host | never |
+
 ## Spouses of other players live at the farm
 
 **The game's rule.** A villager lives in the farm house only if the game's own relationship fact `<npc>_status` says "spouse"
@@ -515,6 +586,12 @@ Also required to keep passing: `tests/test_event_features.py`, `tests/test_event
 Each of these must be confirmed in the game (the checklist covers them). None could be checked here: the scripts were read, the
 game was not run.
 
+0. **Starter kit.** The first tools and seeds come from the `given_items` of `farm_introduction` (or another of `prologue`,
+   `day_zero`, `adeline_quest_board`); the cutscene data files could not be read here. If they come from another scene, add its
+   name to `mistrimulti_story_kit_scenes()`. `CUTSCENES.get(name).post_scene_tutorial` is the tutorial enum (or undefined), and
+   `await_popup(spawn_tutorial, [t])` is safe from the story tick. The guest's copy of the world holds the scene in its history
+   when the host ran it (the 'seen' default). The log line `Starter kit given for: [...]` names what was covered.
+
 1. `QuestCategory.Story` is the world's story and nothing else; every festival quest is reached through
    `FESTIVALS[i].prototype.associated_quest`.
 2. `QUEST_LOG.start(name, stage)` is safe to call outside a normal flow in a game that did not play the step (turn-in boxes are
@@ -609,6 +686,17 @@ game was not run.
 Two game installs (or one plus `tests/test_live_game.py`), a host world on an autosave. `mistrimulti.story` in the MMAPI debug console
 prints the mirror, the claims in flight, refusals, statistics and what was found in the game's data (`gate_scenes`, `gate_facts`).
 
+**Starter kit** (host has played day 1, so it has the hoe and seeds):
+
+* S1. A new guest joins on day 1 and finishes the editor: the toolbar holds the same hoe, watering can and seeds the host got, in
+  the game's own quantities; the log has `Starter kit given for: [...]`; after the editor the tool tutorial popup appears once.
+* S2. Same on a later day (host past day 5): same kit, nothing of the later story.
+* S3. The guest leaves and joins again (New Game > Join, answer 'Keep mine'; and Load Game): no second kit, same items.
+* S4. The guest answers 'New character': the kit is given again after the editor; the old one is in `players/*.replaced.json`.
+* S5. The host has not played day 1 yet: the guest gets no kit (`Starter kit` line absent or `[]`) and plays the scene or gets
+  it from the story sync with its items; the host never gets a second set.
+* S6. The guest's pockets are full when the kit is given: the rest is at the bed (the game's own fallback).
+
 1. **Start-up.** No error in the log; `mistrimulti.story` on both shows `ready: true` within a few seconds of joining, and
    `gate_scenes` / `gate_facts` list the bridge, secret and market gates (an empty list means the data could not be read: report
    `error`).
@@ -696,6 +784,11 @@ applied silently, with the reason) and `stats.shown / viewed / silent`):
 
 ## Known limitations
 
+* **The starter kit is data-driven but its scene list is a guess from the game's own story test.** Which scene gives the first
+  tools is in data files that could not be read; the list is `mistrimulti_story_kit_scenes()`. A guest character made before this
+  version has no kit and no ledger and is not topped up (choose 'New character' to get it, or give the items by hand).
+  Quest rewards of the early story quests (for example the first story quest's reward items) are still not owed to a new
+  character; if the real game turns out to hand essentials out there, extend the kit with the quest's `reward_list`.
 * **A reward is paid when the mirror reaches the game, not when the step is taken,** and a reward that fails is lost rather than
   repeated. A guest that dies within about five seconds of a reward may lose or repeat that one reward (the core and the progress
   record are separate uploads). A new character is deliberately not owed the story so far. Rewards that depend on the player's

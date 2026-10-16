@@ -463,6 +463,11 @@ function __mistrimulti_story_scene_effects(name, c) {
         spawn_prios_on_map(GRIDS[LocationId.Town], location_id_to_gm_room(LocationId.Town), "PriorityObjectsPlazaFixed", spawn_priority_object);
         fix_plaza_footsteps();
     }
+    __mistrimulti_story_scene_spell(c);
+}
+
+// The scene's spell and mana, which the game gives to everybody who sees the scene (also to a player who did not watch it).
+function __mistrimulti_story_scene_spell(c) {
     if (c.spell_to_unlock != undefined) ARI.learn_spell(c.spell_to_unlock);
     if (c.mana_to_set != undefined && ARI.mana_max < c.mana_to_set) {
         ARI.mana_max = c.mana_to_set;
@@ -488,6 +493,63 @@ function mistrimulti_story_apply_scene(name) {
     __mistrimulti_story_scene_effects(name, c);
     __mistrimulti_story_scene_gifts(name, c, true, true);
     return true;
+}
+
+// ---- the starter kit of a new character ---------------------------------------------------------------------------------------
+// A new character in a world that has been played starts from the host's copy of the world, whose history holds the scenes the
+// host's first day ran. Those scenes are never shown again to the newcomer, and the story's "a new character is not owed the past"
+// rule paid nothing for them, so the first tools and seeds (which the game hands out in those scenes) were never given. The kit is
+// the data of those scenes, read at run time (item ids, quantities, infusions, requirements, baths, spell, mana and the tutorial
+// popup): what the game's own cleanup would have given a player who watched them. It is given once, when the new character's
+// progress starts; the ledger is the world fact "mm_kit" (the JSON list of the scenes it covered), carried by the progress
+// section story_rewards. Scenes that are not in the history yet are not part of it: the game shows them, or the story sync
+// applies them with their items, the usual way.
+
+// The game's first-day scenes, in the order of its own story test (TestSuite "main_story": prologue, day_zero, then the scenes
+// the first day triggers on the farm and at the quest board). Which of them hand out items is read from the game's data.
+function mistrimulti_story_kit_scenes() {
+    return ["prologue", "day_zero", "farm_introduction", "adeline_quest_board"];
+}
+
+// Gives the kit once. Returns the scenes it covered ([] when there was nothing to give, or it was given before).
+function mistrimulti_story_kit_grant() {
+    var r = __mistrimulti_runtime();
+    var covered = [];
+    if (T2R.read("mm_kit") != undefined) return covered;
+    var names = mistrimulti_story_kit_scenes();
+    for (var i = 0; i < array_length(names); i++) {
+        if (!CUTSCENES.contains_key(names[i]) || !MIST.scene_history.contains(names[i])) continue;
+        if (CUTSCENES.get(names[i])[$ "requires_story_mode"] == true && STORY_ENABLED != true) continue;
+        array_push(covered, names[i]);
+    }
+    // The ledger moves first: a gift that fails is lost rather than given twice.
+    T2R.write("mm_kit", json_stringify(covered));
+    for (var i = 0; i < array_length(covered); i++) {
+        var c = CUTSCENES.get(covered[i]);
+        try {
+            __mistrimulti_story_scene_gifts(covered[i], c, true, true);
+            __mistrimulti_story_scene_spell(c);
+            var tutorial = c[$ "post_scene_tutorial"];
+            if (tutorial != undefined) {
+                if (!is_array(r[$ "kit_tutorials"])) r.kit_tutorials = [];
+                array_push(r.kit_tutorials, tutorial);
+            }
+        } catch (e) {
+            __mistrimulti_story_warn("The starter kit of scene " + covered[i] + " could not be given: " + string(e));
+        }
+    }
+    if (array_length(covered) > 0) mmapi_log_info("mistrimulti", "Starter kit given for: " + json_stringify(covered));
+    return covered;
+}
+
+// The game shows the tutorial popup a scene names after it (the tool tutorial, for the scene that gives the tools); the new
+// character gets it once the editor is over and nothing else is running, one per pass.
+function __mistrimulti_story_kit_pump(r) {
+    var list = r[$ "kit_tutorials"];
+    if (!is_array(list) || array_length(list) == 0 || !r.player_ready || r.character_pending) return;
+    var tutorial = list[0];
+    array_delete(list, 0, 1);
+    if (!ARI.tutorials_seen[tutorial]) await_popup(spawn_tutorial, [tutorial]);
 }
 
 // ---- cutscenes that every player watches ---------------------------------------------------------------------------------------
@@ -1087,6 +1149,7 @@ function mistrimulti_story_tick() {
         // A cutscene is private and changes the game while it runs; the end-of-day sequence rebuilds the world. In both,
         // nothing is compared or applied. The next pass sees the finished state.
         if (MIST.is_running() || ARI.end_of_day_status != undefined) return;
+        if (r.mode == "join") __mistrimulti_story_kit_pump(r);
         if (r.mode == "host") __mistrimulti_story_host_pass(st);
         else __mistrimulti_story_guest_pass(st);
         if (st.ticks mod MISTRIMULTI_STORY_NPC_PASS == 0) __mistrimulti_story_house_pass(st, false);

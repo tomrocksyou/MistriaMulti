@@ -201,7 +201,7 @@ A progress file is `{ "v": 1, "revision": n, "data": { "v": 1, "uid", "world", "
 | `counters` | `stats` (name → number), `spoken` (villager → number) |
 | `misc` | `crown_cooldown`, `artifacts`, `pinned`, `perks_off`, `renown`, `renown_rewards`, `mount`, `mines_level` |
 | `daily` | `day` plus today's flags; restored only when `day` is the current in-game day |
-| `story_rewards` | `init` (the ledger was seeded), `paid` (story quest -> level whose rewards this player has been given, 1 to 1000000, at most 2048 quests) and optionally `view` (world cutscenes whose effects this player has been given but who has not watched them yet: scene -> game day, at most 64); see below |
+| `story_rewards` | `init` (the ledger was seeded), `paid` (story quest -> level whose rewards this player has been given, 1 to 1000000, at most 2048 quests) optionally `view` (world cutscenes whose effects this player has been given but who has not watched them yet: scene -> game day, at most 64) and optionally `kit` (the first-day scenes whose starter kit this player was given, at most 16 names; missing = never given, nothing owed); see below |
 
 **`story_rewards`** is not a field of the game's save: it is the player's ledger of story-step rewards (`docs/SYNC-STORY.md`, "Rewards
 of a shared step"), kept in the world facts `mm_paid_<quest>` and `mm_paid_init`. Capture reads those facts for every story quest;

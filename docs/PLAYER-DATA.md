@@ -105,7 +105,9 @@ every read for as long as the guest was loading. The cause was `mistrimulti_read
 A guest requests its record before publishing an active character or sending
 progress, and then requests its progress record; it becomes active only when both are
 applied. A returning player loads the host's records and does not create a character
-again (when it entered through Load Game, or answered "Keep mine"; see "A character per world"). A new player receives starter items and a new character's progress and opens the
+again (when it entered through Load Game, or answered "Keep mine"; see "A character per world"). A new player receives starter items, the starter kit (the items, baths, spell and tutorial of the host's first-day scenes, which the
+guest's copy of the world would otherwise skip: the first hoe and seeds; once, see `docs/SYNC-STORY.md` "Starter kit") and a new
+character's progress and opens the
 character creator; inventory and money from another local save are not imported.
 A world whose players only have core records (made before the progress record existed) keeps
 working: the core record is restored as before and the progress starts fresh and is then stored. The same identity cannot occupy two guest slots simultaneously,

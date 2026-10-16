@@ -308,6 +308,11 @@ the story scenes that every player watches themselves: any order, loss, restarts
 `python3 tests/mutate_story.py` breaks the GML in 44 ways and `python3 tests/mutate_story_views.py` breaks the shared-scenes part in
 29; both fail if any test still passes. See `docs/SYNC-STORY.md`.
 
+`python3 tests/test_starterkit.py` (about 20 seconds) runs the real story, progress, player-sync and character GML for the starter kit of
+a new guest character (first tools and seeds): day 1 and later, a host that has not played yet, rejoin, Load Game, 'New character',
+old records, failures, the tutorial popup. `python3 tests/mutate_starterkit.py` breaks the GML in 23 ways and fails if any test still
+passes. See `docs/SYNC-STORY.md`, "Starter kit".
+
 `python3 tests/test_maplive.py` (seconds) runs the real map-marker GML against a model of the game's MapMenu: live marker updates, rebuild only on change, other locations, closing, hostile peers. The remote hit shake is `test_hit_shake` in `tests/test_farm_sync.py`. See `docs/SYNC-MAPLIVE.md`.
 
 ## Transport checks

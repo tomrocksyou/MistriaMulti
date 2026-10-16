@@ -151,6 +151,7 @@ function mistrimulti_player_restore(data) {
 
 function mistrimulti_player_fresh() {
     var r = __mistrimulti_runtime();
+    r.kit_owed = true;    // the new character's progress start gives the starter kit (MistriMultiStory.gml), this once
     ARI.inventory.deserialize(Inventory(10).serialize());
     var items = fiddle_get("misc/ari_stats/starting_inventory");
     for (var i = 0; i < array_length(items); i++) ARI.inventory.add(string_to_item_id(items[i]));
