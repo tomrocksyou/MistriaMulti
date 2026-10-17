@@ -1,20 +1,4 @@
-; In-game menu supervisor of the Linux launcher (docs/SYNC-MENU.md; the Windows twin is in launcher/launcher.asm).
-;
-; The game's mod cannot start programs, so everything the player chooses in the game's Multiplayer menu reaches the launcher
-; through two small files in <game data>/mod_data/mistrimulti/menu/ (the same file bridge the game and helper already use):
-;   cmd.txt      written by the mod, "key=value" lines:  seq=N, cmd=host|join|scan|stop, host=IPv4, port=N, password=..., room=8hex
-;                The launcher reads it about four times a second, deletes it at once (a password must not stay on disk) and
-;                answers each new "seq" exactly once.
-;   status.json  written by the launcher about once a second and after every change: heartbeat, the last seq it applied,
-;                state (idle|hosting|joining|downloading|ready|error|scanning), err (a number the mod turns into plain words),
-;                this computer's addresses (host) and the hosts found by the last scan.
-; Two more commands belong to the title screen's "Update" button (common/updatecore.inc, docs/SYNC-UPDATE.md): cmd=update runs the
-; update program next to the launcher (mistrimulti-manager update --result <file>) and relays its progress in status.json (us, uv, um, ue,
-; ur); cmd=update_cancel stops it. The same file also carries `update`, the answer of the daily release check.
-; Nothing listens and no helper runs until the player picks Host or Join: standby opens no port at all. Hosting starts the
-; transport helper plus the discovery answer (UDP 7776) and the world server (TCP 7775); Join starts the helper as a guest, waits
-; for the host's authenticated WELCOME (so a wrong password is reported before anything is downloaded), then downloads the world.
-; Everything the player or the network can send is validated like launcher.cfg is, before it reaches a file or a command line.
+; In-game menu supervisor of the Linux launcher
 
 %define ST_IDLE 0
 %define ST_HOSTING 1
@@ -23,9 +7,8 @@
 %define ST_READY 4
 %define ST_ERROR 5
 %define ST_SCANNING 6
-%define ST_STOPPED 7                   ; the launcher is ending (the game closed): the mod stops showing Idle at once
+%define ST_STOPPED 7
 
-; err codes (docs/SYNC-MENU.md has the table; the mod turns them into words)
 %define ER_NONE 0
 %define ER_NOHELPER 1
 %define ER_HELPERFAIL 2
@@ -33,8 +16,8 @@
 %define ER_NOANSWER 4
 %define ER_BADPASS 5
 %define ER_CONTROL 6
-%define ER_REJ_BASE 20                  ; + the helper's reject reason: 21 password, 22 banned, 23 slot busy, 24 full, 26 password needed
-%define ER_WORLD_BASE 40                ; + world_fetch result: 41 cannot connect, 42 host has no world, 43 bad reply, 44 checksum, 45 cannot write, 46 memory, 47 refused (no joined session or wrong proof)
+%define ER_REJ_BASE 20
+%define ER_WORLD_BASE 40
 
 section .data
 n_menudir db '/menu/x',0
@@ -134,11 +117,11 @@ sv_t_room resb 16
 sv_tmp resb 48
 sv_ipbuf resb 20
 sv_json resb 4096
-sv_hw resd 1                           ; guest: the host's current world (game id; 0 = unknown), from its signed header
-sv_hf resd 1                           ; guest: bit 0 the host named a world, bit 1 that world is saved on the host
-sv_dw resd 1                           ; guest: the game id of the world file that was downloaded
-wh_id resd 1                           ; host: the world the mod says is being played (menu/world.txt, 0 = no file: any newest save)
-wh_found resd 1                        ; host: a save of that world exists (or, with no world.txt, any save)
+sv_hw resd 1
+sv_hf resd 1
+sv_dw resd 1
+wh_id resd 1
+wh_found resd 1
 up_pid resq 1
 ck_pid resq 1
 up_respath resb 1100
@@ -151,7 +134,6 @@ wh_disc_bits resd 1
 wh_disc_at resq 1
 
 section .text
-; ---------------- status file ----------------
 FN sv_status_write
     lea rcx, [sv_json]
     mov edx, 4096
@@ -205,7 +187,7 @@ FN sv_status_write
     call pb_str
     mov ecx, [sv_dw]
     call pb_int
-    call up_json_make                   ; ,"update":..,"us":..,"uv":..,"um":..,"ue":..,"ur":.. (common/updatecore.inc)
+    call up_json_make
     lea rcx, [up_json]
     call pb_str
     lea rcx, [j_m9]
@@ -309,13 +291,12 @@ FN sv_status_write
 .d:
 END_FN
 
-FN sv_set                       ; ecx = state, edx = err: records and publishes at once
+FN sv_set
     mov [sv_state], ecx
     mov [sv_err], edx
     call sv_status_write
 END_FN
 
-; Writes the status again after a second, so the game sees the launcher is alive.
 FN sv_status_tick
     call ticks_ms
     sub rax, [sv_last_write]
@@ -325,9 +306,6 @@ FN sv_status_tick
 .d:
 END_FN
 
-; ---------------- start / stop of a session ----------------
-; The mod's note about the world the host plays now (menu/world.txt, written by MistriMultiMenu.gml): read by the world server and the
-; discovery answer. No file = the old behaviour (the newest save). It belongs to a session, so a stop or a new session deletes it.
 FN wh_forget
     lea rcx, [p1]
     lea rdx, [mod_dir]
@@ -346,7 +324,6 @@ FN sv_world_clear
     mov dword [sv_dw], 0
 END_FN
 
-; Reads menu/world.txt ("id=<game id>") into wh_id (0 when absent or invalid)
 FN wh_load
     mov dword [wh_id], 0
     lea rcx, [p1]
@@ -368,15 +345,12 @@ FN wh_load
 .d:
 END_FN
 
-; The host's world as the server and the discovery answer see it: wh_id, and the save to send (ws_name, ws_path, ws_size) which is the
-; newest save OF THAT WORLD when the mod named one -> eax 1 if there is one (wh_found)
 FN wh_state
     call wh_load
     call world_find_newest
     mov [wh_found], eax
 END_FN
 
-; Puts the world info into the world header being built in wf_hdr: byte 6 flags (bit 0 world named, bit 1 saved), u32 id at 44. Signed later.
 FN wh_fill_hdr
     mov eax, [wh_id]
     test eax, eax
@@ -391,7 +365,6 @@ FN wh_fill_hdr
 .d:
 END_FN
 
-; Discovery answer: flags bit 2 = the host named its current world, bit 3 = that world is saved (at most one look at the disk a second)
 FN wh_disc_flags
     call ticks_ms
     mov rcx, rax
@@ -422,13 +395,12 @@ FN sess_stop
     call disc_stop
     mov dword [cfg_mode], 0
     xor ecx, ecx
-    call write_control                  ; control.json says enabled:false, mode idle
+    call write_control
     mov dword [sv_phase], 0
     mov dword [sv_session], 0
     mov dword [sv_addr_count], 0
 END_FN
 
-; Fills sv_addrs with this computer's addresses, the Tailscale one first (what a friend types or scans for).
 FN sv_collect_addrs
     mov dword [sv_addr_count], 0
     mov dword [mp_tgt_count], 0
@@ -451,7 +423,7 @@ FN sv_collect_addrs
     mov r8d, [rax+r12*4]
     mov eax, r8d
     and eax, 0xFFFF
-    cmp eax, 0xFEA9                     ; 169.254.x.x (self-assigned): no use to a friend
+    cmp eax, 0xFEA9
     je .next
     xor edx, edx
     lea r9, [sv_addrs]
@@ -471,7 +443,6 @@ FN sv_collect_addrs
 .d:
 END_FN
 
-; Hosting: sv_t_port / sv_t_pass / sv_t_room were validated by the caller.
 FN sv_host
     call sess_stop
     call sv_world_clear
@@ -507,7 +478,7 @@ FN sv_host
     call write_auth
     test eax, eax
     jnz .authok
-    cmp byte [a_pass], 0                ; without a password the helper still works (its keys stay in memory)
+    cmp byte [a_pass], 0
     mov ecx, ST_ERROR
     mov edx, ER_BADPASS
     jne .fail
@@ -540,7 +511,6 @@ FN sv_host
 .d:
 END_FN
 
-; Joining: sv_t_host, sv_t_port, sv_t_pass and sv_t_room were validated by the caller.
 FN sv_join
     call sess_stop
     call sv_world_clear
@@ -565,7 +535,6 @@ FN sv_join
     lea rdx, [room_default]
 .room:
     call str_copy
-    ; a player number 1..7 that differs from the last attempt (a taken number is reported by the host as "busy")
     lea rcx, [sv_tmp]
     call guid_hex
     movzx eax, byte [guid]
@@ -635,7 +604,6 @@ FN sv_join
 .d:
 END_FN
 
-; Number after the needle (rcx = needle) in the helper's status text read into file_buf (r12 bytes) -> eax, or -1 if absent
 FN sv_json_num
     mov r13, rcx
     call str_len
@@ -671,7 +639,6 @@ FN sv_json_num
 .d:
 END_FN
 
-; Once the helper reports the host's WELCOME the world is downloaded (or the join fails with the reason).
 FN sv_join_step
     cmp dword [sv_phase], 1
     jne .d
@@ -727,12 +694,12 @@ FN sv_join_step
     mov dword [wf_connect_ms], 3000
     lea rcx, [bridge_dir]
     mov edx, [cfg_player]
-    call world_use_session              ; the helper wrote this session's key before it reported the WELCOME
+    call world_use_session
     mov ecx, r12d
     lea rdx, [p1]
     call world_fetch
     mov r12d, eax
-    mov eax, [wf_host_id]               ; which world the host plays now / which one arrived: the mod compares them before it enters
+    mov eax, [wf_host_id]
     mov [sv_hw], eax
     mov eax, [wf_host_flags]
     mov [sv_hf], eax
@@ -769,8 +736,6 @@ FN sv_scan_now
     call sv_set
 END_FN
 
-; ---------------- commands ----------------
-; Reads and deletes cmd.txt. eax: 0 nothing new, 1 host, 2 join, 3 scan, 4 stop, 5 update, 6 update_cancel, 9 anything else (answered, not acted on).
 FN sv_read_cmd
     lea rcx, [p1]
     lea rdx, [mod_dir]
@@ -786,7 +751,7 @@ FN sv_read_cmd
     call read_file
     mov r12, rax
     lea rcx, [p1]
-    call sys_unlink                     ; consumed: a password never stays on disk
+    call sys_unlink
     test r12, r12
     jle .none
     mov [cfg_len], r12
@@ -869,7 +834,6 @@ FN sv_read_cmd
 .d:
 END_FN
 
-; eax 1 if sv_t_port is empty or a number 1..65535 and sv_t_pass / sv_t_room are acceptable (room empty or 8 hex digits)
 FN sv_valid_common
     cmp byte [sv_t_port], 0
     je .pass
@@ -915,10 +879,10 @@ FN sv_poll
     je .update
     cmp eax, 6
     je .ucancel
-    call sv_status_write                ; unknown command: only the answer (seq) changes
+    call sv_status_write
     jmp .step
 .update:
-    call up_cmd_update                  ; never touches the session state: it only fills the update fields
+    call up_cmd_update
     jmp .step
 .ucancel:
     call up_cmd_cancel
@@ -962,12 +926,11 @@ FN sv_poll
     call sv_set
 .step:
     call sv_join_step
-    call up_step                        ; a running update program (common/updatecore.inc)
-    call chk_step                       ; the daily release check, in the background, after the game started
+    call up_step
+    call chk_step
     call sv_status_tick
 END_FN
 
-; Folder, stale command, counters and the helper check: shared by standby and the optional launcher.cfg start.
 FN menu_prepare
     mov dword [sv_seq], 0
     mov dword [sv_scan], 0
@@ -986,15 +949,15 @@ FN menu_prepare
     lea r8, [n_menucmd]
     call path2
     lea rcx, [p1]
-    call sys_unlink                     ; a command left over from an earlier run must not be applied
+    call sys_unlink
     call sv_world_clear
-    call wh_forget                      ; and neither must a world note of an earlier run
+    call wh_forget
     lea rcx, [p1]
     lea rdx, [exe_dir]
     lea r8, [n_helper]
     call path2
     lea rcx, [p1]
-    mov edx, 1                          ; X_OK
+    mov edx, 1
     call sys_access
     xor ecx, ecx
     test rax, rax
@@ -1002,8 +965,6 @@ FN menu_prepare
     mov [sv_helper_ok], ecx
 END_FN
 
-; Standby start (no launcher.cfg): safe defaults, control.json (enabled:false, mode idle) and the first status.
-; eax 1 ok, 0 if control.json could not be written.
 FN menu_init
     mov dword [cfg_mode], 0
     mov dword [cfg_port], 7777
@@ -1031,7 +992,6 @@ FN menu_init
 .d:
 END_FN
 
-; ---------------- update run and release check: the Linux side (common/updatecore.inc is the logic) ----------------
 FN plat_ms
     call ticks_ms
 END_FN
@@ -1043,7 +1003,6 @@ FN plat_unix
     mov rax, [ts_buf]
 END_FN
 
-; p1 = a path. eax 1 if it is a regular file and its first 8000 bytes are in file_buf (NUL terminated), cfg_len set
 FN plat_load
     lea rcx, [p1]
     call path_kind
@@ -1081,7 +1040,7 @@ FN plat_cache_read
     call plat_load
 END_FN
 
-FN plat_cache_write                    ; rcx data, rdx length
+FN plat_cache_write
     mov r12, rcx
     mov r13, rdx
     lea rcx, [p1]
@@ -1094,7 +1053,6 @@ FN plat_cache_write                    ; rcx data, rdx length
     call write_file
 END_FN
 
-; <game folder>/mods/mistrimulti/manifest.toml, the game folder being where the game program named on the command line lives
 FN plat_manifest_read
     cmp qword [game_idx], 0
     je .no
@@ -1114,7 +1072,7 @@ FN plat_manifest_read
     call cut_last_component
     cmp byte [up_gamedir], 0
     jne .have
-    mov word [up_gamedir], '.'          ; a bare program name: the current folder
+    mov word [up_gamedir], '.'
 .have:
     lea rcx, [p1]
     lea rdx, [up_gamedir]
@@ -1127,7 +1085,7 @@ FN plat_manifest_read
 .d:
 END_FN
 
-FN plat_up_limit                       ; test hook: MISTRIMULTI_UPDATE_TIMEOUT_MS=<1..999999> shortens the run time limit
+FN plat_up_limit
     lea rcx, [s_env_uplimit]
     call env_get
     test rax, rax
@@ -1147,11 +1105,9 @@ FN plat_up_prepare
     lea r8, [n_updres]
     call path2
     lea rcx, [up_respath]
-    call sys_unlink                     ; a result of an earlier run must not be read as this run's
+    call sys_unlink
 END_FN
 
-; Starts  <launcher folder>/mistrimulti-manager update --result <file>  (stdin, stdout, stderr: /dev/null). eax 1 if it was started.
-; It is not tied to the launcher's life (no death signal): an update that has begun may finish even when the game closes.
 FN plat_up_start
     lea rcx, [p1]
     lea rdx, [exe_dir]
@@ -1160,7 +1116,7 @@ FN plat_up_start
     cmp eax, -1
     je .no
     lea rcx, [p1]
-    mov edx, 1                          ; X_OK
+    mov edx, 1
     call sys_access
     test rax, rax
     jnz .no
@@ -1209,8 +1165,6 @@ FN plat_up_read
     call plat_load
 END_FN
 
-; Starts  curl -fsSL --max-time 5 ... -o <menu/latest.dl> <release list URL>  (a short, quiet try; it dies with the launcher).
-; MISTRIMULTI_RELEASE_URL replaces the URL (for tests); the https-only rule is then dropped so a test server on loopback works.
 %macro ARG 2
     lea rax, [%2]
     mov [ck_argv+%1*8], rax
@@ -1224,7 +1178,7 @@ FN plat_chk_start
     call sys_unlink
     lea rcx, [s_env_relurl]
     call env_get
-    mov r12, rax                        ; the override, or 0
+    mov r12, rax
     ARG 0, s_curl
     ARG 1, s_cu_f
     ARG 2, s_cu_t
@@ -1253,7 +1207,7 @@ FN plat_chk_start
     call open_devnull
     mov r13, rax
     mov [rsp+32], r13
-    mov qword [rsp+40], 3               ; die with the launcher, search PATH for curl
+    mov qword [rsp+40], 3
     lea rcx, [s_curl]
     lea rdx, [ck_argv]
     mov r8, r13

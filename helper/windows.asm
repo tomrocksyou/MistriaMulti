@@ -1,4 +1,5 @@
-; Native Windows platform layer. No C/C++ runtime or third-party libraries.
+; Windows platform layer
+
 bits 64
 default rel
 %define WINDOWS 1
@@ -63,7 +64,6 @@ FN pl_arg
 .done:
 END_FN
 
-; UTF-8 path RCX -> UTF-16 path_wide; returns pointer or zero.
 FN pl_path
     mov r8, rcx
     mov ecx, 65001
@@ -114,7 +114,6 @@ FN pl_bind
     movsxd rax, eax
 END_FN
 
-; socket, buffer, capacity, sockaddr output. SOCKET_ERROR must be sign-extended.
 FN pl_recv
     mov [rsp+32], r9
     lea rax, [from_length]
@@ -125,7 +124,6 @@ FN pl_recv
     movsxd rax, eax
 END_FN
 
-; socket, buffer, length, destination sockaddr.
 FN pl_send
     mov [rsp+32], r9
     mov qword [rsp+40], 16
@@ -149,7 +147,6 @@ FN pl_ticks
     call GetTickCount64
 END_FN
 
-; Returns byte count, or -1. Read capacity includes one overflow sentinel byte.
 FN pl_read
     mov r12, rdx
     mov r13, r8
@@ -199,7 +196,6 @@ FN pl_exists
 .done:
 END_FN
 
-; temp-write, close, replace. A sharing violation skips this publication, never waits.
 FN pl_atomic
     mov r12, rcx
     mov r13, rdx
@@ -264,7 +260,6 @@ FN pl_atomic
 .done:
 END_FN
 
-; RCX buffer, RDX length -> EAX 1 when filled with system randomness (BCryptGenRandom, system preferred RNG)
 FN pl_random
     mov r8d, edx
     mov rdx, rcx

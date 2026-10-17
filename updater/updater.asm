@@ -1,5 +1,5 @@
-; MistriaMulti updater: a plain Win32 window written in NASM. No C runtime.
-; Shows the installed and latest version, updates the mod files, and backs up solo saves.
+; updater
+
 bits 64
 default rel
 %define WINDOWS 1
@@ -159,7 +159,7 @@ status_text resw 2048
 installed_ver resw 40
 latest_ver resw 40
 file_buf resb 8192
-http_buf resb 1056768              ; HTTP_MAX + room for one more read (see http_get)
+http_buf resb 1056768
 manifest_buf resb 32768
 http_len resq 1
 manifest_len resq 1
@@ -191,10 +191,10 @@ res_have_ver resd 1
 res_wide resw 1500
 res_ascii resb 1600
 res_tmp resw 1100
-chk_code resd 1                      ; why do_check found no list: 0 ok, 20 no network, 21 invalid list
-upd_code resd 1                      ; why do_update changed nothing: 13 no game, 21, 22 download or checksum, 23 could not write or replace
-http_tmo resd 1                    ; milliseconds for every WinHTTP step, 0 = the system defaults
-upd_ok resd 1                      ; 1 when do_update finished installing
+chk_code resd 1
+upd_code resd 1
+http_tmo resd 1
+upd_ok resd 1
 
 section .text
 global start
@@ -204,11 +204,6 @@ global start
 %include "mp.inc"
 %include "momi.inc"
 
-
-
-
-; Looks for Fields of Mistria; fills game_dir. rax=1 found / 0 not found
-; Tries argv[1], then drive letters C..Z against the usual Steam library locations.
 FN find_game
     cmp dword [argc], 2
     jb .search
@@ -228,7 +223,6 @@ FN find_game
 .drive:
     xor r13d, r13d
 .cand:
-    ; game_dir = X + candidate
     lea rcx, [game_dir]
     lea rdx, [fmt_cand]
     mov r8d, r12d
@@ -253,8 +247,6 @@ FN find_game
 .finish:
 END_FN
 
-
-; Reads the installed mod version into installed_ver ("not installed" when missing).
 FN read_installed
     lea rcx, [txt_none]
     lea rdx, [installed_ver]
@@ -264,10 +256,10 @@ FN read_installed
     lea r8, [path_tmp]
     call join_wide
     lea rcx, [path_tmp]
-    mov edx, 0x80000000        ; GENERIC_READ
-    mov r8d, 1                 ; FILE_SHARE_READ
+    mov edx, 0x80000000
+    mov r8d, 1
     xor r9d, r9d
-    mov qword [rsp+32], 3      ; OPEN_EXISTING
+    mov qword [rsp+32], 3
     mov qword [rsp+40], 0x80
     mov qword [rsp+48], 0
     call CreateFileW
@@ -282,7 +274,7 @@ FN read_installed
     call ReadFile
     mov rcx, rbx
     call CloseHandle
-    mov edx, [rsp+64]          ; bytes read
+    mov edx, [rsp+64]
     lea rcx, [file_buf]
     lea r8, [needle_version]
     mov r9d, needle_version_len
@@ -326,49 +318,38 @@ FN show_status
     call SetWindowTextW
 END_FN
 
-; rcx = wide message to show under the versions
 FN set_state
     mov [state_msg], rcx
     call show_status
 END_FN
 
-; Creates a child control. rcx=class rdx=text r8d=style r9d=x ; stack: y,w,h,id (our own convention: r12..r15 preset)
 FN make_child
-    ; in: rcx class, rdx text, r8 style, r9 x, r12 y, r13 w, r14 h, r15 id
-    ; CreateWindowExW(ex, class, text, style, x, y, w, h, parent, menu, inst, param)
-    mov r10, r8                ; style
-    mov r8, rdx                ; text -> 3rd arg
-    mov rdx, rcx               ; class -> 2nd arg
-    xor ecx, ecx               ; ex style -> 1st arg
-    mov r11, r9                ; x
-    mov r9, r10                ; style -> 4th arg
-    mov [rsp+32], r11          ; x
-    mov [rsp+40], r12          ; y
-    mov [rsp+48], r13          ; w
-    mov [rsp+56], r14          ; h
+    mov r10, r8
+    mov r8, rdx
+    mov rdx, rcx
+    xor ecx, ecx
+    mov r11, r9
+    mov r9, r10
+    mov [rsp+32], r11
+    mov [rsp+40], r12
+    mov [rsp+48], r13
+    mov [rsp+56], r14
     mov rax, [cur_parent]
-    mov [rsp+64], rax          ; parent
-    mov [rsp+72], r15          ; control id as menu
+    mov [rsp+64], rax
+    mov [rsp+72], r15
     mov rax, [h_inst]
     mov [rsp+80], rax
     mov qword [rsp+88], 0
     call CreateWindowExW
     mov rbx, rax
     mov rcx, rbx
-    mov edx, 0x30              ; WM_SETFONT
+    mov edx, 0x30
     mov r8, [h_font]
     mov r9d, 1
     call SendMessageW
     mov rax, rbx
 END_FN
 
-
-
-
-
-
-; ---------- network ----------
-; rcx host (wide), rdx path (wide). Uses srv_port / srv_secure. eax=1 ok, body in http_buf, length in http_len
 FN http_get
     mov r12, rcx
     mov r13, rdx
@@ -411,7 +392,7 @@ FN http_get
     xor eax, eax
     cmp dword [srv_secure], 0
     je .ns
-    mov eax, 0x800000       ; WINHTTP_FLAG_SECURE
+    mov eax, 0x800000
 .ns:
     mov [rsp+48], rax
     call WinHttpOpenRequest
@@ -436,7 +417,7 @@ FN http_get
     mov dword [q_len], 4
     mov dword [status_code], 0
     mov rcx, rdi
-    mov edx, 0x20000013     ; STATUS_CODE | FLAG_NUMBER
+    mov edx, 0x20000013
     xor r8d, r8d
     lea r9, [status_code]
     lea rax, [q_len]
@@ -467,7 +448,7 @@ FN http_get
     jz .ok
     add r14d, eax
     cmp r14d, HTTP_MAX
-    ja .fail                        ; larger than anything we publish: refuse
+    ja .fail
     jmp .read
 .ok:
     mov [http_len], r14
@@ -496,7 +477,6 @@ FN http_get
     mov eax, r15d
 END_FN
 
-; rcx data, rdx length -> lowercase hex of SHA-256 in hexout (64 chars + 0). eax=1 ok
 FN sha256_hex
     mov r12, rcx
     mov r13, rdx
@@ -546,7 +526,6 @@ FN sha256_hex
 .d:
 END_FN
 
-; ---------- update list ----------
 FN cleanup_staged
     xor r12d, r12d
 .l: cmp r12d, [ent_n]
@@ -561,7 +540,6 @@ FN cleanup_staged
 .d:
 END_FN
 
-; Puts every file back that this update moved: the old file returns over the new one, files that were new are removed.
 FN rollback_all
     xor r12d, r12d
 .l: cmp r12d, [ent_n]
@@ -577,7 +555,7 @@ FN rollback_all
     jz .remove
     lea rcx, [wold]
     lea rdx, [wpath1]
-    mov r8d, 1                      ; MOVEFILE_REPLACE_EXISTING
+    mov r8d, 1
     call MoveFileExW
     jmp .n
 .remove:
@@ -588,11 +566,9 @@ FN rollback_all
 .d:
 END_FN
 
-; The loaded entry: move the old file aside (a running program can be renamed, not overwritten), move the staged
-; file into place. Records what happened in ent_flag so rollback_all can undo it. eax 1 ok / 0 failed
 FN swap_in
     lea rcx, [wold]
-    call DeleteFileW                ; a stale .old (fails, harmlessly, when its program still runs)
+    call DeleteFileW
     lea rcx, [wpath1]
     call file_exists
     test eax, eax
@@ -690,9 +666,6 @@ FN do_check
     call set_state
 END_FN
 
-; Verifies the whole list, downloads every file that differs from what is installed, verifies each hash, stages
-; it as <name>.new, and only then replaces the files (all or nothing; the old files are kept as <name>.old until
-; everything is in place). The running MistriMulti.exe is renamed to .old like any other program.
 FN do_update
     cmp qword [manifest_len], 0
     jne .go
@@ -713,8 +686,8 @@ FN do_update
     mov dword [n_mod], 0
     mov dword [n_bin], 0
     mov dword [self_upd], 0
-    xor r12d, r12d                  ; entry number
-    xor r15d, r15d                  ; files staged
+    xor r12d, r12d
+    xor r15d, r15d
 .p1:
     cmp r12d, [ent_n]
     jae .staged
@@ -769,7 +742,7 @@ FN do_update
     lea rdx, [rs_installing]
     xor r8d, r8d
     call res_write
-    xor r13d, r13d                  ; sweep 0: everything except manifest.toml; sweep 1: manifest.toml last
+    xor r13d, r13d
 .sweep:
     xor r12d, r12d
 .s1:
@@ -796,7 +769,6 @@ FN do_update
     inc r13d
     cmp r13d, 2
     jb .sweep
-    ; all in place: count, forget the backups
     xor r12d, r12d
 .fin:
     cmp r12d, [ent_n]
@@ -824,7 +796,7 @@ FN do_update
     test r13d, 2
     jz .finn
     lea rcx, [wold]
-    call DeleteFileW                ; refused for the program that is running: removed at the next start
+    call DeleteFileW
 .finn:
     inc r12d
     jmp .fin
@@ -902,20 +874,19 @@ FN do_update
 .d:
 END_FN
 
-; The one button: check, update when there is something to update, then the MOMI step. Every outcome is a plain sentence.
 FN do_oneclick
     mov dword [upd_ok], 0
     mov dword [n_mod], 0
     call do_check
     cmp qword [manifest_len], 0
-    je .d                           ; offline or invalid list: do_check said so
+    je .d
     call version_state
     cmp eax, 3
-    je .d                           ; the installed version is newer: nothing to do
+    je .d
     cmp eax, 2
     jne .go
     cmp dword [tools_stale], 0
-    je .after                       ; up to date (a pending MOMI step may still be due)
+    je .after
 .go:
     call do_update
     cmp dword [upd_ok], 0
@@ -926,7 +897,7 @@ FN do_oneclick
     cmp dword [n_mod], 0
     jne .step
     test r12d, r12d
-    jz .d                           ; only programs changed and nothing pending: MOMI has nothing new to install
+    jz .d
     lea rcx, [msg_pending]
     call set_state
 .step:
@@ -935,10 +906,6 @@ FN do_oneclick
 .d:
 END_FN
 
-; --daily <mod data folder> [<host> <port> <https 0/1> <path prefix>]   (started hidden by the launcher at every game start)
-; At most one check a day, silent, short timeouts: reads the latest release list, writes <mod data folder>\update.json
-; {"v":1,"latest":"x.y.z","checked":<unix seconds>} for the mod's badge. A line "check=off" in <mod data folder>\update.cfg turns it
-; off. Any failure ends quietly without touching anything. Nothing is installed.
 FN daily_check
     mov rax, [argv]
     mov r12, [rax+16]
@@ -968,7 +935,7 @@ FN daily_check
     div rcx
     mov rcx, 11644473600
     sub rax, rcx
-    mov r13, rax                    ; now, unix seconds
+    mov r13, rax
     lea rcx, [wpath1]
     lea rdx, [dl_json]
     mov r8, r12
@@ -1000,14 +967,14 @@ FN daily_check
     inc r8d
     cmp r8d, 11
     jb .dg
-    jmp .go                         ; absurd number: check again
+    jmp .go
 .dge:
     cmp r13, rax
-    jb .go                          ; "checked" lies in the future: check again
+    jb .go
     mov rdx, r13
     sub rdx, rax
     cmp rdx, 86400
-    jb .done                        ; checked within the last day
+    jb .done
 .go:
     mov dword [http_tmo], 5000
     mov qword [manifest_len], 0
@@ -1058,14 +1025,11 @@ FN daily_check
     call wsprintfW
     lea rcx, [wpath2]
     lea rdx, [wpath1]
-    mov r8d, 1                      ; MOVEFILE_REPLACE_EXISTING
+    mov r8d, 1
     call MoveFileExW
 .done:
 END_FN
 
-
-; Writes the result file (atomically: <file>.tmp, then rename):  state=<s>  version=<x.y.z>  message=<plain words>  error=<code>
-; rcx = state (ASCII), rdx = message (wide), r8d = error code. Does nothing when no result file was asked for.
 FN res_write
     cmp qword [res_path], 0
     je .d
@@ -1101,19 +1065,11 @@ FN res_write
     jz .d
     lea rcx, [res_tmp]
     mov rdx, [res_path]
-    mov r8d, 1                      ; MOVEFILE_REPLACE_EXISTING
+    mov r8d, 1
     call MoveFileExW
 .d:
 END_FN
 
-; --update <result file> [<game folder> <host> <port> <https 0/1> <path prefix>]   (no window, no questions; the last five are for tests)
-; Updates the mod files and the programs exactly like the Update button and reports in the result file: state=checking | downloading |
-; installing | done | failed | needs_momi. MOMI's installer runs only when the player turned that on earlier (momi-cli.cfg and
-; momi-cli.auto, see momi.inc) and MISTRIMULTI_NO_MOMI is not set; otherwise the state is needs_momi (marker momi-pending is left for
-; the next Update). Exit code 0 on done / needs_momi, else the error: 13 mod files not touched (no game found), 20 no network,
-; 21 invalid list, 22 download or checksum failed, 23 could not write or replace (everything put back).
-; error= is 0, or the same code; for needs_momi it is 0 (no installer run) or 30 installer reported a problem, 31 still running after
-; 5 minutes, 32 could not be started.
 FN update_result
     mov rax, [argv]
     mov rcx, [rax+16]
@@ -1138,7 +1094,7 @@ FN update_result
     jmp .found
 .scan:
     mov r12d, [argc]
-    mov dword [argc], 1                 ; find_game then scans the drives instead of reading the first argument
+    mov dword [argc], 1
     call find_game
     mov [argc], r12d
 .found:
@@ -1169,7 +1125,7 @@ FN update_result
     jne .go
     call momi_pending_check
     test eax, eax
-    jnz .momi                           ; an earlier in-game update still waits for the MOMI step
+    jnz .momi
     lea rcx, [st_done]
     lea rdx, [rs_current]
     xor r8d, r8d
@@ -1194,7 +1150,7 @@ FN update_result
     mov r13d, [upd_code]
     test r13d, r13d
     jnz .upd_failed
-    lea rcx, [st_done]                  ; nothing differed
+    lea rcx, [st_done]
     lea rdx, [rs_current]
     xor r8d, r8d
     call res_write
@@ -1219,7 +1175,6 @@ FN update_result
     xor eax, eax
     jmp .d
 .momi:
-    ; the mod files changed (or an earlier update left the MOMI step pending): leave the marker, then run MOMI only if allowed
     lea rcx, [wpath2]
     lea rdx, [mo_f_pending]
     call momi_cfg_path_into
@@ -1356,7 +1311,7 @@ FN do_save
     je .report
     mov rbx, rax
 .each:
-    test dword [fd], 0x10          ; skip folders
+    test dword [fd], 0x10
     jnz .next
     lea rcx, [wpath3]
     lea rdx, [fmt_slash]
@@ -1404,8 +1359,6 @@ FN do_save
 .d:
 END_FN
 
-
-; Writes the Documents folder into wpath2. eax 1 if found
 FN get_docs_dir
     lea rcx, [env_docs]
     lea rdx, [wpath2]
@@ -1433,7 +1386,6 @@ FN get_docs_dir
 .d:
 END_FN
 
-; rcx = path below %LOCALAPPDATA% (wide), rdx = file name to use in the logs folder (wide). Needs wpath1 = LOCALAPPDATA, wurl = folder
 FN copy_one_log
     mov r12, rdx
     mov r9, rcx
@@ -1456,7 +1408,6 @@ FN copy_one_log
 .d:
 END_FN
 
-; Collect Logs: copies the mod and launcher logs into Documents\MistriMulti Backups\Logs-<time> and opens that folder
 FN do_logs
     lea rcx, [env_local]
     lea rdx, [wpath1]
@@ -1520,7 +1471,7 @@ FN do_logs
     call wsprintfW
     lea rcx, [done_msg]
     call set_state
-    cmp dword [argc], 8            ; the hidden test mode does not open Explorer
+    cmp dword [argc], 8
     jae .d
     xor ecx, ecx
     lea rdx, [mo_verb]
@@ -1541,10 +1492,9 @@ FN do_logs
 END_FN
 
 FN wndproc
-    ; rcx=hwnd rdx=msg r8=wParam r9=lParam
-    cmp edx, 2                 ; WM_DESTROY
+    cmp edx, 2
     je .destroy
-    cmp edx, 0x111             ; WM_COMMAND
+    cmp edx, 0x111
     je .command
     call DefWindowProcW
     jmp .done
@@ -1604,7 +1554,7 @@ FN wndproc
     jmp .done
 .close:
     mov rcx, [h_wnd]
-    mov edx, 0x10              ; WM_CLOSE
+    mov edx, 0x10
     xor r8d, r8d
     xor r9d, r9d
     call DefWindowProcW
@@ -1621,7 +1571,6 @@ start:
     sub rsp, 8
     and rsp, -16
     sub rsp, 128
-    ; command line
     call GetCommandLineW
     mov rcx, rax
     lea rdx, [argc]
@@ -1630,10 +1579,9 @@ start:
     xor ecx, ecx
     call GetModuleHandleW
     mov [h_inst], rax
-    mov ecx, 17                ; DEFAULT_GUI_FONT
+    mov ecx, 17
     call GetStockObject
     mov [h_font], rax
-    ; defaults (arguments 2-5 override the server: host port secure(0/1) path-prefix, used for testing)
     lea rcx, [txt_unknown]
     lea rdx, [latest_ver]
     call wcopy
@@ -1662,7 +1610,6 @@ start:
     mov [srv_prefix], rcx
     mov dword [srv_override], 1
 .args_done:
-    ; --daily <mod data folder> [<host> <port> <https 0/1> <path prefix>]: the once-a-day update check (no window), see daily_check
     cmp dword [argc], 3
     jb .nodaily
     mov rax, [argv]
@@ -1699,7 +1646,6 @@ start:
     xor ecx, ecx
     call ExitProcess
 .nodaily:
-    ; --update <result file> [<game folder> <host> <port> <https 0/1> <path prefix>]: see update_result
     cmp dword [argc], 3
     jb .noresult
     mov rax, [argv]
@@ -1732,7 +1678,7 @@ start:
     mov [srv_prefix], rcx
     mov dword [srv_override], 1
 .res_run:
-    xor ecx, ecx                       ; app_dir and self_path are needed by the installer (startup_cleanup has not run)
+    xor ecx, ecx
     lea rdx, [self_path]
     mov r8d, 520
     call GetModuleFileNameW
@@ -1745,7 +1691,6 @@ start:
     mov ecx, eax
     call ExitProcess
 .noresult:
-    ; where this program lives: tools are installed next to it; leftovers of an earlier update are removed
     xor ecx, ecx
     lea rdx, [self_path]
     mov r8d, 520
@@ -1758,7 +1703,6 @@ start:
     call startup_cleanup
     lea rax, [txt_tools_unknown]
     mov [tools_text], rax
-    ; window class
     lea rdi, [wc]
     xor eax, eax
     mov ecx, 80
@@ -1770,15 +1714,15 @@ start:
     mov rax, [h_inst]
     mov [wc+24], rax
     xor ecx, ecx
-    mov edx, 32512             ; IDC_ARROW
+    mov edx, 32512
     call LoadCursorW
     mov [wc+40], rax
-    mov qword [wc+48], 6       ; COLOR_WINDOW + 1
+    mov qword [wc+48], 6
     lea rax, [cls_name]
     mov [wc+64], rax
     lea rcx, [wc]
     call RegisterClassExW
-    lea rax, [join_proc]               ; second window class: the Join window
+    lea rax, [join_proc]
     mov [wc+8], rax
     lea rax, [mp_join_class]
     mov [wc+64], rax
@@ -1788,11 +1732,10 @@ start:
     mov [wc+8], rax
     lea rax, [cls_name]
     mov [wc+64], rax
-    ; main window
     xor ecx, ecx
     lea rdx, [cls_name]
     lea r8, [title]
-    mov r9d, 0x10CA0000        ; WS_VISIBLE | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+    mov r9d, 0x10CA0000
     mov dword [rsp+32], 0x80000000
     mov dword [rsp+40], 0x80000000
     mov qword [rsp+48], 520
@@ -1805,10 +1748,9 @@ start:
     call CreateWindowExW
     mov [h_wnd], rax
     mov [cur_parent], rax
-    ; status text
     lea rcx, [cls_static]
     lea rdx, [txt_start]
-    mov r8d, 0x50000000        ; WS_CHILD | WS_VISIBLE
+    mov r8d, 0x50000000
     mov r9d, 16
     mov r12d, 12
     mov r13d, 480
@@ -1816,10 +1758,9 @@ start:
     mov r15d, 10
     call make_child
     mov [h_status], rax
-    ; buttons
     lea rcx, [cls_button]
     lea rdx, [txt_update]
-    mov r8d, 0x50010000        ; WS_CHILD | WS_VISIBLE | WS_TABSTOP
+    mov r8d, 0x50010000
     mov r9d, 16
     mov r12d, 204
     mov r13d, 236
@@ -1890,7 +1831,6 @@ start:
     mov r14d, 30
     mov r15d, 9
     call make_child
-    ; test hook:  --fetch <ip> <destination folder> <result file> [<bridge folder> <slot>]   (downloads the host's world, writes the result code)
     cmp dword [argc], 5
     jb .nofetch
     mov rax, [argv]
@@ -1919,7 +1859,7 @@ start:
     mov qword [wf_keypath], 0
     cmp dword [argc], 7
     jb .fetch_nosession
-    mov rax, [argv]                    ; optional: <bridge folder> <slot 1-7>, the join session to prove
+    mov rax, [argv]
     mov rcx, [rax+40]
     mov rax, [rax+48]
     movzx edx, word [rax]
@@ -1943,7 +1883,6 @@ start:
     xor ecx, ecx
     call ExitProcess
 .nofetch:
-    ; test hook:  --urls <version> <file>   writes the host and URL path used for the list, a mod file and a tool
     cmp dword [argc], 4
     jb .nourls
     mov rax, [argv]
@@ -1956,7 +1895,6 @@ start:
     xor ecx, ecx
     call ExitProcess
 .nourls:
-    ; test hook:  --scan <file>
     cmp dword [argc], 3
     jb .noscan
     mov rax, [argv]
@@ -1972,7 +1910,6 @@ start:
     xor ecx, ecx
     call ExitProcess
 .noscan:
-    ; hook for the launcher's in-game menu:  --addrs <file>
     cmp dword [argc], 3
     jb .noaddrs
     mov rax, [argv]
@@ -1987,7 +1924,6 @@ start:
     xor ecx, ecx
     call ExitProcess
 .noaddrs:
-    ; game + installed version
     call find_game
     mov [have_game], eax
     test eax, eax
@@ -2004,7 +1940,6 @@ start:
     lea rdx, [fmt_game_missing]
     call SetWindowTextW
 .loop_init:
-    ; Hidden test mode: argument 6 = steps (c=check u=update s=save), argument 7 = file to write the final status to.
     cmp dword [argc], 8
     jb .interactive
     mov rax, [argv]
@@ -2062,7 +1997,6 @@ start:
     mov rcx, [h_wnd]
     mov edx, 5
     call ShowWindow
-    ; MISTRIMULTI_OPEN_JOIN=1 opens the Join window straight away (used for screenshots)
     lea rcx, [mp_e_openjoin]
     lea rdx, [wpath1]
     mov r8d, 4

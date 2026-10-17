@@ -1,6 +1,5 @@
-; Test stand-in for curl.exe (Windows): finds  -o "<file>"  in its command line, writes "version 0.4.7" there (the first line of a release
-; list) and its own command line, as UTF-16, to "<file>.args". Exit code 0. Used by tests/test_launcher.py: the Windows launcher runs
-; %SystemRoot%\System32\curl.exe for the daily release check, and the test puts this program there.
+; Test stand-in for curl.exe
+
 bits 64
 default rel
 extern GetCommandLineW, CreateFileW, WriteFile, CloseHandle, ExitProcess, lstrlenW
@@ -50,12 +49,12 @@ start:
     jmp .copy
 .copied:
     mov word [rdi], 0
-    mov r12, rdi                        ; end of the path
+    mov r12, rdi
     lea rcx, [buf]
     lea rdx, [body]
     mov r8d, body_len
     call write_out
-    lea rsi, [suffix]                   ; <file>.args
+    lea rsi, [suffix]
     mov rdi, r12
 .sfx:
     lodsw
@@ -72,7 +71,7 @@ start:
     xor ecx, ecx
     call ExitProcess
 
-write_out:                              ; rcx = wide path, rdx = data, r8d = byte count
+write_out:
     push rbx
     push rsi
     sub rsp, 104

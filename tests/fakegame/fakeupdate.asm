@@ -1,7 +1,5 @@
-; Test stand-in for MistriMulti.exe --update <result file> (the update program the launcher runs when the in-game Update button is
-; pressed). It reads fakeupdate.cfg from its working directory (the launcher's folder):
-;     <exit code> <sleep ms>\n<result file text>
-; writes the text to the result file at once, sleeps, and exits with the code. Used by tests/test_launcher.py (Windows launcher).
+; Test stand-in for MistriMulti.exe
+
 bits 64
 default rel
 extern GetCommandLineW, CommandLineToArgvW, CreateFileW, ReadFile, WriteFile, CloseHandle, Sleep, ExitProcess
@@ -24,7 +22,7 @@ start:
     mov r15, rax
     cmp dword [argc], 3
     jb .bad
-    mov r14, [r15+16]                   ; the result file
+    mov r14, [r15+16]
     lea rcx, [cfgname]
     mov edx, 0x80000000
     mov r8d, 3
@@ -45,7 +43,7 @@ start:
     mov rcx, rbx
     call CloseHandle
     lea rsi, [buf]
-    xor r12d, r12d                      ; exit code
+    xor r12d, r12d
 .d1:movzx eax, byte [rsi]
     sub eax, '0'
     cmp eax, 9
@@ -55,7 +53,7 @@ start:
     inc rsi
     jmp .d1
 .s1:inc rsi
-    xor r13d, r13d                      ; sleep ms
+    xor r13d, r13d
 .d2:movzx eax, byte [rsi]
     sub eax, '0'
     cmp eax, 9
@@ -64,11 +62,11 @@ start:
     add r13d, eax
     inc rsi
     jmp .d2
-.s2:inc rsi                             ; the line end
+.s2:inc rsi
     lea rdi, [buf]
     mov eax, [nread]
     add rdi, rax
-    sub rdi, rsi                        ; length of the text
+    sub rdi, rsi
     jbe .nobody
     mov rcx, r14
     mov edx, 0x40000000

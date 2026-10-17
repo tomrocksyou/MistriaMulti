@@ -1,5 +1,5 @@
-; Steam identity reader using the flat Steamworks API.
-; Platform adapters accept an absolute path to the game's own Steam library.
+; Steam identity reader
+
 section .data
 steam_init_name db 'SteamAPI_InitFlat',0
 steam_shutdown_name db 'SteamAPI_Shutdown',0
@@ -38,9 +38,9 @@ FN steam_identity_main
     jz .failed
     mov r15, rax
     mov rcx, r12
-    xor edx, edx ; optional error-message buffer is null
+    xor edx, edx
     call si_call_one
-    test eax, eax ; ESteamAPIInitResult_OK = 0
+    test eax, eax
     jnz .failed
     mov dword [steam_initialized], 1
     mov rcx, r14
@@ -51,7 +51,6 @@ FN steam_identity_main
     mov rcx, r15
     call si_call_one
     mov r12, rax
-    ; Public-universe individual account, default desktop instance, nonzero ID.
     mov rdx, rax
     shr rdx, 32
     cmp edx, 0x01100001
@@ -107,6 +106,6 @@ FN steam_identity_main
     call si_call_zero
 .unload:
     call si_close
-    mov ecx, 2 ; no identity: caller may use an explicitly local fallback
+    mov ecx, 2
     call si_exit
 END_FN

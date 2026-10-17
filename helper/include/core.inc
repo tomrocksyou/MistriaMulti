@@ -1,6 +1,5 @@
-; MistriaMulti UDP transport.
-; UDP snapshots with bounded fragmentation, per-source reassembly, and replay rejection.
-; Game-level acknowledged event queues ride inside these snapshots.
+; UDP transport
+
 %define MAX_PLAYERS 8
 %define MAX_STATE 16384
 %define FRAGMENT 1152
@@ -42,7 +41,6 @@
 %define FRM_BUCKET_CAP 60
 %define WINDOW_MS 20000
 %define CFG_BYTES 4096
-
 
 section .data
 udp_socket dq -1
@@ -226,7 +224,6 @@ FN text_length
 .done:
 END_FN
 
-; Copy NUL-terminated string, returning the address of its destination terminator.
 FN text_copy
 .loop:
     mov al, [rdx]
@@ -249,7 +246,6 @@ FN bytes_copy
     rep movsb
 END_FN
 
-; FNV-1a is an integrity checksum, not cryptographic authentication.
 FN hash_bytes
     mov eax, 2166136261
     xor r8d, r8d
@@ -264,7 +260,6 @@ FN hash_bytes
 .done:
 END_FN
 
-; Decimal parse, rejects empty/non-digit/overflow; carry flag on failure.
 FN parse_decimal
     xor eax, eax
     cmp byte [rcx], 0
@@ -377,7 +372,7 @@ FN parse_arguments
     mov r12d, eax
     mov ecx, 1
     call pl_arg
-    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    test rax, rax
     jz .bad
     cmp dword [rax], 'host'
     je .host
@@ -397,7 +392,7 @@ FN parse_arguments
 .port:
     mov ecx, 2
     call pl_arg
-    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    test rax, rax
     jz .bad
     mov rcx, rax
     call parse_decimal
@@ -411,7 +406,7 @@ FN parse_arguments
     mov [local_address+2], ax
     mov ecx, 3
     call pl_arg
-    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    test rax, rax
     jz .bad
     mov rcx, rax
     call parse_decimal
@@ -430,7 +425,7 @@ FN parse_arguments
     mov [local_id], eax
     mov ecx, 4
     call pl_arg
-    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    test rax, rax
     jz .bad
     mov rcx, rax
     call parse_hex
@@ -438,7 +433,7 @@ FN parse_arguments
     mov [session_code], eax
     mov ecx, 5
     call pl_arg
-    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    test rax, rax
     jz .bad
     mov r13, rax
     mov rcx, rax
@@ -466,14 +461,14 @@ FN parse_arguments
     je .good
     mov ecx, 6
     call pl_arg
-    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    test rax, rax
     jz .bad
     mov rcx, rax
     call parse_ip
     jc .bad
     mov ecx, 7
     call pl_arg
-    test rax, rax                  ; an argument that cannot be converted is invalid, never a null pointer
+    test rax, rax
     jz .bad
     mov rcx, rax
     call parse_decimal
@@ -495,7 +490,6 @@ FN parse_arguments
 .done:
 END_FN
 
-; destination RCX and suffix RDX -> full path destination.
 FN make_path
     mov r12, rdx
     lea rdx, [base_dir]
@@ -587,7 +581,6 @@ FN send_local
 .done:
 END_FN
 
-; RCX source record, EDX recipient slot, R8D original source player ID: only to authenticated live peers
 FN send_to_peer
     mov r12, rcx
     mov ebx, edx
@@ -609,8 +602,6 @@ FN send_to_peer
 .done:
 END_FN
 
-; RCX source record, RDX destination sockaddr, R8D original source player ID, R9 32 byte session key.
-; Every datagram ends with a 16 byte HMAC tag over (direction byte, header, payload).
 FN send_record
     mov r12, rcx
     mov r13, rdx
@@ -684,7 +675,6 @@ FN send_record
     jb .chunk
 END_FN
 
-; Datagram length in ECX; the datagram and its source are in the platform-filled packet_in / source_address.
 FN receive_packet
     cmp ecx, 8
     jb .bad
@@ -702,7 +692,6 @@ FN receive_packet
 .done:
 END_FN
 
-; Datagram length in ECX (a 40 byte header, 1 to 1152 payload bytes, the 16 byte tag).
 FN receive_fragment
     cmp ecx, HEADER+TAG+1
     jb .bad
@@ -746,7 +735,6 @@ FN receive_fragment
     add ecx, HEADER
     cmp ecx, r15d
     jne .bad
-    ; Authentication comes before any state is touched.
     xor esi, esi
     cmp dword [mode_host], 0
     je .client
@@ -861,7 +849,6 @@ FN receive_fragment
     call hash_bytes
     cmp eax, [r13+P_HASH]
     jne .corrupt
-    ; A host spends one completed-frame token per accepted snapshot; a peer out of tokens is simply not published.
     test rsi, rsi
     jz .publish
     mov rcx, rsi
@@ -884,7 +871,6 @@ FN receive_fragment
     inc qword [rx_packets]
     cmp dword [mode_host], 0
     je .done
-    ; Broadcast accepted, fully reassembled state to every other live client.
     mov ebx, 1
 .forward:
     cmp ebx, MAX_PLAYERS
@@ -902,8 +888,6 @@ FN receive_fragment
     inc qword [rx_packets]
     cmp dword [mode_host], 0
     je .done
-    ; Forward one cached snapshot on the last heartbeat fragment. This also
-    ; introduces idle players to late joiners without rewriting game IPC files.
     movzx eax, word [packet_in+28]
     inc eax
     cmp ax, [packet_in+30]
@@ -966,7 +950,6 @@ FN expire_peers
 .done:
 END_FN
 
-; Append decimal unsigned 64-bit RCX to destination RDX, returning terminator.
 FN append_number
     mov r12, rdx
     mov rax, rcx

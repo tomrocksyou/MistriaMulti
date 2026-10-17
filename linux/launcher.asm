@@ -1,9 +1,5 @@
-; MistriaMulti launcher for Linux and the Steam Deck (NASM, x86-64 ELF, raw system calls, no C runtime).
-;   mistrimulti-launcher --steam <game command...>    Steam launch option:  "<folder>/mistrimulti-launcher" --steam %command%
-;   mistrimulti-launcher --configure                  asks host / join once and saves launcher.cfg (also: no arguments)
-; This is the Linux twin of launcher/launcher.asm and keeps its safety rules: the game is ALWAYS started, whatever fails
-; first; every value read from launcher.cfg is validated strictly before it reaches a command line or a file; solo saves are
-; only ever copied (never changed or removed). Shared pieces live in linux/*.inc and common/textutil.inc.
+; launcher for Linux and the Steam Deck
+
 bits 64
 default rel
 %include "abi.inc"
@@ -124,7 +120,6 @@ have_old resd 1
 old_mode resd 1
 old_player resd 1
 ans resb 64
-; discovery and world server
 disc_sock resq 1
 tcp_sock resq 1
 disc_pfds resb 16
@@ -143,7 +138,7 @@ ws_tv resb 16
 ws_best_set resd 1
 
 section .text
-FN a_cmp                        ; rcx, rdx ASCII strings -> eax negative / 0 / positive (byte order)
+FN a_cmp
 .l: movzx eax, byte [rcx]
     movzx r8d, byte [rdx]
     cmp eax, r8d
@@ -158,9 +153,7 @@ FN a_cmp                        ; rcx, rdx ASCII strings -> eax negative / 0 / p
 .d:
 END_FN
 
-; ---------------- identity ----------------
 FN get_uid
-    ; Steam identity probe (a separate process, so a Steam problem can never stop the launcher)
     lea rcx, [p1]
     lea rdx, [exe_dir]
     lea r8, [n_probe]
@@ -169,7 +162,7 @@ FN get_uid
     call path_kind
     cmp eax, 1
     jne .local
-    call find_steam_lib                  ; p2 = libsteam_api.so, eax 1 if found
+    call find_steam_lib
     test eax, eax
     jz .local
     lea rcx, [p3]
@@ -311,8 +304,6 @@ FN get_uid
 .done:
 END_FN
 
-; Looks for the game's libsteam_api.so (native Linux game only; under Proton there is none and the local identity is used).
-; Leaves its path in p2. eax 1 if found.
 FN find_steam_lib
     lea rcx, [s_env_steamapi]
     call env_get
@@ -349,7 +340,7 @@ FN find_steam_lib
     cmp eax, 1
     je .yes
 .cwd:
-    lea rcx, [p3]                       ; Steam starts the game command in the game's folder
+    lea rcx, [p3]
     mov edx, 1000
     call sys_getcwd
     test rax, rax
@@ -389,9 +380,6 @@ FN find_steam_lib
 .d:
 END_FN
 
-; ---------------- control.json and the bridge ----------------
-; ecx = 1 enabled / 0 disabled. Writes control.json (compact JSON, validated pieces only). eax 1 ok.
-; A data folder inside a Proton prefix is written the way the Windows game sees it: .../pfx/drive_c/X becomes C:/X.
 FN write_control
     mov r12d, ecx
     lea rcx, [bridge_dir]
@@ -477,7 +465,7 @@ FN write_control
 .d:
 END_FN
 
-FN unlink_in                    ; rcx folder, rdx file name -> removes folder/name (a missing file is fine)
+FN unlink_in
     mov r12, rcx
     mov r13, rdx
     lea rcx, [p1]
@@ -510,8 +498,7 @@ FN prepare_bridge
     lea r8, [s_x]
     call path2
     lea rcx, [p2]
-    call ensure_dirs                    ; creates the bridge folder itself (everything in front of the last name)
-    ; remove only this helper's own transient files
+    call ensure_dirs
     xor r12d, r12d
 .names:
     cmp r12d, 5
@@ -542,7 +529,7 @@ FN prepare_bridge
     call unlink_in
     inc r12d
     jmp .rxl
-.wk0:                                   ; session keys of an earlier run (world_<slot>.key) must not outlive it
+.wk0:
     xor r12d, r12d
 .wk:
     cmp r12d, 8
@@ -565,7 +552,7 @@ FN prepare_bridge
 .d:
 END_FN
 
-FN is_stamp                     ; rcx: eax 1 if "YYYYMMDD-HHMMSS"
+FN is_stamp
     xor edx, edx
 .l: movzx eax, byte [rcx+rdx]
     cmp edx, 15
@@ -593,13 +580,12 @@ FN is_stamp                     ; rcx: eax 1 if "YYYYMMDD-HHMMSS"
 .d:
 END_FN
 
-; keeps the 10 newest backup folders (names are timestamps) under p2 = solo_backups; only our own timestamp folders are touched
 FN prune_backups
     mov r15d, 64
 .again:
     dec r15d
     jz .d
-    xor r12d, r12d                         ; count
+    xor r12d, r12d
     mov byte [minname], 0
     lea rcx, [p2]
     call dir_open
@@ -676,7 +662,6 @@ FN prune_backups
 .d:
 END_FN
 
-; Copies the solo saves to mod_data/mistrimulti/solo_backups/<timestamp> (UTC). Copy only; never changes the saves.
 FN backup_saves
     lea rcx, [p1]
     lea rdx, [data_dir]
@@ -738,8 +723,6 @@ FN backup_saves
 .d:
 END_FN
 
-; Writes <bridge>/auth.cfg for the helper: where it keeps the install key and the key store, the deny list, and the room
-; password (docs/SECURITY.md). Private to this user. eax 1 ok. Rewritten at every start, so a removed password disappears.
 FN write_auth
     lea rcx, [out_buf]
     mov edx, 4096
@@ -791,8 +774,6 @@ FN write_auth
 .d:
 END_FN
 
-; ---------------- helper ----------------
-; A joining player refreshes the host's world just before the game starts (quietly: failures are fine).
 FN join_refresh_world
     cmp dword [cfg_mode], 2
     jne .d
@@ -807,7 +788,7 @@ FN join_refresh_world
     lea rcx, [bridge_dir]
     mov edx, [cfg_player]
     call world_use_session
-    call ticks_ms                       ; the world is released only to a joined player: wait for the helper's WELCOME
+    call ticks_ms
     add rax, 5000
     mov r13, rax
 .wait:
@@ -828,7 +809,6 @@ FN join_refresh_world
 .d:
 END_FN
 
-; Host side of the world server: ecx = slot of the guest -> eax 1 with its session key in wa_key (worldauth.inc)
 FN wf_key_for_slot
     mov r8d, ecx
     lea rcx, [wf_path2]
@@ -838,18 +818,16 @@ FN wf_key_for_slot
     call wa_load_key
 END_FN
 
-; Starts the network helper with the arguments the Windows launcher passes. eax 1 if it is still running after a short wait.
 FN start_helper
     lea rcx, [p1]
     lea rdx, [exe_dir]
     lea r8, [n_helper]
     call path2
     lea rcx, [p1]
-    mov edx, 1                          ; X_OK
+    mov edx, 1
     call sys_access
     test rax, rax
     jnz .bad
-    ; numbers as text
     lea rcx, [num1]
     mov edx, 16
     call pb_start
@@ -902,15 +880,15 @@ FN start_helper
     mov edx, O_WRITE_NEW
     mov r8d, 0644o
     call sys_open
-    mov r12, rax                        ; helper.log; -1 (output stays as it is) if it cannot be created
+    mov r12, rax
     test r12, r12
     jns .haslog
     mov r12, -1
 .haslog:
     call open_devnull
     mov r13, rax
-    mov [rsp+32], r12                   ; stderr
-    mov qword [rsp+40], 1               ; die with the launcher
+    mov [rsp+32], r12
+    mov qword [rsp+40], 1
     lea rcx, [p1]
     lea rdx, [helper_argv]
     mov r8, r13
@@ -960,17 +938,13 @@ FN stop_helper
 .d:
 END_FN
 
-; ---------------- host discovery and world server ----------------
-; While hosting, answer "who is hosting?" queries on UDP 7776 and serve the newest multiplayer save on TCP 7775.
-; Query:  exactly 64 bytes starting "MSDQ", version 1.  Reply: 64 bytes "MSDR", version 1, flags, game port, computer name.
-; The reply is never larger than the query, so this cannot be used to amplify traffic.
 FN disc_start
     mov qword [disc_sock], 0
     mov qword [tcp_sock], 0
     cmp dword [cfg_mode], 1
     jne .d
     mov ecx, 2
-    mov edx, 2 | 0x800 | 0x80000        ; SOCK_DGRAM
+    mov edx, 2 | 0x800 | 0x80000
     xor r8d, r8d
     call sys_socket
     test rax, rax
@@ -992,9 +966,8 @@ FN disc_start
     mov rcx, rbx
     call sys_close
 .tcp:
-    ; the host's world is offered on TCP 7775
     mov ecx, 2
-    mov edx, 1 | 0x800 | 0x80000        ; SOCK_STREAM
+    mov edx, 1 | 0x800 | 0x80000
     xor r8d, r8d
     call sys_socket
     test rax, rax
@@ -1002,8 +975,8 @@ FN disc_start
     mov r12, rax
     mov dword [wf_one], 1
     mov rcx, r12
-    mov edx, 1                          ; SOL_SOCKET
-    mov r8d, 2                          ; SO_REUSEADDR
+    mov edx, 1
+    mov r8d, 2
     lea r9, [wf_one]
     mov qword [rsp+32], 4
     call sys_setsockopt
@@ -1028,7 +1001,6 @@ FN disc_start
     mov rcx, r12
     call sys_close
 .reply:
-    ; the fixed part of the reply
     lea rdi, [disc_resp]
     xor eax, eax
     mov ecx, 64
@@ -1038,10 +1010,10 @@ FN disc_start
     lea rcx, [a_room]
     lea rdx, [room_default]
     call a_equal
-    xor eax, 1                          ; flag bit 0: this host uses a custom room code
+    xor eax, 1
     cmp byte [a_pass], 0
     je .nopassflag
-    or al, 2                            ; flag bit 1: this host needs a room password
+    or al, 2
 .nopassflag:
     mov [disc_resp+5], al
     mov eax, [cfg_port]
@@ -1050,7 +1022,7 @@ FN disc_start
     call sys_uname
     test rax, rax
     jnz .d
-    lea rsi, [uts+65]                   ; nodename
+    lea rsi, [uts+65]
     lea rdi, [disc_resp+8]
     xor ecx, ecx
 .nm:movzx eax, byte [rsi+rcx]
@@ -1063,7 +1035,6 @@ FN disc_start
 .d:
 END_FN
 
-; Newest valid multiplayer save -> eax 1, with ws_name (ASCII), ws_path, ws_size
 FN world_find_newest
     mov dword [ws_best_set], 0
     mov qword [ws_key], 0
@@ -1090,7 +1061,7 @@ FN world_find_newest
     je .anyworld
     mov rcx, r13
     call wf_name_id
-    cmp eax, [wh_id]                    ; the mod named the world being played: only that world's saves count
+    cmp eax, [wh_id]
     jne .each
 .anyworld:
     lea rcx, [p3]
@@ -1104,13 +1075,13 @@ FN world_find_newest
     call path_kind
     cmp eax, 1
     jne .each
-    mov rax, [st_buf+48]                ; size
+    mov rax, [st_buf+48]
     test rax, rax
     jz .each
     cmp rax, WF_MAX_FILE
     ja .each
     mov r14, rax
-    mov rax, [st_buf+88]                ; modification time, seconds
+    mov rax, [st_buf+88]
     imul rax, rax, 1000000000
     add rax, [st_buf+96]
     cmp dword [ws_best_set], 0
@@ -1143,7 +1114,6 @@ FN world_find_newest
 .d:
 END_FN
 
-; Serves one waiting connection: sends the newest multiplayer save with its SHA-256. Never reads a path from the client.
 FN world_serve
     mov dword [ws_fromlen], 16
     mov rcx, [tcp_sock]
@@ -1158,18 +1128,18 @@ FN world_serve
     mov qword [ws_tv], 15
     mov qword [ws_tv+8], 0
     mov rcx, rbx
-    mov edx, 1                          ; SOL_SOCKET
-    mov r8d, 20                         ; SO_RCVTIMEO
+    mov edx, 1
+    mov r8d, 20
     lea r9, [ws_tv]
     mov qword [rsp+32], 16
     call sys_setsockopt
     mov rcx, rbx
     mov edx, 1
-    mov r8d, 21                         ; SO_SNDTIMEO
+    mov r8d, 21
     lea r9, [ws_tv]
     mov qword [rsp+32], 16
     call sys_setsockopt
-    call wa_serve_auth                  ; nothing is read from disk or sent before the client proved its join session
+    call wa_serve_auth
     test eax, eax
     jz .close
     lea rdi, [wf_hdr]
@@ -1178,8 +1148,8 @@ FN world_serve
     rep stosb
     mov dword [wf_hdr], 'MSWR'
     mov byte [wf_hdr+4], 2
-    xor r12d, r12d                      ; file buffer
-    call wh_state                       ; the world the mod says the host plays now; its newest save (any newest save without a note)
+    xor r12d, r12d
+    call wh_state
     test eax, eax
     jz .nosave
     mov r13d, [ws_size]
@@ -1223,7 +1193,7 @@ FN world_serve
     mov byte [wf_hdr+5], 1
     cmp dword [wh_id], 0
     je .sendhdr
-    mov byte [wf_hdr+5], 4              ; the host plays a world it has not saved: nothing downloadable is that world
+    mov byte [wf_hdr+5], 4
     jmp .sendhdr
 .cannot:
     lea rdi, [wf_hdr+8]
@@ -1247,7 +1217,7 @@ FN world_serve
     call sys_munmap
 .close:
     mov rcx, rbx
-    mov edx, 1                          ; SHUT_WR
+    mov edx, 1
     call sys_shutdown
     mov rcx, rbx
     call sys_close
@@ -1255,7 +1225,6 @@ FN world_serve
 .d:
 END_FN
 
-; Waits for the game process (rcx pid) while answering discovery queries and world downloads. Sets game_exit.
 FN disc_serve
     mov r12, rcx
 .loop:
@@ -1269,7 +1238,7 @@ FN disc_serve
     mov word [disc_pfds+14], 0
     cmp qword [disc_sock], 0
     jne .p1
-    mov dword [disc_pfds], -1            ; poll ignores a negative descriptor
+    mov dword [disc_pfds], -1
 .p1:cmp qword [tcp_sock], 0
     jne .poll
     mov dword [disc_pfds+8], -1
@@ -1313,13 +1282,13 @@ FN disc_serve
     mov [rsp+40], rax
     call sys_sendto
 .check:
-    call sv_poll                        ; commands from the in-game menu (linux/menu.inc)
+    call sv_poll
     mov edx, [sig_flag]
     test edx, edx
     jz .nosig
     mov dword [sig_flag], 0
     mov rcx, r12
-    call sys_kill                       ; the launcher was asked to stop: pass the signal to the game
+    call sys_kill
 .nosig:
     mov rcx, r12
     call proc_poll
@@ -1330,7 +1299,6 @@ FN disc_serve
 .d:
 END_FN
 
-; Closes the discovery answer (UDP 7776) and the world server (TCP 7775): nothing listens when no host session runs.
 FN disc_stop
     mov rcx, [disc_sock]
     test rcx, rcx
@@ -1345,19 +1313,17 @@ FN disc_stop
 .d:
 END_FN
 
-; Steam stops a game by sending SIGTERM (and Ctrl+C in a terminal sends SIGINT): the launcher passes the signal on to the game and
-; then does its normal clean-up (helper stopped, control.json disabled) instead of dying in the middle.
 sig_handler:
     mov [sig_flag], edi
     ret
 sig_restorer:
-    mov eax, 15                         ; rt_sigreturn
+    mov eax, 15
     syscall
 
 FN install_signals
     lea rax, [sig_handler]
     mov [sigact_buf], rax
-    mov qword [sigact_buf+8], 0x04000000 ; SA_RESTORER
+    mov qword [sigact_buf+8], 0x04000000
     lea rax, [sig_restorer]
     mov [sigact_buf+16], rax
     mov qword [sigact_buf+24], 0
@@ -1378,18 +1344,16 @@ FN install_signals
     call sys_rt_sigaction
 END_FN
 
-; Runs the game command (everything after "--steam") as a child and waits for it, serving discovery and the world meanwhile.
-; Sets game_exit.
 FN launch_game
     mov dword [game_exit], 1
     call install_signals
     mov rax, [argv_v]
     lea rdx, [rax+16]
     mov rcx, [rdx]
-    mov r8, -1                          ; stdin, stdout and stderr stay as Steam set them
+    mov r8, -1
     mov r9, -1
     mov qword [rsp+32], -1
-    mov qword [rsp+40], 2               ; search PATH
+    mov qword [rsp+40], 2
     call spawn
     test rax, rax
     js .d
@@ -1399,7 +1363,6 @@ FN launch_game
 .d:
 END_FN
 
-; Replaces this process with the game (the plain, no-multiplayer start). Returns only if that fails.
 FN exec_game
     xor ecx, ecx
     call sigpipe_set
@@ -1411,7 +1374,6 @@ FN exec_game
     call say_err
 END_FN
 
-; ---------------- configure ----------------
 FN setup_failed_exit
     lea rcx, [t_giveup]
     call say
@@ -1429,7 +1391,7 @@ configure_main:
     mov [have_old], eax
     test eax, eax
     jnz .keeppass
-    mov byte [a_pass], 0               ; no usable old setup: nothing to keep (an invalid password is never written back)
+    mov byte [a_pass], 0
 .keeppass:
     lea rcx, [t_optional]
     call say
@@ -1611,7 +1573,6 @@ configure_main:
     call say
     jmp .ask_room
 .host_room:
-    ; a host keeps a custom room code it already had; otherwise the shared default is used
     cmp dword [old_mode], 1
     jne .defroom
     cmp dword [have_old], 0
@@ -1667,8 +1628,6 @@ cfg_giveup:
     mov ecx, 1
     call sys_exit
 
-; ---------------- --steam ----------------
-; Writes why multiplayer was not started to mod_data/mistrimulti/launcher.log (only when the folder is known)
 FN log_reason
     cmp qword [reason], 0
     je .d
@@ -1689,8 +1648,6 @@ FN log_reason
 .d:
 END_FN
 
-; Finds the argument that names the game (its file name starts with "FieldsOfMistria": FieldsOfMistria.exe under Proton,
-; or the native program). game_idx = its index, 0 if none. Also looks for --mistrimulti-direct (eax 1).
 FN scan_game_args
     mov qword [game_idx], 0
     xor r13d, r13d
@@ -1727,7 +1684,7 @@ program_main:
     mov ecx, 1
     call arg_n
     test rax, rax
-    jz configure_main                 ; no arguments: run the setup
+    jz configure_main
     mov r12, rax
     mov rcx, r12
     lea rdx, [s_configure]
@@ -1741,9 +1698,9 @@ program_main:
     jz .exit1
     cmp qword [argc_v], 3
     jb .exit1
-    mov ecx, 1                        ; a closed log pipe must not kill the launcher before the game starts
+    mov ecx, 1
     call sigpipe_set
-    call exe_init                     ; best effort from here on: every failure still starts the game
+    call exe_init
     call find_datadir
     mov r12d, eax
     test eax, eax
@@ -1752,7 +1709,7 @@ program_main:
     mov r12d, eax
 .pathsdone:
     call scan_game_args
-    mov r13d, eax                     ; --mistrimulti-direct seen
+    mov r13d, eax
     lea rbx, [r_exe]
     cmp qword [game_idx], 0
     je .direct
@@ -1763,13 +1720,12 @@ program_main:
     test r12d, r12d
     jz .direct
     call load_config
-    mov [sv_legacy], eax              ; 1: a valid launcher.cfg (optional, advanced): that role starts by itself, as before
+    mov [sv_legacy], eax
     call get_uid
     lea rcx, [epoch_a]
     call guid_hex
     cmp dword [sv_legacy], 0
     jne .legacy
-    ; No launcher.cfg: standby. Nothing is hosted or joined and no port opens; the in-game Multiplayer menu decides.
     lea rbx, [r_control]
     call menu_init
     test eax, eax
@@ -1786,7 +1742,7 @@ program_main:
     lea rbx, [r_auth]
     test eax, eax
     jnz .authok
-    cmp byte [a_pass], 0                ; without a password the helper still works (its keys stay in memory)
+    cmp byte [a_pass], 0
     jne .direct
 .authok:
     mov ecx, 1

@@ -1,8 +1,5 @@
-; MistriaMulti launcher (NASM, Windows x64, no C runtime).
-;   MistriMultiLauncher.exe --steam <game exe> [game args]   Steam launch option: starts the helper, runs the game, cleans up.
-;   MistriMultiLauncher.exe --configure                      asks host / join once and saves launcher.cfg
-; Safety rules: the game is ALWAYS started, whatever fails first; every value read from launcher.cfg is validated
-; strictly before it reaches a command line or file; solo saves are only ever copied (never changed or removed).
+; launcher
+
 bits 64
 default rel
 %define WINDOWS 1
@@ -196,13 +193,7 @@ global start
 %include "worldserve.inc"
 %include "menu.inc"
 
-
-
-
-
-
-
-FN wsubstr                      ; rcx haystack wide, rdx needle wide -> eax 1 if contained
+FN wsubstr
     mov rsi, rcx
     mov r12, rdx
 .o: cmp word [rsi], 0
@@ -226,7 +217,7 @@ FN wsubstr                      ; rcx haystack wide, rdx needle wide -> eax 1 if
 .d:
 END_FN
 
-FN guid_hex                     ; fills guid, writes 32 lowercase hex chars + NUL at rcx
+FN guid_hex
     mov r12, rcx
     lea rcx, [guid]
     call CoCreateGuid
@@ -249,7 +240,6 @@ FN guid_hex                     ; fills guid, writes 32 lowercase hex chars + NU
     mov byte [rdi], 0
 END_FN
 
-; rcx = key (length-prefixed), rdx = out ASCII buffer, r8 = out size. Value of "key=..." line from file_buf -> eax length (0 if absent)
 FN cfg_get
     movzx r9d, byte [rcx]
     lea r10, [rcx+1]
@@ -313,8 +303,6 @@ FN cfg_get
 .end:
 END_FN
 
-; ---------------- paths ----------------
-; Fills exe_path, exe_dir, game_dir (from argv[2] when present), local_app, mod_dir. eax=1 ok (game_dir is best effort)
 FN setup_paths
     mov byte [game_dir], 0
     mov word [game_dir], 0
@@ -366,7 +354,6 @@ FN setup_paths
 .d:
 END_FN
 
-; Reads and validates launcher.cfg. eax=1 valid. Sets cfg_mode (1 host, 2 join), cfg_port, cfg_player, cfg_local, a_*, w_*
 FN load_config
     lea rcx, [p1]
     lea rdx, [f_cat]
@@ -422,7 +409,7 @@ FN load_config
     call cfg_get
     test eax, eax
     jnz .haveRoom
-    lea rsi, [room_default]            ; no room code configured: everyone uses the built-in default
+    lea rsi, [room_default]
     lea rdi, [a_room]
     mov ecx, 9
     rep movsb
@@ -431,7 +418,7 @@ FN load_config
     call v_room
     test eax, eax
     jz .bad
-    lea rcx, [k_pass]                  ; optional room password; an unusable one stops multiplayer, never opens the room
+    lea rcx, [k_pass]
     lea rdx, [a_pass]
     mov r8d, 72
     call cfg_get
@@ -488,10 +475,7 @@ FN load_config
 .d:
 END_FN
 
-
-
 FN get_uid
-    ; Steam identity probe (a separate process, so a Steam problem can never stop the launcher)
     lea rcx, [p1]
     lea rdx, [f_slash]
     lea r8, [exe_dir]
@@ -656,7 +640,6 @@ FN get_uid
 .done:
 END_FN
 
-; rcx = 1 enabled / 0 disabled. Writes mod_data\mistrimulti\control.json (compact JSON, validated pieces only). eax=1 ok
 FN write_control
     mov r12d, ecx
     lea rcx, [bridge_dir]
@@ -719,8 +702,6 @@ FN write_control
 .d:
 END_FN
 
-; Writes <bridge>\auth.cfg for the helper: where it keeps the install key and the key store, the deny list, and the room
-; password (docs/SECURITY.md). Rewritten at every start, so a removed password disappears. eax=1 ok.
 FN write_auth
     mov ecx, 65001
     xor edx, edx
@@ -788,7 +769,6 @@ FN prepare_bridge
     call wsprintfW
     lea rcx, [p1]
     call ensure_dirs
-    ; remove only this helper's own transient files
     xor r12d, r12d
 .names:
     cmp r12d, 5
@@ -821,7 +801,7 @@ FN prepare_bridge
     call DeleteFileW
     inc r12d
     jmp .rxl
-.wk0:                                   ; session keys of an earlier run (world_<slot>.key) must not outlive it
+.wk0:
     xor r12d, r12d
 .wk:
     cmp r12d, 8
@@ -837,7 +817,7 @@ FN prepare_bridge
 .d:
 END_FN
 
-FN is_stamp                     ; rcx wide: eax 1 if "YYYYMMDD-HHMMSS"
+FN is_stamp
     xor edx, edx
 .l: movzx eax, word [rcx+rdx*2]
     cmp edx, 15
@@ -865,13 +845,12 @@ FN is_stamp                     ; rcx wide: eax 1 if "YYYYMMDD-HHMMSS"
 .d:
 END_FN
 
-; keeps the 10 newest backup folders (names are timestamps) under p2 = solo_backups; only our own timestamp folders are touched
 FN prune_backups
     mov r15d, 64
 .again:
     dec r15d
     jz .d
-    xor r12d, r12d                         ; count
+    xor r12d, r12d
     mov word [minname], 0
     lea rcx, [p3]
     lea rdx, [f_star]
@@ -953,7 +932,6 @@ FN prune_backups
 .d:
 END_FN
 
-; Copies the solo saves to mod_data\mistrimulti\solo_backups\<timestamp>. Copy only; never changes the saves.
 FN backup_saves
     lea rcx, [p1]
     lea rdx, [f_saves]
@@ -1033,8 +1011,6 @@ FN backup_saves
     call prune_backups
 END_FN
 
-; Starts the network helper hidden. eax=1 if it is running after a short wait
-; A joining player refreshes the host's world just before the game starts (quietly: failures are fine).
 FN join_refresh_world
     cmp dword [cfg_mode], 2
     jne .d
@@ -1051,7 +1027,7 @@ FN join_refresh_world
     lea rcx, [bridge_dir]
     mov edx, [cfg_player]
     call world_use_session
-    call GetTickCount64                 ; the world is released only to a joined player: wait for the helper's WELCOME
+    call GetTickCount64
     add rax, 5000
     mov r13, rax
 .wait:
@@ -1072,7 +1048,6 @@ FN join_refresh_world
 .d:
 END_FN
 
-; Host side of the world server: ecx = slot of the guest -> eax 1 with its session key in wa_key (worldauth.inc)
 FN wf_key_for_slot
     mov r8d, ecx
     lea rcx, [wf_path2]
@@ -1136,7 +1111,6 @@ FN start_helper
     test rax, rax
     jz .bad
     mov [h_helper], rax
-    ; Tie the helper to this launcher: if the launcher is killed, Windows ends the helper too.
     xor ecx, ecx
     xor edx, edx
     call CreateJobObjectW
@@ -1147,9 +1121,9 @@ FN start_helper
     xor eax, eax
     mov ecx, 144
     rep stosb
-    mov dword [jobinfo+16], 0x2000        ; JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    mov dword [jobinfo+16], 0x2000
     mov rcx, [h_job]
-    mov edx, 9                            ; JobObjectExtendedLimitInformation
+    mov edx, 9
     lea r8, [jobinfo]
     mov r9d, 144
     call SetInformationJobObject
@@ -1160,7 +1134,7 @@ FN start_helper
     mov rcx, [h_helper]
     mov edx, 400
     call WaitForSingleObject
-    cmp eax, 258                    ; WAIT_TIMEOUT = still running
+    cmp eax, 258
     je .ok
     mov rcx, [h_helper]
     call CloseHandle
@@ -1197,7 +1171,7 @@ FN stop_helper
     mov rcx, [h_helper]
     call CloseHandle
     mov qword [h_helper], 0
-    mov rcx, [h_job]                ; the job only exists to end a helper that outlives the launcher
+    mov rcx, [h_job]
     test rcx, rcx
     jz .d
     call CloseHandle
@@ -1205,10 +1179,6 @@ FN stop_helper
 .d:
 END_FN
 
-; ---------------- host discovery ----------------
-; While hosting, answer "who is hosting?" queries on UDP 7776 so friends can find this PC without typing an IP.
-; Query:  exactly 64 bytes starting "MSDQ", version 1.  Reply: 64 bytes "MSDR", version 1, flags, game port, computer name.
-; The reply is never larger than the query, so this cannot be used to amplify traffic.
 FN disc_start
     mov qword [disc_sock], 0
     cmp dword [cfg_mode], 1
@@ -1218,9 +1188,9 @@ FN disc_start
     call WSAStartup
     test eax, eax
     jnz .d
-    mov ecx, 2                      ; AF_INET
-    mov edx, 2                      ; SOCK_DGRAM
-    mov r8d, 17                     ; IPPROTO_UDP
+    mov ecx, 2
+    mov edx, 2
+    mov r8d, 17
     call socket
     cmp rax, -1
     je .d
@@ -1229,7 +1199,7 @@ FN disc_start
     xor eax, eax
     mov ecx, 16
     rep stosb
-    mov word [disc_from], 2         ; AF_INET, port 7776 (0x1E60) in network order, address 0.0.0.0
+    mov word [disc_from], 2
     mov word [disc_from+2], 0x601E
     mov rcx, rbx
     lea rdx, [disc_from]
@@ -1238,7 +1208,6 @@ FN disc_start
     test eax, eax
     jnz .fail
     mov [disc_sock], rbx
-    ; the host's world is offered on TCP 7775 (see world.inc)
     mov qword [tcp_sock], 0
     mov ecx, 2
     mov edx, 1
@@ -1270,7 +1239,6 @@ FN disc_start
     mov rcx, r12
     call closesocket
 .notcp:
-    ; prepare the fixed part of the reply
     lea rdi, [disc_resp]
     xor eax, eax
     mov ecx, 64
@@ -1280,10 +1248,10 @@ FN disc_start
     lea rcx, [a_room]
     lea rdx, [room_default]
     call a_equal
-    xor eax, 1                      ; flag bit 0: this host uses a custom room code
+    xor eax, 1
     cmp byte [a_pass], 0
     je .nopassflag
-    or al, 2                            ; flag bit 1: this host needs a room password
+    or al, 2
 .nopassflag:
     mov [disc_resp+5], al
     mov eax, [cfg_port]
@@ -1299,7 +1267,6 @@ FN disc_start
 .d:
 END_FN
 
-; Newest valid multiplayer save -> eax 1, with ws_name (ASCII), ws_path (wide), ws_size
 FN world_find_newest
     mov qword [ws_best], 0
     mov dword [ws_size], 0
@@ -1317,7 +1284,7 @@ FN world_find_newest
 .each:
     test dword [fd], 0x10
     jnz .next
-    cmp dword [fd+28], 0                ; size high word must be 0
+    cmp dword [fd+28], 0
     jne .next
     mov eax, [fd+32]
     test eax, eax
@@ -1336,10 +1303,10 @@ FN world_find_newest
     je .anyworld
     lea rcx, [ws_tmp]
     call wf_name_id
-    cmp eax, [wh_id]                    ; the mod named the world being played: only that world's saves count
+    cmp eax, [wh_id]
     jne .next
 .anyworld:
-    mov rax, [fd+20]                    ; last write time
+    mov rax, [fd+20]
     cmp rax, [ws_best]
     jbe .next
     mov [ws_best], rax
@@ -1371,7 +1338,6 @@ FN world_find_newest
 .d:
 END_FN
 
-; Serves one waiting connection: sends the newest multiplayer save with its SHA-256. Never reads a path from the client.
 FN world_serve
     mov dword [ws_fromlen], 32
     mov rcx, [tcp_sock]
@@ -1384,18 +1350,18 @@ FN world_serve
     mov [wf_sock], rbx
     mov dword [ws_timeout], 15000
     mov rcx, rbx
-    mov edx, 0xFFFF                    ; SOL_SOCKET
-    mov r8d, 0x1006                    ; SO_RCVTIMEO
+    mov edx, 0xFFFF
+    mov r8d, 0x1006
     lea r9, [ws_timeout]
     mov qword [rsp+32], 4
     call setsockopt
     mov rcx, rbx
     mov edx, 0xFFFF
-    mov r8d, 0x1005                    ; SO_SNDTIMEO
+    mov r8d, 0x1005
     lea r9, [ws_timeout]
     mov qword [rsp+32], 4
     call setsockopt
-    call wa_serve_auth                 ; nothing is read from disk or sent before the client proved its join session
+    call wa_serve_auth
     test eax, eax
     jz .close
     lea rdi, [wf_hdr]
@@ -1404,8 +1370,8 @@ FN world_serve
     rep stosb
     mov dword [wf_hdr], 'MSWR'
     mov byte [wf_hdr+4], 2
-    xor r12d, r12d                     ; file buffer
-    call wh_state                      ; the world the mod says the host plays now; its newest save (any newest save without a note)
+    xor r12d, r12d
+    call wh_state
     test eax, eax
     jz .nosave
     mov r13d, [ws_size]
@@ -1449,7 +1415,7 @@ FN world_serve
     mov byte [wf_hdr+5], 1
     cmp dword [wh_id], 0
     je .sendhdr
-    mov byte [wf_hdr+5], 4             ; the host plays a world it has not saved: nothing downloadable is that world
+    mov byte [wf_hdr+5], 4
     jmp .sendhdr
 .cannot:
     lea rdi, [wf_hdr+8]
@@ -1472,14 +1438,13 @@ FN world_serve
     call VirtualFree
 .close:
     mov rcx, rbx
-    mov edx, 1                         ; SD_SEND
+    mov edx, 1
     call shutdown
     mov rcx, rbx
     call closesocket
 .d:
 END_FN
 
-; Waits for the game process (rcx handle) while answering discovery queries and world downloads.
 FN disc_serve
     mov r12, rcx
 .loop:
@@ -1487,14 +1452,14 @@ FN disc_serve
     jne .have
     cmp qword [tcp_sock], 0
     jne .have
-    mov rcx, r12                        ; standby or joined: nothing listens, so just wait a moment for the game to end
+    mov rcx, r12
     mov edx, 250
     call WaitForSingleObject
     jmp .check
 .have:
     mov rax, [disc_sock]
     mov [disc_pfds], rax
-    mov word [disc_pfds+8], 0x0100      ; POLLRDNORM
+    mov word [disc_pfds+8], 0x0100
     mov word [disc_pfds+10], 0
     mov rax, [tcp_sock]
     mov [disc_pfds+16], rax
@@ -1543,7 +1508,7 @@ FN disc_serve
     mov [rsp+40], rax
     call sendto
 .check:
-    call sv_poll                        ; commands from the in-game menu (launcher/menu.inc)
+    call sv_poll
     mov rcx, r12
     xor edx, edx
     call WaitForSingleObject
@@ -1553,7 +1518,6 @@ FN disc_serve
 .d:
 END_FN
 
-; Runs the game command line (everything after "--steam") and waits for it. Sets game_exit.
 FN launch_game
     mov dword [game_exit], 1
     mov rsi, [cmd_rest]
@@ -1567,7 +1531,7 @@ FN launch_game
     inc ecx
     cmp ecx, 2040
     jb .cp
-    jmp .d                          ; absurdly long command line: refuse
+    jmp .d
 .copied:
     lea rcx, [cmd_buf]
     xor edx, edx
@@ -1581,7 +1545,7 @@ FN launch_game
     test rax, rax
     jz .d
     mov rbx, rax
-    cmp dword [sv_serving], 0           ; the plain no-multiplayer start just waits for the game
+    cmp dword [sv_serving], 0
     jne .serve
     mov rcx, rbx
     mov edx, -1
@@ -1599,7 +1563,6 @@ FN launch_game
 .d:
 END_FN
 
-; Puts  "<launcher>" --steam %command%  on the clipboard so it can simply be pasted into Steam. Failures are ignored.
 FN copy_launch_option
     lea rcx, [names]
     lea rdx, [f_launchopt]
@@ -1613,8 +1576,7 @@ FN copy_launch_option
     call clip_set
 END_FN
 
-; ---------------- console (configure) ----------------
-FN say                          ; rcx ASCII
+FN say
     mov r12, rcx
     call lstrlenA
     mov r8d, eax
@@ -1625,7 +1587,6 @@ FN say                          ; rcx ASCII
     call WriteFile
 END_FN
 
-; next input byte -> eax, or -1 at end of input (refills from stdin; works for consoles and pipes)
 FN getc
     mov eax, [in_pos]
     cmp eax, [in_len]
@@ -1656,14 +1617,13 @@ FN getc
 .d:
 END_FN
 
-; rcx prompt, rdx out buffer, r8 size -> eax length, -1 at end of input. Spaces and the line ending are dropped.
 FN ask
     mov r12, rdx
     mov r13, r8
     dec r13
     call say
-    xor r14d, r14d                  ; characters stored
-    xor r15d, r15d                  ; bytes seen
+    xor r14d, r14d
+    xor r15d, r15d
 .ch:
     call getc
     cmp eax, -1
@@ -1907,7 +1867,6 @@ configure_main:
     call say
     jmp .ask_room
 .host_room:
-    ; a host keeps a custom room code it already had; otherwise the shared default is used
     cmp dword [old_mode], 1
     jne .defroom
     cmp dword [have_old], 0
@@ -2000,7 +1959,6 @@ cfg_giveup:
     mov ecx, 1
     call ExitProcess
 
-; ---------------- --steam ----------------
 FN skip_to_game_cmd
     call GetCommandLineW
     mov rsi, rax
@@ -2047,7 +2005,6 @@ FN skip_to_game_cmd
     mov [cmd_rest], rsi
 END_FN
 
-; is argv[2] named FieldsOfMistria.exe ? eax 1/0
 FN game_exe_ok
     mov rax, [argv]
     mov rsi, [rax+16]
@@ -2072,7 +2029,6 @@ FN game_exe_ok
     movzx eax, al
 END_FN
 
-; Writes why multiplayer was not started to mod_data\mistrimulti\launcher.log (only when the folder is known)
 FN log_reason
     cmp qword [reason], 0
     je .d
@@ -2102,7 +2058,7 @@ start:
     call CommandLineToArgvW
     mov [argv], rax
     cmp dword [argc], 2
-    jb configure_main                 ; double-clicked: run the setup
+    jb configure_main
     mov rax, [argv]
     mov rcx, [rax+8]
     lea rdx, [s_configure]
@@ -2118,7 +2074,7 @@ start:
     cmp dword [argc], 3
     jb .exit1
     call skip_to_game_cmd
-    call setup_paths                  ; best effort: game_dir is filled even when the rest fails
+    call setup_paths
     mov r12d, eax
     call game_exe_ok
     lea rbx, [r_exe]
@@ -2134,13 +2090,12 @@ start:
     test r12d, r12d
     jz .direct
     call load_config
-    mov [sv_legacy], eax              ; 1: a valid launcher.cfg (optional, advanced): that role starts by itself, as before
+    mov [sv_legacy], eax
     call get_uid
     lea rcx, [epoch_a]
     call guid_hex
     cmp dword [sv_legacy], 0
     jne .legacy
-    ; No launcher.cfg: standby. Nothing is hosted or joined and no port opens; the in-game Multiplayer menu decides.
     lea rbx, [r_control]
     call menu_init
     test eax, eax
@@ -2157,7 +2112,7 @@ start:
     lea rbx, [r_auth]
     test eax, eax
     jnz .authok
-    cmp byte [a_pass], 0                ; without a password the helper still works (its keys stay in memory)
+    cmp byte [a_pass], 0
     jne .direct
 .authok:
     mov ecx, 1

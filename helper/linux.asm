@@ -1,4 +1,5 @@
-; Native Linux x86-64 layer. Linux syscalls only: no libc, Wine, or Proton.
+; Linux platform layer
+
 bits 64
 default rel
 %include "abi.inc"
@@ -196,7 +197,6 @@ FN pl_atomic
     xor eax, eax
 .done:
 END_FN
-; RCX buffer, RDX length -> EAX 1 when filled with system randomness (getrandom)
 FN pl_random
     mov r12, rcx
     mov r13, rdx

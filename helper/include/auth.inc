@@ -1,22 +1,4 @@
-; MistriaMulti join authentication, identity keys and abuse limits (docs/SECURITY.md).
-;
-; Layer choice: the UDP helper is the only code that sees every datagram, so slot admission and per-packet
-; authentication live here, in assembly, on top of the SHA-256 the launchers already use (linux/sha256.inc).
-; The game's GML has no hash function and no randomness it could trust.
-;
-; Join handshake (all integers little-endian; every packet starts 'MSAU', type byte, version byte 1):
-;   HELLO     guest -> host  128 bytes  session code, slot, 16 byte client nonce (padded so no reply is larger)
-;   CHALLENGE host  -> guest  64 bytes  flags (bit 0: password), window id, stateless cookie, host fingerprint
-;   PROOF     guest -> host  128 bytes  cookie echo, guest fingerprint, masked key, 16 byte tag
-;   WELCOME   host  -> guest  48 bytes  16 byte tag proving the host knows the same keys
-;   REJECT / RESYNC (16 bytes): why the join failed / "I do not know you, say HELLO again" (not authenticated)
-; Keys: IK is a random per-install secret (a file). The guest's key for one host is K = HMAC(IK, "MMBIND1" | host
-; fingerprint), so a host that learns K cannot impersonate the guest to another host. The guest fingerprint is
-; SHA256("MMFP2" | K)[0:16]: it names K, so nobody can claim a fingerprint without knowing its key. PWK is the
-; stretched room password (32 zero bytes when there is none). AK = HMAC(PWK, K) is the authentication key.
-; The first time a host sees a fingerprint, the guest sends K masked with HMAC(PWK, ...): with a password only
-; a password holder can read it; without one it is in the clear (trust on first use, documented).
-; After the handshake every game datagram ('MSMP' version 2) carries a 16 byte HMAC tag under the session key.
+; Join authentication
 
 %include "sha256.inc"
 
@@ -124,17 +106,13 @@ world_key resb 32
 world_path resb 2112
 
 section .text
-; ---------------------------------------------------------------------------------------------------------
-; small helpers
 
-; slot ECX -> auth record in RAX
 FN auth_pointer
     imul rax, rcx, A_SIZE
     lea rdx, [auth_tab]
     add rax, rdx
 END_FN
 
-; RCX a, RDX b, R8 length -> EAX 1 if equal; the running time does not depend on where they differ
 FN ct_equal
     xor eax, eax
     xor r9d, r9d
@@ -152,7 +130,6 @@ FN ct_equal
     movzx eax, al
 END_FN
 
-; Message builder for HMAC and SHA input: it lives in hm_in+64 so hashing needs no further copy.
 FN mb_add
     mov eax, [mb_len]
     mov r8d, eax
@@ -172,7 +149,6 @@ FN mb_add
 .done:
 END_FN
 
-; NUL terminated string RCX
 FN mb_str
     mov r12, rcx
     call text_length
@@ -181,7 +157,6 @@ FN mb_str
     call mb_add
 END_FN
 
-; HMAC-SHA256 with the 32 byte key RCX over the message built so far -> 32 bytes at RDX
 FN mb_hmac
     mov r12, rcx
     mov r13, rdx
@@ -229,7 +204,6 @@ FN mb_hmac
     call sha256_raw
 END_FN
 
-; SHA-256 of label (RCX, NUL terminated) | data (RDX, length R8) -> first 16 bytes to R9
 FN make_fp
     mov r12, rdx
     mov r13, r8
@@ -251,7 +225,6 @@ FN make_fp
     call bytes_copy
 END_FN
 
-; RCX destination, RDX source, R8 byte count -> lower-case hex and a NUL; RAX = the NUL
 FN hex_put
     lea r9, [hex_digits]
 .loop:
@@ -274,7 +247,6 @@ FN hex_put
     mov rax, rcx
 END_FN
 
-; RCX text (exactly 2*R8 hex digits), RDX destination, R8 byte count -> EAX 1 if valid
 FN hex_get
     xor r9d, r9d
 .loop:
@@ -324,7 +296,6 @@ FN hex_get
 .done:
 END_FN
 
-; Dotted IPv4 text RCX -> EAX in network memory order; carry set when invalid
 FN parse_ip4
     lea rdi, [sc+8]
     xor r8d, r8d
@@ -369,7 +340,6 @@ FN parse_ip4
 .done:
 END_FN
 
-; RCX string, RDX prefix (both NUL terminated) -> EAX prefix length if the string starts with it, else 0
 FN prefix_len
     xor eax, eax
 .loop:
@@ -385,10 +355,6 @@ FN prefix_len
 .done:
 END_FN
 
-; RCX destination, RDX length: fills with system randomness, EAX 1 on success (platform call, see linux/windows.asm)
-
-; ---------------------------------------------------------------------------------------------------------
-; password stretching: x = SHA256(x | hfp | password), PW_ROUNDS times (RCX host fingerprint, RDX 32 byte output)
 FN pwk_derive
     mov r12, rdx
     mov r13, rcx
@@ -419,10 +385,6 @@ FN pwk_derive
     call bytes_copy
 END_FN
 
-; ---------------------------------------------------------------------------------------------------------
-; token buckets (abuse limits). Time is the helper's monotonic clock in milliseconds.
-
-; RCX auth record: refills 40 packet tokens and 3 frame tokens per 100 ms (capped at 800 and 60)
 FN bucket_refill
     mov rax, [now_ms]
     sub rax, [rcx+A_LAST]
@@ -460,7 +422,6 @@ FN bucket_refill
 .done:
 END_FN
 
-; RCX auth record -> EAX 1 and one packet token spent, or 0
 FN bucket_packet
     mov r12, rcx
     call bucket_refill
@@ -476,7 +437,6 @@ FN bucket_packet
 .done:
 END_FN
 
-; RCX auth record -> EAX 1 and one completed-frame token spent, or 0
 FN bucket_frame
     mov r12, rcx
     call bucket_refill
@@ -492,8 +452,6 @@ FN bucket_frame
 .done:
 END_FN
 
-; Handshake packets from strangers: ECX 0 (HELLO) or 1 (PROOF), each with its own bucket of 30 per second (burst 30),
-; so a flood of HELLOs cannot stop a player who already holds a cookie from finishing the join.
 FN take_global
     lea r10, [gb_tokens]
     lea r11, [gb_last]
@@ -539,10 +497,6 @@ FN take_global
 .done:
 END_FN
 
-; ---------------------------------------------------------------------------------------------------------
-; configuration, keys, deny list
-
-; Reads <bridge>/auth.cfg (written by the launcher): key=, keys=, deny=, pass= lines.
 FN auth_cfg_load
     lea rcx, [auth_cfg_path]
     lea rdx, [auth_cfg_suffix]
@@ -623,7 +577,6 @@ FN auth_cfg_load
 .done:
 END_FN
 
-; RCX entry fingerprint (16 bytes) -> RAX pointer to its 48 byte entry (fingerprint, key) or 0
 FN ks_find
     mov r12, rcx
     xor ebx, ebx
@@ -649,7 +602,6 @@ FN ks_find
 .done:
 END_FN
 
-; Serialises the key store to keys_path (best effort): "<32 hex> <64 hex>\n" per entry
 FN ks_save
     cmp byte [keys_path], 0
     je .done
@@ -735,7 +687,6 @@ FN ks_load
 .done:
 END_FN
 
-; RCX fingerprint (16 bytes, may be 0), EDX address (network memory order) -> EAX 1 if on the deny list
 FN deny_match
     mov r12, rcx
     mov r13d, edx
@@ -774,7 +725,6 @@ FN deny_match
 .done:
 END_FN
 
-; Re-reads deny.txt: lines of a 32 digit fingerprint or a dotted IPv4 address; '#' starts a comment.
 FN deny_load
     mov dword [dn_fp_count], 0
     mov dword [dn_ip_count], 0
@@ -855,9 +805,6 @@ FN deny_load
 .done:
 END_FN
 
-; ---------------------------------------------------------------------------------------------------------
-; startup
-
 FN auth_init
     mov dword [pass_len], 0
     mov byte [key_path], 0
@@ -865,7 +812,6 @@ FN auth_init
     mov byte [deny_path], 0
     mov byte [pass_text], 0
     call auth_cfg_load
-    ; The password is checked now: a malformed one must stop the helper, never silently open the room.
     cmp dword [pass_len], -1
     je .badpass
     lea rcx, [pass_text]
@@ -884,7 +830,6 @@ FN auth_init
     inc ebx
     jmp .pwchars
 .pwok:
-    ; install key: read it, or make and save a new one
     xor r12d, r12d
     cmp byte [key_path], 0
     je .generate
@@ -957,10 +902,6 @@ FN auth_init
 .done:
 END_FN
 
-; ---------------------------------------------------------------------------------------------------------
-; sending
-
-; RCX buffer, EDX length, R8 destination sockaddr
 FN send_raw
     mov r9, r8
     mov r8d, edx
@@ -969,7 +910,6 @@ FN send_raw
     call pl_send
 END_FN
 
-; Fills the 8 byte header of auth_out: 'MSAU', type EDX, version 1
 FN auth_header
     mov dword [auth_out], 'MSAU'
     mov byte [auth_out+4], dl
@@ -977,7 +917,6 @@ FN auth_header
     mov word [auth_out+6], 0
 END_FN
 
-; ECX reason -> REJECT to the current source
 FN send_reject
     mov r12d, ecx
     lea rdi, [auth_out]
@@ -996,10 +935,6 @@ FN send_reject
     call send_raw
 END_FN
 
-; ---------------------------------------------------------------------------------------------------------
-; host side
-
-; ECX window id, EDX slot, R8 client nonce, R9 16 byte output: the stateless cookie for the current source
 FN make_cookie
     mov r12, r9
     mov r13, r8
@@ -1029,7 +964,6 @@ FN make_cookie
     call bytes_copy
 END_FN
 
-; Current cookie window id -> EAX
 FN window_now
     mov rax, [now_ms]
     xor edx, edx
@@ -1037,7 +971,6 @@ FN window_now
     div rcx
 END_FN
 
-; HELLO (128 bytes) in packet_in
 FN host_hello
     mov eax, [packet_in+8]
     cmp eax, [session_code]
@@ -1094,7 +1027,6 @@ FN host_hello
 .done:
 END_FN
 
-; PROOF (128 bytes) in packet_in
 FN host_proof
     mov eax, [packet_in+8]
     cmp eax, [session_code]
@@ -1132,7 +1064,6 @@ FN host_proof
     call deny_match
     test eax, eax
     jnz .denied
-    ; the key: stored for this fingerprint, or unmasked from the registration
     lea rcx, [packet_in+52]
     call ks_find
     mov r13, rax
@@ -1207,7 +1138,6 @@ FN host_proof
     call ct_equal
     test eax, eax
     jz .authfail
-    ; a captured PROOF must not open a second session
     xor ebx, ebx
     lea r14, [replay_ring]
 .replay:
@@ -1233,7 +1163,6 @@ FN host_proof
     mov ecx, r12d
     call auth_pointer
     mov r15, rax
-    ; the slot belongs to someone else while that player is live?
     cmp dword [r14+P_PRESENT], 0
     je .slot_free
     cmp dword [r15+A_STATE], 1
@@ -1245,7 +1174,6 @@ FN host_proof
     test eax, eax
     jz .busy
 .slot_free:
-    ; the same install live in another slot?
     mov ebx, 1
 .elsewhere:
     cmp ebx, MAX_PLAYERS
@@ -1286,7 +1214,6 @@ FN host_proof
     inc dword [ks_count]
     call ks_save
 .store_done:
-    ; remember the nonce
     mov eax, [replay_next]
     and eax, 7
     shl eax, 4
@@ -1297,7 +1224,6 @@ FN host_proof
     cld
     rep movsb
     inc dword [replay_next]
-    ; session key
     mov dword [mb_len], 0
     lea rcx, [lbl_sk]
     call mb_str
@@ -1310,7 +1236,6 @@ FN host_proof
     lea rcx, [ak_buf]
     lea rdx, [r15+A_SK]
     call mb_hmac
-    ; the WELCOME tag
     mov dword [mb_len], 0
     lea rcx, [lbl_welcome]
     call mb_str
@@ -1326,7 +1251,6 @@ FN host_proof
     lea rcx, [ak_buf]
     lea rdx, [hm_res]
     call mb_hmac
-    ; the slot
     mov rax, [source_address]
     mov [r14+P_ADDR], rax
     mov rax, [source_address+8]
@@ -1353,7 +1277,6 @@ FN host_proof
     rep movsb
     mov ecx, r12d
     call publish_auth
-    ; WELCOME
     lea rdi, [auth_out]
     xor eax, eax
     mov ecx, 48
@@ -1398,7 +1321,6 @@ FN host_proof
 .done:
 END_FN
 
-; Hint to an unknown source that sends game data: say HELLO again (unauthenticated, 16 bytes, twice a second at most)
 FN send_resync
     mov rax, [now_ms]
     sub rax, [resync_last]
@@ -1420,9 +1342,6 @@ FN send_resync
 .done:
 END_FN
 
-; ---------------------------------------------------------------------------------------------------------
-; guest side
-
 FN guest_from_host
     mov rax, [source_address]
     cmp rax, [host_address]
@@ -1430,7 +1349,6 @@ FN guest_from_host
     movzx eax, al
 END_FN
 
-; CHALLENGE (64 bytes) in packet_in
 FN guest_challenge
     cmp dword [g_state], 1
     jne .done
@@ -1449,7 +1367,6 @@ FN guest_challenge
     mov ecx, 16
     cld
     rep movsb
-    ; PWK: stretched when the host asks for a password, zero otherwise
     lea rdi, [g_pwk]
     xor eax, eax
     mov ecx, 32
@@ -1488,7 +1405,6 @@ FN guest_challenge
     cld
     rep movsb
 .keys:
-    ; K = HMAC(IK, "MMBIND1" | host fingerprint)
     mov dword [mb_len], 0
     lea rcx, [lbl_bind]
     call mb_str
@@ -1522,7 +1438,6 @@ FN guest_challenge
     lea rcx, [g_pwk]
     lea rdx, [ak_buf]
     call mb_hmac
-    ; the PROOF packet
     lea rdi, [auth_out]
     xor eax, eax
     mov ecx, 128
@@ -1576,7 +1491,6 @@ FN guest_challenge
     mov ecx, 16
     cld
     rep movsb
-    ; session key and the WELCOME tag we expect
     mov dword [mb_len], 0
     lea rcx, [lbl_sk]
     call mb_str
@@ -1627,7 +1541,6 @@ FN guest_challenge
 .done:
 END_FN
 
-; WELCOME (48 bytes) in packet_in
 FN guest_welcome
     cmp dword [g_state], 3
     jne .done
@@ -1662,7 +1575,6 @@ FN guest_welcome
 .done:
 END_FN
 
-; REJECT (16 bytes) in packet_in
 FN guest_reject
     call guest_from_host
     test eax, eax
@@ -1690,7 +1602,6 @@ FN guest_reject
 .done:
 END_FN
 
-; RESYNC (16 bytes): the host lost us (restart, expiry)
 FN guest_resync
     cmp dword [g_state], 2
     jne .done
@@ -1709,7 +1620,6 @@ FN guest_resync
 .done:
 END_FN
 
-; Once per main loop pass on a guest: sends HELLO, and drops back to HELLO after a silent host
 FN auth_tick
     cmp dword [mode_host], 0
     jne .done
@@ -1773,9 +1683,6 @@ FN auth_tick
     call publish_auth
 .done:
 END_FN
-
-; ---------------------------------------------------------------------------------------------------------
-; receive dispatch for 'MSAU' packets: ECX datagram length (strict per type)
 
 FN auth_receive
     mov r12d, ecx
@@ -1842,8 +1749,6 @@ FN auth_receive
 .done:
 END_FN
 
-; ECX plain length (header and payload), RDX 32 byte key, R8D direction (0 guest to host, 1 host to guest)
-; -> EAX 1 if the 16 byte tag after the plain bytes in packet_in is valid
 FN verify_packet
     mov r12d, ecx
     mov r13, rdx
@@ -1865,10 +1770,6 @@ FN verify_packet
     call ct_equal
 END_FN
 
-; ---------------------------------------------------------------------------------------------------------
-; peers leaving, published authentication state
-
-; Slot ECX is gone (expired, kicked): clears its record and publishes the inactive state
 FN peer_drop
     mov ebx, ecx
     call peer_pointer
@@ -1889,7 +1790,7 @@ FN peer_drop
     call publish_record
     cmp dword [mode_host], 0
     jne .publish
-    test ebx, ebx                       ; a guest only publishes the state of the host (slot 0)
+    test ebx, ebx
     jnz .done
 .publish:
     mov ecx, ebx
@@ -1897,9 +1798,6 @@ FN peer_drop
 .done:
 END_FN
 
-; Writes <bridge>/world_<slot>.key for ECX = slot (a guest: its own slot): WK = HMAC(SK, "MMWORLD1") while that session is
-; established, 32 zero bytes otherwise. The launcher of the same computer reads it to run the world download's challenge and
-; response (docs/PROTOCOL.md): only a party that completed this join handshake can answer it. The file is created 0600 on Linux.
 FN publish_world_key
     mov ebx, ecx
     cmp dword [mode_host], 0
@@ -1947,11 +1845,9 @@ FN publish_world_key
     call pl_atomic
 END_FN
 
-; Writes <bridge>/auth_<slot>.json: {"fp":"..","gen":N,"state":S,"reject":R}. Hosts publish the verified
-; fingerprint of each guest; a guest publishes the host's fingerprint (slot 0) and why a join was rejected.
 FN publish_auth
     mov ebx, ecx
-    call publish_world_key              ; first: whoever sees the new state can already use the key
+    call publish_world_key
     mov ecx, ebx
     lea rcx, [auth_path]
     lea rdx, [auth_json_suffix]
@@ -2023,7 +1919,6 @@ FN publish_auth
     call pl_atomic
 END_FN
 
-; Once a second on a host: re-read deny.txt and remove players who are on it
 FN auth_second
     cmp dword [mode_host], 0
     je .done
