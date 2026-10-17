@@ -32,7 +32,9 @@ Then grab the latest download from **Releases** (on the right).
 3. In MOMI, tick MistriaMulti and click Install. (If MOMI's game picker pre-fills a `.exe` path, clear it and choose the game's normal
    program instead.)
 
-**Updating:** close the game, then Windows: open `MistriMulti.exe` and press **Update MistriMulti**; Linux / Steam Deck:
+**Updating:** close the game, then 
+Windows: open `MistriMulti.exe` and press **Update MistriMulti**; 
+Linux / Steam Deck:
 `./install.sh --update` (or `mistrimulti-manager update`). It downloads the newest release, verifies it and replaces the mod files
 and programs; then press Install in MOMI once more (or let it run MOMI's command-line installer for you after you agreed once).
 Details: [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md#update), [docs/RELEASES.md](docs/RELEASES.md).
