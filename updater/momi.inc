@@ -1,10 +1,5 @@
-; MOMI step of the manager: after an update changed the mod files, MOMI has to rebuild the game's data. Two ways:
-;  1. the player's chosen MOMI command-line program (a file name containing "-cli"), run for them, ONLY after they agree in a
-;     question each time, with EXIT_ON_COMPLETE=true so it does not wait for a key. It is started in the game folder and gets no
-;     arguments: per MOMI's public source (Program.cs, Standalone.cs) no arguments means "install every mod in the mods folder".
-;  2. otherwise (no CLI chosen, declined, failed) the chosen MOMI window program is opened and the player is told to press Install.
-; Nothing is searched for or guessed: both paths are chosen by the player once (or set by the tests through the environment).
-; Facts and what is unverified: docs/MOMI-NOTES.md.
+; MOMI step of the manager
+
 extern ShellExecuteW, GetOpenFileNameW, SetEnvironmentVariableW, MessageBoxW, EnableWindow, PeekMessageW
 extern GetExitCodeProcess, WaitForSingleObject, GetTickCount64
 
@@ -56,7 +51,6 @@ mo_fout resq 1
 
 section .text
 
-; rcx = format of the file name (mo_f_cfg / mo_f_cfgcli). wpath2 = that file under %LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti  eax 1 ok
 FN momi_cfg_path
     mov r12, rcx
     lea rcx, [mp_e_local]
@@ -78,7 +72,6 @@ FN momi_cfg_path
 .d:
 END_FN
 
-; Does the file name part of the wide path in rcx contain "-cli" (any case: ModsOfMistriaInstaller-cli.exe, ...-cli-linux)? eax 1 / 0
 FN momi_is_cli
     mov rsi, rcx
     mov rdi, rcx
@@ -123,8 +116,6 @@ FN momi_is_cli
 .d:
 END_FN
 
-; Looks for a MOMI program: the environment variable rcx names, then the choice saved in the file whose format is rdx; r8 = buffer for
-; the path (520 characters). Nothing else is searched. eax 1 found
 FN momi_find_x
     mov [mo_fenv], rcx
     mov [mo_ffmt], rdx
@@ -155,7 +146,6 @@ FN momi_find_x
     lea rdx, [file_buf]
     mov word [rdx+rax], 0
     shr eax, 1
-    ; trim trailing CR, LF and spaces
 .trim:
     test eax, eax
     jz .none
@@ -197,7 +187,6 @@ FN momi_find_cli
     call momi_find_x
 END_FN
 
-; Remembers the program rcx in the file whose name format is rdx (see momi_cfg_path)
 FN momi_remember
     mov r12, rcx
     mov rcx, rdx
@@ -215,7 +204,6 @@ FN momi_remember
 .d:
 END_FN
 
-; Asks the player for a MOMI program once. eax 1 if one was chosen (momi_path)
 FN momi_pick
     lea rdi, [momi_ofn]
     xor eax, eax
@@ -233,12 +221,11 @@ FN momi_pick
     mov dword [momi_ofn+56], 520
     lea rax, [mo_title]
     mov [momi_ofn+88], rax
-    mov dword [momi_ofn+96], 0x1808      ; file must exist, path must exist, keep the working folder
+    mov dword [momi_ofn+96], 0x1808
     lea rcx, [momi_ofn]
     call GetOpenFileNameW
 END_FN
 
-; Opens the chosen MOMI window program (momi_path) in its own folder, with no arguments. eax 1 if it started
 FN momi_exec_gui
     lea rcx, [momi_path]
     lea rdx, [wpath3]
@@ -255,7 +242,7 @@ FN momi_exec_gui
     xor r9d, r9d
     lea rax, [wpath3]
     mov [rsp+32], rax
-    mov qword [rsp+40], 1           ; SW_SHOWNORMAL
+    mov qword [rsp+40], 1
     call ShellExecuteW
     xor ecx, ecx
     cmp rax, 32
@@ -263,10 +250,8 @@ FN momi_exec_gui
     mov eax, ecx
 END_FN
 
-; The button: find MOMI (ask once), open it, and tell the player what to click. Never passes arguments to MOMI's window program.
-; A command-line program chosen here is only remembered (momi-cli.cfg); it is run by "Update MistriMulti", after a question.
 FN momi_open
-    xor r13d, r13d                  ; 1 when the player just chose the program
+    xor r13d, r13d
     call momi_find
     test eax, eax
     jnz .have
@@ -283,7 +268,7 @@ FN momi_open
     jnz .cli
     test r13d, r13d
     jz .run
-    lea rcx, [momi_path]            ; remember the choice
+    lea rcx, [momi_path]
     lea rdx, [mo_f_cfg]
     call momi_remember
 .run:
@@ -299,7 +284,7 @@ FN momi_open
     lea rcx, [mo_m_cli]
     test r13d, r13d
     jz .say
-    lea rcx, [momi_path]            ; just chosen: keep it for the one-click update, do not run it now
+    lea rcx, [momi_path]
     lea rdx, [mo_f_cfgcli]
     call momi_remember
     lea rcx, [mo_m_clisaved]
@@ -310,7 +295,6 @@ FN momi_open
     call set_state
 END_FN
 
-; rcx = message with one %s (the version) and optionally one %d (momi_exit). It becomes the status.
 FN momi_say_version
     mov r12, rcx
     lea rcx, [done_msg]
@@ -322,7 +306,6 @@ FN momi_say_version
     call set_state
 END_FN
 
-; May the command-line installer run? A question each time; hidden test mode: only with MISTRIMULTI_MOMI_CONSENT=yes. eax 1 yes
 FN momi_consent
     cmp dword [momi_quiet], 0
     je .ask
@@ -344,10 +327,10 @@ FN momi_consent
     mov rcx, [h_wnd]
     lea rdx, [momi_text]
     lea r8, [mo_c_title]
-    mov r9d, 0x24                   ; MB_YESNO | MB_ICONQUESTION
+    mov r9d, 0x24
     call MessageBoxW
     xor ecx, ecx
-    cmp eax, 6                      ; IDYES
+    cmp eax, 6
     sete cl
     mov eax, ecx
     jmp .d
@@ -356,8 +339,6 @@ FN momi_consent
 .d:
 END_FN
 
-; Runs momi_cli_path with no arguments in the game folder, EXIT_ON_COMPLETE=true, no window. Waits up to 5 minutes (the manager's window
-; keeps repainting). eax: 0 could not start, 1 exit code 0, 2 another exit code (momi_exit), 3 still running
 FN momi_run_cli
     mov dword [momi_exit], 0
     lea rcx, [mo_e_exit]
@@ -374,7 +355,7 @@ FN momi_run_cli
 .gd:
     lea rcx, [momi_cmd]
     xor r8d, r8d
-    mov r9d, 0x08000000             ; CREATE_NO_WINDOW
+    mov r9d, 0x08000000
     call spawn
     test rax, rax
     jz .nostart
@@ -400,7 +381,7 @@ FN momi_run_cli
     xor edx, edx
     xor r8d, r8d
     xor r9d, r9d
-    mov qword [rsp+32], 1           ; PM_REMOVE
+    mov qword [rsp+32], 1
     call PeekMessageW
     test eax, eax
     jz .tm
@@ -440,15 +421,13 @@ FN momi_run_cli
 .d:
 END_FN
 
-; After an update that changed mod files: run the chosen MOMI command-line installer (after a question), else open the chosen MOMI
-; window program, else leave the "press Open MOMI" instructions in the status.
 FN momi_after_update
     mov dword [momi_declined], 0
     call momi_find_cli
     test eax, eax
     jz .gui
     lea rcx, [momi_cli_path]
-    call momi_is_cli                ; a program whose name has no "-cli" is never run here
+    call momi_is_cli
     test eax, eax
     jz .gui
     call momi_consent
@@ -499,14 +478,13 @@ FN momi_after_update
     jmp .d
 .nogui:
     cmp dword [momi_declined], 0
-    je .d                           ; nothing chosen: the update message already says "press Open MOMI"
+    je .d
     lea rcx, [mo_r_declined]
 .say:
     call momi_say_version
 .d:
 END_FN
 
-; The marker an in-game update leaves when the mod files changed but MOMI could not run (the game was open). eax 1 if it exists
 FN momi_pending_check
     lea rcx, [mo_f_pending]
     call momi_cfg_path
@@ -527,7 +505,6 @@ FN momi_pending_clear
 .d:
 END_FN
 
-; rcx = output (wide), rdx = file name format: the same file as momi_cfg_path, written to rcx. eax 1 ok
 FN momi_cfg_path_into
     mov r12, rcx
     mov r13, rdx
@@ -545,7 +522,6 @@ FN momi_cfg_path_into
 .d:
 END_FN
 
-; Did the player allow MOMI's installer to run without a question (momi-cli.auto)? eax 1 / 0
 FN momi_auto_check
     lea rcx, [mo_f_auto]
     call momi_cfg_path
@@ -556,7 +532,6 @@ FN momi_auto_check
 .d:
 END_FN
 
-; After a Yes to the question: ask once whether to run it without asking in future (updates started without a window)
 FN momi_ask_auto
     cmp dword [momi_quiet], 0
     jne .d

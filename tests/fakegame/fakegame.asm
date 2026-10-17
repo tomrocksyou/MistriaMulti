@@ -1,7 +1,5 @@
-; Test stand-in for FieldsOfMistria.exe: writes its command line to ran.txt (in its working directory),
-; sleeps three seconds, exits with code 7.
-; If its file name contains "-cli" it plays MOMI's command-line installer instead: no sleep, exit code 0 only when the
-; environment variable EXIT_ON_COMPLETE is "true" (9 otherwise), and "-cli-fail" exits with 5.
+; Test stand-in for FieldsOfMistria.exe
+
 bits 64
 default rel
 extern GetEnvironmentVariableW, GetCommandLineW, CreateFileW, WriteFile, CloseHandle, Sleep, ExitProcess, lstrlenW
@@ -72,7 +70,6 @@ start:
     mov ecx, 9
     call ExitProcess
 .nocli:
-    ; "--quick" anywhere on the command line skips the sleep, "--slow" sleeps 12 seconds, otherwise 3
     mov rsi, rbx
     mov r12d, 3000
 .scan:

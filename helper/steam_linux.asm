@@ -1,4 +1,5 @@
-; One-shot Linux/Steam Deck Steam ID probe. Uses the OS dynamic loader only.
+; Linux Steam ID probe
+
 bits 64
 default rel
 %include "abi.inc"
@@ -14,7 +15,7 @@ global steam_identity_start
 steam_identity_start:
     mov [steam_initial_stack], rsp
     and rsp, -16
-    sub rsp, 8 ; match the ABI macro's normal called-function entry alignment
+    sub rsp, 8
     jmp steam_identity_main
 FN si_load
     mov rax, [steam_initial_stack]
@@ -30,7 +31,7 @@ FN si_load
     call setenv wrt ..plt
     mov rax, [steam_initial_stack]
     mov rdi, [rax+16]
-    mov esi, 2 ; RTLD_NOW, local symbols
+    mov esi, 2
     call dlopen wrt ..plt
     jmp .done
 .bad:
@@ -60,7 +61,7 @@ END_FN
 FN si_print
     mov rsi, rcx
     mov edi, 1
-    mov eax, 1 ; write stdout
+    mov eax, 1
     syscall
 END_FN
 FN si_exit

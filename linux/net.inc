@@ -1,13 +1,8 @@
-; Networking shared by the Linux launcher and manager: addresses, the world download client (protocol: docs/PROTOCOL.md)
-; and the host scan (broadcast on every local network plus the Tailscale peer list). Raw syscalls, no libc.
-;   client and host first run the challenge and response of worldauth.inc (proof of the join session's key), then
-;   host -> client   144-byte header: "MSWR", version 2, status (0 ok, 1 no world, 2 cannot send, 3 refused),
-;                    file length u32 @8, SHA-256 @12 (32 bytes), file name @48 (64 bytes, NUL padded), tag @112 (32 bytes);
-;                    then the file bytes
+; Networking shared by the Linux launcher and manager
 
-%define WF_PORT_NET 0x5F1E              ; TCP 7775 in network byte order
-%define WF_MAX_FILE 209715200           ; 200 MB
-%define DISC_PORT_NET 0x601E            ; UDP 7776
+%define WF_PORT_NET 0x5F1E
+%define WF_MAX_FILE 209715200
+%define DISC_PORT_NET 0x601E
 
 section .bss
 wf_sock resq 1
@@ -19,9 +14,9 @@ wf_pfd resb 8
 wf_one resd 1
 wf_digest resb 32
 wf_connect_ms resd 1
-wf_host_flags resd 1                   ; from the host's signed header: bit 0 the host named its current world, bit 1 that world is saved
-wf_host_id resd 1                      ; the game id of the host's current world (0 = the host did not say)
-wf_got_id resd 1                       ; the game id in the name of the world file that was downloaded (0 = none)
+wf_host_flags resd 1
+wf_host_id resd 1
+wf_got_id resd 1
 wf_path1 resb 1100
 wf_path2 resb 1100
 ifc_req resb 16
@@ -64,11 +59,10 @@ s_slash db '/',0
 align 8
 
 section .text
-; ---------------- addresses ----------------
-FN ip_parse                     ; rcx dotted ASCII (already checked with v_ipv4) -> eax IPv4 in network byte order (as in memory)
+FN ip_parse
     mov rsi, rcx
     xor eax, eax
-    xor r8d, r8d                    ; shift
+    xor r8d, r8d
 .g: xor edx, edx
 .d: movzx r9d, byte [rsi]
     sub r9d, '0'
@@ -84,12 +78,12 @@ FN ip_parse                     ; rcx dotted ASCII (already checked with v_ipv4)
     add r8d, 8
     cmp r8d, 32
     jae .done
-    inc rsi                         ; skip the dot
+    inc rsi
     jmp .g
 .done:
 END_FN
 
-FN ip_text                      ; ecx IPv4 (network order), rdx out buffer (>= 16 bytes) -> writes dotted text and a NUL
+FN ip_text
     mov rdi, rdx
     mov ebx, ecx
     mov r9d, 10
@@ -131,8 +125,7 @@ FN ip_text                      ; ecx IPv4 (network order), rdx out buffer (>= 1
     mov byte [rdi], 0
 END_FN
 
-; ---------------- sockets ----------------
-FN wf_recv_exact                ; rcx buffer, edx byte count, r8d timeout per wait (ms), reads from [wf_sock] -> eax 1 ok
+FN wf_recv_exact
     mov rsi, rcx
     mov r12d, edx
     mov r13d, r8d
@@ -171,7 +164,7 @@ FN wf_recv_exact                ; rcx buffer, edx byte count, r8d timeout per wa
 .d:
 END_FN
 
-FN wf_send_all                  ; rcx buffer, edx byte count, sends on [wf_sock] (never raises SIGPIPE) -> eax 1 ok
+FN wf_send_all
     mov rsi, rcx
     mov r12d, edx
     xor r14d, r14d
@@ -204,7 +197,7 @@ FN wf_send_all                  ; rcx buffer, edx byte count, sends on [wf_sock]
 .d:
 END_FN
 
-FN fill_sockaddr                ; rcx destination (16 bytes), edx port in network order, r8d IPv4 in network order
+FN fill_sockaddr
     mov qword [rcx], 0
     mov qword [rcx+8], 0
     mov word [rcx], 2
@@ -212,13 +205,12 @@ FN fill_sockaddr                ; rcx destination (16 bytes), edx port in networ
     mov [rcx+4], r8d
 END_FN
 
-; ---------------- world download ----------------
-FN wf_random                    ; rcx buffer, edx count (<= 256) -> eax 1
+FN wf_random
     call random_bytes
     mov eax, 1
 END_FN
 
-FN wf_key_path                  ; rcx output (1100 bytes), rdx bridge folder, r8d slot: the key file the helper writes for a join session
+FN wf_key_path
     mov r12, rdx
     mov r13d, r8d
     mov edx, 1100
@@ -234,7 +226,7 @@ FN wf_key_path                  ; rcx output (1100 bytes), rdx bridge folder, r8
     call pb_end
 END_FN
 
-FN world_use_session            ; rcx bridge folder, edx this computer's slot (1-7): the download proves the helper's join session in that folder
+FN world_use_session
     mov [wf_slot], edx
     mov r8d, edx
     mov rdx, rcx
@@ -247,20 +239,14 @@ FN world_use_session            ; rcx bridge folder, edx this computer's slot (1
 .d:
 END_FN
 
-; ecx = host IPv4 (network order), rdx = destination folder. Downloads the host's world into that folder; needs
-; world_use_session first (the host releases the world only to a joined player).
-; Returns 0 ok, 1 cannot connect, 2 host has no world to give, 3 invalid reply, 4 checksum mismatch, 5 cannot write, 6 out of memory,
-; 7 refused (no joined session, wrong proof, or a host that does not speak the authenticated protocol),
-; 8 the host is playing a world it has not saved yet (nothing downloadable matches it)
-; Afterwards wf_host_flags / wf_host_id say which world the host plays now and wf_got_id which world was downloaded.
 FN world_fetch
     mov r12d, ecx
     mov r13, rdx
     mov dword [wf_host_flags], 0
     mov dword [wf_host_id], 0
     mov dword [wf_got_id], 0
-    xor r15d, r15d                     ; memory block
-    xor ebx, ebx                       ; result: a socket may not exist yet
+    xor r15d, r15d
+    xor ebx, ebx
     mov qword [wf_sock], 0
     mov rcx, [wf_keypath]
     test rcx, rcx
@@ -273,7 +259,7 @@ FN world_fetch
     mov dword [wf_connect_ms], 3000
 .have_ms:
     mov ecx, 2
-    mov edx, 1 | 0x800 | 0x80000       ; SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC: every wait below is a timed poll
+    mov edx, 1 | 0x800 | 0x80000
     xor r8d, r8d
     call sys_socket
     test rax, rax
@@ -306,8 +292,8 @@ FN world_fetch
     mov dword [wf_one], 4
     mov dword [wf_digest], 0
     mov rcx, [wf_sock]
-    mov edx, 1                         ; SOL_SOCKET
-    mov r8d, 4                         ; SO_ERROR
+    mov edx, 1
+    mov r8d, 4
     lea r9, [wf_digest]
     lea rax, [wf_one]
     mov [rsp+32], rax
@@ -330,10 +316,10 @@ FN world_fetch
     jne .refused
     cmp byte [wf_hdr+5], 3
     je .refused
-    call wa_check_header               ; nothing below is believed unless the host proved the session key too
+    call wa_check_header
     test eax, eax
     jz .refused
-    movzx eax, byte [wf_hdr+6]         ; the signed world info of the host (zero from a host that predates it)
+    movzx eax, byte [wf_hdr+6]
     mov [wf_host_flags], eax
     mov eax, [wf_hdr+44]
     mov [wf_host_id], eax
@@ -355,15 +341,15 @@ FN world_fetch
     jz .bad
     cmp r14d, WF_MAX_FILE
     ja .bad
-    mov byte [wf_hdr+111], 0           ; the name must end inside the header
+    mov byte [wf_hdr+111], 0
     lea rcx, [wf_hdr+48]
     call wf_valid_name
     test eax, eax
     jz .bad
     xor ecx, ecx
     mov edx, r14d
-    mov r8d, 3                         ; PROT_READ | PROT_WRITE
-    mov r9d, 0x22                      ; MAP_PRIVATE | MAP_ANONYMOUS
+    mov r8d, 3
+    mov r9d, 0x22
     mov qword [rsp+32], -1
     mov qword [rsp+40], 0
     call sys_mmap
@@ -457,8 +443,7 @@ FN world_fetch
     mov eax, r14d
 END_FN
 
-; ---------------- local networks ----------------
-FN mp_add_target                ; ecx = IPv4 (network order)
+FN mp_add_target
     mov edx, [mp_tgt_count]
     cmp edx, 60
     jae .d
@@ -476,7 +461,7 @@ FN mp_add_target                ; ecx = IPv4 (network order)
 .d:
 END_FN
 
-FN mp_is_local                  ; ecx = IPv4 -> eax 1 if it is one of this computer's own addresses
+FN mp_is_local
     xor eax, eax
     mov edx, [mp_local_count]
     lea r8, [mp_local_ips]
@@ -494,8 +479,6 @@ FN mp_is_local                  ; ecx = IPv4 -> eax 1 if it is one of this compu
 .d:
 END_FN
 
-; Reads this computer's IPv4 addresses (SIOCGIFCONF); the directed broadcast of each network becomes a scan target.
-; Loopback addresses are not listed: a host on this very computer (tests) must still be found.
 FN mp_collect_adapters
     mov dword [mp_local_count], 0
     mov ecx, 2
@@ -509,7 +492,7 @@ FN mp_collect_adapters
     lea rax, [ifc_buf]
     mov [ifc_req+8], rax
     mov rcx, r15
-    mov edx, 0x8912                    ; SIOCGIFCONF
+    mov edx, 0x8912
     lea r8, [ifc_req]
     call sys_ioctl
     test rax, rax
@@ -537,14 +520,14 @@ FN mp_collect_adapters
     mov ecx, 5
     rep movsq
     mov rcx, r15
-    mov edx, 0x891b                    ; SIOCGIFNETMASK
+    mov edx, 0x891b
     lea r8, [ifr_tmp]
     call sys_ioctl
     test rax, rax
     jnz .next
     mov eax, [ifr_tmp+20]
     cmp eax, -1
-    je .next                           ; a /32 (such as the Tailscale interface) has no broadcast address
+    je .next
     not eax
     or eax, r14d
     mov ecx, eax
@@ -558,12 +541,12 @@ FN mp_collect_adapters
 .d:
 END_FN
 
-FN open_devnull                 ; -> rax descriptor of /dev/null (opened once), or -1
+FN open_devnull
     mov rax, [dev_null]
     test rax, rax
     jnz .d
     lea rcx, [s_devnull]
-    mov edx, 2 | O_CLOEXEC             ; O_RDWR
+    mov edx, 2 | O_CLOEXEC
     xor r8d, r8d
     call sys_open
     test rax, rax
@@ -574,8 +557,6 @@ FN open_devnull                 ; -> rax descriptor of /dev/null (opened once), 
 .d:
 END_FN
 
-; Runs "tailscale status --json" when Tailscale is installed (MISTRIMULTI_TAILSCALE overrides the program) and adds
-; every peer's 100.x address as a scan target. The first 100.x address in the output is this computer's own (mp_ts_self).
 FN mp_tailscale
     mov dword [mp_ts_self], 0
     lea rcx, [ts_pipe]
@@ -592,7 +573,7 @@ FN mp_tailscale
 .default:
     lea rax, [s_ts_name]
 .have:
-    mov [rsp+48], rax                  ; argv[0] / program
+    mov [rsp+48], rax
     lea rax, [s_ts_status]
     mov [rsp+56], rax
     lea rax, [s_ts_json]
@@ -605,14 +586,14 @@ FN mp_tailscale
     mov r8, r12
     mov r9d, [ts_pipe+4]
     mov [rsp+32], r12
-    mov qword [rsp+40], 2              ; search PATH
+    mov qword [rsp+40], 2
     call spawn
     mov r13, rax
     mov ecx, [ts_pipe+4]
     call sys_close
     test r13, r13
     js .closer
-    xor r14d, r14d                     ; bytes read
+    xor r14d, r14d
     call ticks_ms
     lea r15, [rax+4000]
 .rd:
@@ -650,10 +631,10 @@ FN mp_tailscale
     jl .d
     lea rax, [ts_out]
     mov byte [rax+r14], 0
-    xor r12d, r12d                     ; scan position
+    xor r12d, r12d
 .scan:
     mov rax, r14
-    sub rax, 5                        ; enough room for "100. (the buffer ends with a NUL)
+    sub rax, 5
     cmp r12, rax
     jae .d
     lea rcx, [ts_out]
@@ -675,7 +656,7 @@ FN mp_tailscale
 .ok:
     mov [rdi+rcx], al
     inc ecx
-    cmp ecx, 16                       ; 15 characters is the longest address; the 16th must be the closing quote
+    cmp ecx, 16
     jb .cp
     jmp .next
 .endtok:
@@ -689,7 +670,7 @@ FN mp_tailscale
     lea rcx, [mp_ascii]
     call ip_parse
     mov ecx, eax
-    movzx edx, ah                      ; second octet: Tailscale uses 100.64.0.0/10
+    movzx edx, ah
     cmp edx, 64
     jb .next
     cmp edx, 127
@@ -708,7 +689,6 @@ FN mp_tailscale
 .d:
 END_FN
 
-; Sends a discovery query to every target and collects the answers for about 1.2 seconds.
 FN mp_scan
     mov dword [mp_host_count], 0
     mov dword [mp_tgt_count], 0
@@ -716,7 +696,6 @@ FN mp_scan
     mov ecx, 0xFFFFFFFF
     call mp_add_target
     call mp_tailscale
-    ; optional extra target for tests: MISTRIMULTI_SCAN_EXTRA=<ipv4>
     lea rcx, [s_scan_extra]
     call env_get
     test rax, rax
@@ -740,8 +719,8 @@ FN mp_scan
     mov r12, rax
     mov dword [mp_one], 1
     mov rcx, r12
-    mov edx, 1                         ; SOL_SOCKET
-    mov r8d, 6                         ; SO_BROADCAST
+    mov edx, 1
+    mov r8d, 6
     lea r9, [mp_one]
     mov qword [rsp+32], 4
     call sys_setsockopt

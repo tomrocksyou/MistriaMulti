@@ -1,6 +1,6 @@
-; HMAC-SHA256 (RFC 2104) for the launchers, the managers and the updater, built on their own sha256_raw
-; (bcrypt on Windows, linux/sha256.inc on Linux). Same primitive as the helper's join handshake (helper/include/auth.inc).
-HMAC_MAX equ 256                       ; longest message
+; HMAC-SHA256
+
+HMAC_MAX equ 256
 
 section .bss
 hm2_in resb 64+HMAC_MAX
@@ -8,7 +8,6 @@ hm2_out resb 96
 hm2_mid resb 32
 
 section .text
-; rcx key (32 bytes), rdx message, r8 length (at most HMAC_MAX), r9 = 32-byte output -> eax 1 ok / 0 too long or hash failure
 FN hmac_sha256
     cmp r8, HMAC_MAX
     ja .fail

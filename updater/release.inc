@@ -1,18 +1,9 @@
-; Release list handling of the manager: parsing, strict validation, version comparison, where each file goes.
-; Included by updater.asm after winutil.inc.  The list format and the publishing scheme: docs/RELEASES.md.
-;
-;   version 0.2.0
-;   <64 lowercase hex> mod/mistrimulti/<file>      installed under <game>\mods\mistrimulti\
-;   <64 lowercase hex> bin/<tool>.exe              installed next to MistriMulti.exe (whitelisted names only)
-;   end <number of file lines>                     a list that lost its tail is rejected
-;
-; Nothing is trusted: a list is used only when every line is valid.  Rejected: any path outside the two roots,
-; ".." or a leading dot, drive letters, backslashes, absolute paths, characters outside [A-Za-z0-9._-], empty or
-; reserved (CON, NUL, COM1...) names, duplicates, a missing footer, more than MAX_ENTRIES files.
+; Release list handling of the manager
+
 extern lstrcmpiW
 
 MAX_ENTRIES equ 200
-HTTP_MAX equ 1048576                ; largest file or list that will be downloaded
+HTTP_MAX equ 1048576
 BIN_COUNT equ 4
 
 section .data
@@ -46,7 +37,6 @@ urls_mod_len equ $ - urls_mod
 urls_bin db 'bin/MistriMulti.exe'
 urls_bin_len equ $ - urls_bin
 align 8
-; (pointer, length) pairs: the only tool names the manager will ever install
 bin_table dq bin_n0, bin_n0_len, bin_n1, bin_n1_len, bin_n2, bin_n2_len, bin_n3, bin_n3_len
 
 section .bss
@@ -62,8 +52,8 @@ alignb 8
 ent_hex resq MAX_ENTRIES
 ent_path resq MAX_ENTRIES
 ent_plen resq MAX_ENTRIES
-ent_kind resb MAX_ENTRIES           ; 1 mod file, 2 tool binary, 3 the mod's manifest.toml
-ent_flag resb MAX_ENTRIES           ; 1 staged (.new written), 2 old file moved to .old, 4 new file in place
+ent_kind resb MAX_ENTRIES
+ent_flag resb MAX_ENTRIES
 ent_host resq 1
 srv_override resd 1
 have_game resd 1
@@ -78,7 +68,6 @@ wold resw 1040
 
 section .text
 
-; rcx = wide version "N", "N.N", "N.N.N" or "N.N.N.N" (1-5 digits each), rdx = dword[4] out (missing groups are 0). eax 1 if valid
 FN ver_parse
     mov qword [rdx], 0
     mov qword [rdx+8], 0
@@ -119,7 +108,6 @@ FN ver_parse
 .d:
 END_FN
 
-; rcx, rdx = dword[4] versions -> eax -1 (first is older), 0 (same), 1 (first is newer)
 FN ver_cmp
     xor r8d, r8d
 .l: mov eax, [rcx+r8*4]
@@ -139,8 +127,6 @@ FN ver_cmp
 .d:
 END_FN
 
-; Compares the installed mod version with the published one. eax: 0 not installed, 1 older or unreadable (update),
-; 2 same, 3 installed is NEWER than the published one (never offered as an update)
 FN version_state
     lea rcx, [installed_ver]
     lea rdx, [txt_none]
@@ -171,7 +157,6 @@ FN version_state
 .d:
 END_FN
 
-; rcx = pointer to the name, edx = length of its part before the first '.'  -> eax 1 if it is a Windows device name
 FN reserved_name
     cmp edx, 3
     je .three
@@ -210,7 +195,6 @@ FN reserved_name
 .d:
 END_FN
 
-; Classifies the path in m_path / m_pathlen (ASCII, not terminated). eax: 0 invalid, 1 mod file, 2 tool, 3 mod manifest.toml
 FN path_kind
     mov r14, [m_path]
     mov rbx, [m_pathlen]
@@ -218,7 +202,6 @@ FN path_kind
     jb .bad
     cmp rbx, 160
     ja .bad
-    ; tool binaries: exact whitelist
     lea r12, [bin_table]
     xor r13d, r13d
 .bt:
@@ -247,11 +230,11 @@ FN path_kind
     mov ecx, 16
     repe cmpsb
     jne .bad
-    mov r13d, 16                    ; position
-    xor r12d, r12d                  ; length of the current component
-    xor r15d, r15d                  ; length of its part before the first dot (-1 once a dot was seen)
+    mov r13d, 16
+    xor r12d, r12d
+    xor r15d, r15d
     xor edi, edi
-    mov r8d, 16                     ; start of the component
+    mov r8d, 16
 .ch:
     cmp r13, rbx
     jae .end
@@ -279,15 +262,15 @@ FN path_kind
     jmp .adv
 .dot:
     test r12d, r12d
-    jz .bad                         ; a component may not start with a dot (also rules out "..")
+    jz .bad
     mov edi, 1
     jmp .adv
 .slash:
     test r12d, r12d
-    jz .bad                         ; empty component ("//")
+    jz .bad
     movzx eax, byte [r14+r13-1]
     cmp eax, '.'
-    je .bad                         ; component ends with a dot
+    je .bad
     lea rcx, [r14+r8]
     mov edx, r15d
     call reserved_name
@@ -305,7 +288,7 @@ FN path_kind
     jmp .ch
 .end:
     test r12d, r12d
-    jz .bad                         ; ends with a slash
+    jz .bad
     movzx eax, byte [r14+rbx-1]
     cmp eax, '.'
     je .bad
@@ -332,7 +315,6 @@ FN path_kind
 .d:
 END_FN
 
-; rcx = ASCII digits, rdx = count (1-4) -> eax value, or -1
 FN parse_uint
     test rdx, rdx
     jz .bad
@@ -355,7 +337,6 @@ FN parse_uint
 .d:
 END_FN
 
-; Validates manifest_buf as a whole and fills the ent_* tables. eax 1 = every line is acceptable
 FN manifest_validate
     mov dword [ent_n], 0
     mov byte [v_seen_ver], 0
@@ -367,7 +348,7 @@ FN manifest_validate
     lea rbx, [manifest_buf]
     lea r15, [rbx+rax]
     cmp byte [r15-1], 10
-    jne .bad                        ; the last line is incomplete: the download was cut
+    jne .bad
 .line:
     cmp rbx, r15
     jae .fin
@@ -392,7 +373,7 @@ FN manifest_validate
     cmp byte [rbx], '#'
     je .next
     cmp byte [v_seen_end], 0
-    jne .bad                        ; nothing may follow the footer
+    jne .bad
     cmp byte [v_seen_ver], 0
     je .version
     cmp r13, 12
@@ -469,7 +450,7 @@ FN manifest_validate
     mov rdi, [m_path]
     mov rcx, rdx
     repe cmpsb
-    je .bad                         ; the same file twice
+    je .bad
 .dupn:
     inc r9d
     jmp .dup
@@ -510,7 +491,6 @@ FN manifest_validate
 .d:
 END_FN
 
-; ecx = entry number -> m_hex, m_path, m_pathlen, cur_kind, cur_i
 FN entry_load
     mov [cur_i], ecx
     lea rax, [ent_hex]
@@ -527,8 +507,6 @@ FN entry_load
     mov [cur_kind], eax
 END_FN
 
-; Builds for the loaded entry: wurl (URL path), ent_host (server), wpath1 (final file), wpath2 (staged .new), wold (.old).
-; The entry was validated by manifest_validate.
 FN entry_paths
     lea rcx, [wpath3]
     mov rdx, [m_path]
@@ -566,7 +544,7 @@ FN entry_paths
 .url_done:
     cmp dword [cur_kind], 2
     je .bin_dest
-    lea rsi, [wpath3+8]             ; skip "mod/"
+    lea rsi, [wpath3+8]
 .sl:
     movzx eax, word [rsi]
     test ax, ax
@@ -588,7 +566,7 @@ FN entry_paths
     lea rcx, [wpath1]
     lea rdx, [fmt_bin_dest]
     lea r8, [app_dir]
-    lea r9, [wpath3+8]              ; skip "bin/"
+    lea r9, [wpath3+8]
     call wsprintfW
 .stage:
     lea rcx, [wpath2]
@@ -601,7 +579,6 @@ FN entry_paths
     call wsprintfW
 END_FN
 
-; List URL: wurl and ent_host
 FN list_url
     cmp dword [srv_override], 0
     jne .test_server
@@ -622,7 +599,6 @@ FN list_url
 .d:
 END_FN
 
-; Is the file at wpath1 identical to the entry in m_hex (SHA-256)? eax 1 / 0 (also 0 when the file is missing)
 FN installed_matches
     lea rcx, [wpath1]
     lea rdx, [http_buf]
@@ -649,7 +625,6 @@ FN installed_matches
 .d:
 END_FN
 
-; Counts the tool binaries that are missing or different from the list -> tools_stale, tools_text
 FN count_tools
     mov dword [tools_stale], 0
     xor r12d, r12d
@@ -675,8 +650,6 @@ FN count_tools
     mov [tools_text], rax
 END_FN
 
-; Deletes the .new and .old files left by an interrupted or earlier update next to MistriMulti.exe. A .old file of a
-; program that is still running cannot be deleted; it is tried again at the next start.
 FN startup_cleanup
     xor r12d, r12d
 .l: cmp r12d, BIN_COUNT
@@ -686,7 +659,7 @@ FN startup_cleanup
     lea rdx, [bin_table]
     mov rsi, [rdx+rax]
     mov r13, [rdx+rax+8]
-    sub r13, 4                      ; the name without "bin/"
+    sub r13, 4
     add rsi, 4
     lea rcx, [wpath3]
     mov rdx, rsi
@@ -714,7 +687,6 @@ FN startup_cleanup
 .d:
 END_FN
 
-; rcx = destination -> eax = characters written: "<host> <url path>" of the loaded list/entry, as a CRLF line
 FN urls_emit
     mov r8, [ent_host]
     lea rdx, [fmt_urls_line]
@@ -722,8 +694,6 @@ FN urls_emit
     call wsprintfW
 END_FN
 
-; test hook   MistriMulti.exe --urls <version> <file>   writes the server and URL path used in production for the
-; list, a mod file and a tool binary of that version (no network involved)
 FN urls_dump
     mov rax, [argv]
     mov rcx, [rax+16]

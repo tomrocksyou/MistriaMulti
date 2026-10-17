@@ -1,6 +1,5 @@
-; Test stand-in for the Linux game (NASM, ELF, raw syscalls): writes its arguments, one per line,
-; to ran.txt in its working folder, sleeps three seconds, exits with code 7.
-; "--quick" among the arguments skips the sleep, "--slow" sleeps 12 seconds. Same behaviour as tests/fakegame/fakegame.asm.
+; Test stand-in for the Linux game
+
 bits 64
 default rel
 section .data
@@ -20,7 +19,6 @@ _start:
     mov [argc], rax
     lea rax, [rsp+8]
     mov [argv], rax
-    ; open("ran.txt", O_WRONLY|O_CREAT|O_TRUNC, 0644)
     lea rdi, [name]
     mov esi, 0x241
     mov edx, 0644o
@@ -28,13 +26,12 @@ _start:
     syscall
     mov [fd], rax
     mov r12d, 3000
-    xor r13d, r13d                      ; argument index
+    xor r13d, r13d
 .arg:
     cmp r13, [argc]
     jae .written
     mov rax, [argv]
     mov rbx, [rax+r13*8]
-    ; length
     xor edx, edx
 .len:
     cmp byte [rbx+rdx], 0
@@ -51,7 +48,6 @@ _start:
     mov edx, 1
     mov eax, 1
     syscall
-    ; --quick / --slow
     lea rsi, [quick]
     mov rdi, rbx
     call same
@@ -83,14 +79,14 @@ _start:
     mov [ts+8], rdx
     lea rdi, [ts]
     xor esi, esi
-    mov eax, 35                         ; nanosleep
+    mov eax, 35
     syscall
 .exit:
     mov edi, 7
     mov eax, 231
     syscall
 
-same:                                   ; rdi, rsi strings -> eax 1 if equal
+same:
 .l: mov al, [rdi]
     cmp al, [rsi]
     jne .no

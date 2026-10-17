@@ -1,5 +1,5 @@
-; Multiplayer part of the manager window: host, find hosts (scan), join, Steam setup.
-; Included by updater.asm after winutil.inc. Discovery protocol: see launcher.asm (disc_start).
+; Multiplayer part of the manager window
+
 extern WSAStartup, socket, setsockopt, WSAPoll, recvfrom, sendto, closesocket, inet_addr
 extern GetAdaptersInfo, GetTickCount64, GetWindowTextW, MessageBoxW, DestroyWindow, SetFocus
 extern wsprintfA, lstrlenA, CoCreateGuid, UpdateWindow, GetModuleFileNameW
@@ -123,8 +123,7 @@ mp_dump_len resd 1
 
 section .text
 
-; ---------- discovery scan ----------
-FN mp_add_target                ; ecx = IPv4 (network order)
+FN mp_add_target
     mov edx, [mp_tgt_count]
     cmp edx, 60
     jae .d
@@ -142,7 +141,7 @@ FN mp_add_target                ; ecx = IPv4 (network order)
 .d:
 END_FN
 
-FN mp_is_local                  ; ecx = IPv4 -> eax 1 if it is one of this PC's addresses
+FN mp_is_local
     xor eax, eax
     mov edx, [mp_local_count]
     lea r8, [mp_local_ips]
@@ -160,7 +159,6 @@ FN mp_is_local                  ; ecx = IPv4 -> eax 1 if it is one of this PC's 
 .d:
 END_FN
 
-; Reads this PC's addresses; the directed broadcast of each network becomes a scan target.
 FN mp_collect_adapters
     mov dword [mp_local_count], 0
     mov dword [mp_adsize], 16384
@@ -208,8 +206,6 @@ FN mp_collect_adapters
 .d:
 END_FN
 
-; Runs "tailscale status --json" (if Tailscale is installed) and adds every peer's 100.x address as a scan target.
-; The first 100.x address in the output is this PC's own Tailscale address (mp_ts_self).
 FN mp_tailscale
     mov dword [mp_ts_self], 0
     lea rcx, [mp_e_pf]
@@ -288,7 +284,7 @@ FN mp_tailscale
     jl .d
     lea rax, [http_buf]
     mov byte [rax+r14], 0
-    xor r12d, r12d                  ; scan position
+    xor r12d, r12d
 .scan:
     mov rax, r14
     sub rax, 24
@@ -313,7 +309,7 @@ FN mp_tailscale
 .ok:
     mov [rdi+rcx], al
     inc ecx
-    cmp ecx, 16                       ; 15 characters is the longest address (100.101.102.103); the 16th must be the closing quote
+    cmp ecx, 16
     jb .cp
     jmp .next
 .endtok:
@@ -343,7 +339,6 @@ FN mp_tailscale
 .d:
 END_FN
 
-; Sends a discovery query to every target and collects the answers for about 1.2 seconds.
 FN mp_scan
     mov dword [mp_host_count], 0
     mov dword [mp_tgt_count], 0
@@ -358,7 +353,6 @@ FN mp_scan
     mov ecx, 0xFFFFFFFF
     call mp_add_target
     call mp_tailscale
-    ; optional extra target for testing: MISTRIMULTI_SCAN_EXTRA=<ipv4>
     lea rcx, [mp_e_extra]
     lea rdx, [wpath1]
     mov r8d, 40
@@ -387,8 +381,8 @@ FN mp_scan
     mov r12, rax
     mov dword [mp_one], 1
     mov rcx, r12
-    mov edx, 0xFFFF                 ; SOL_SOCKET
-    mov r8d, 0x20                   ; SO_BROADCAST
+    mov edx, 0xFFFF
+    mov r8d, 0x20
     lea r9, [mp_one]
     mov qword [rsp+32], 4
     call setsockopt
@@ -509,8 +503,7 @@ FN mp_scan
 .d:
 END_FN
 
-; ---------- showing and saving ----------
-FN mp_ip_text                   ; ecx = IPv4 (network order), rdx = ASCII out buffer (>= 16 bytes)
+FN mp_ip_text
     mov r10, rdx
     movzx r8d, cl
     mov edx, ecx
@@ -528,7 +521,7 @@ FN mp_ip_text                   ; ecx = IPv4 (network order), rdx = ASCII out bu
     call wsprintfA
 END_FN
 
-FN mp_set_status                ; rcx = wide text
+FN mp_set_status
     mov rdx, rcx
     mov rcx, [h_join_status]
     call SetWindowTextW
@@ -538,7 +531,7 @@ END_FN
 
 FN mp_fill_list
     mov rcx, [h_list]
-    mov edx, 0x184                  ; LB_RESETCONTENT
+    mov edx, 0x184
     xor r8d, r8d
     xor r9d, r9d
     call SendMessageW
@@ -568,7 +561,7 @@ FN mp_fill_list
     lea rdx, [mp_text]
     call ascii_to_wide
     mov rcx, [h_list]
-    mov edx, 0x180                  ; LB_ADDSTRING
+    mov edx, 0x180
     xor r8d, r8d
     lea r9, [mp_big]
     call SendMessageW
@@ -589,7 +582,6 @@ FN mp_refresh
 .s: call mp_set_status
 END_FN
 
-; wpath2 = %LOCALAPPDATA%\FieldsOfMistria\mod_data\mistrimulti\launcher.cfg (folders created). eax=1 ok
 FN mp_cfg_path
     lea rcx, [mp_e_local]
     lea rdx, [wpath1]
@@ -612,7 +604,6 @@ FN mp_cfg_path
 .d:
 END_FN
 
-; mp_pass = the password= line of the existing launcher.cfg (empty if none or unusable). Needs wpath2 from mp_cfg_path.
 FN mp_old_pass
     mov byte [mp_pass], 0
     lea rcx, [wpath2]
@@ -631,7 +622,7 @@ FN mp_old_pass
     jz .d
     lea rsi, [rax+mp_k_pass_len]
     lea rdi, [file_buf]
-    add rdi, r13                    ; end of the data
+    add rdi, r13
     lea r8, [mp_pass]
     xor ecx, ecx
 .c: cmp rsi, rdi
@@ -657,7 +648,6 @@ FN mp_old_pass
 .d:
 END_FN
 
-; player number from an existing launcher.cfg (1-7) or a random one -> eax
 FN mp_pick_player
     call mp_cfg_path
     test eax, eax
@@ -693,7 +683,6 @@ FN mp_pick_player
 .d:
 END_FN
 
-; rcx ip (ASCII), edx port, r8d player, r9 room (ASCII, may be empty) -> writes launcher.cfg. eax=1 ok
 FN mp_save_join
     mov r12, rcx
     mov r13d, edx
@@ -730,7 +719,6 @@ FN mp_save_join
 .d:
 END_FN
 
-; mp_msg += label + dotted ip + CRLF.   rcx = label (wide), edx = ip
 FN mp_append_ip
     mov r12, rcx
     mov ecx, edx
@@ -758,7 +746,7 @@ FN mp_do_host
     call mp_cfg_path
     test eax, eax
     jz .fail
-    call mp_old_pass                ; a password already in launcher.cfg stays
+    call mp_old_pass
     cmp byte [mp_pass], 0
     jne .withpass
     lea rcx, [mp_f_cfg_host]
@@ -799,7 +787,7 @@ FN mp_do_host
     mov edx, [rax+r12*4]
     mov eax, edx
     and eax, 0xFFFF
-    cmp eax, 0xFEA9                 ; 169.254.x.x (self-assigned)
+    cmp eax, 0xFEA9
     je .nx
     lea rcx, [mp_t_lan]
     call mp_append_ip
@@ -853,7 +841,6 @@ FN mp_do_steam
 .d:
 END_FN
 
-; join using ip (ASCII, rcx), port (edx), flags (r8d: bit 0 = host needs a room code)
 FN mp_finish_join
     mov r12, rcx
     mov r13d, edx
@@ -977,7 +964,7 @@ END_FN
 
 FN mp_join_selected
     mov rcx, [h_list]
-    mov edx, 0x188                  ; LB_GETCURSEL
+    mov edx, 0x188
     xor r8d, r8d
     xor r9d, r9d
     call SendMessageW
@@ -1028,11 +1015,11 @@ FN mp_join_ip
 END_FN
 
 FN join_proc
-    cmp edx, 0x111                  ; WM_COMMAND
+    cmp edx, 0x111
     je .cmd
-    cmp edx, 0x10                   ; WM_CLOSE
+    cmp edx, 0x10
     je .close
-    cmp edx, 2                      ; WM_DESTROY
+    cmp edx, 2
     je .destroy
     call DefWindowProcW
     jmp .d
@@ -1093,7 +1080,6 @@ FN mp_open_join
     jz .d
     mov [h_join], rax
     mov [cur_parent], rax
-    ; heading
     lea rcx, [cls_static]
     lea rdx, [mp_t_hosts]
     mov r8d, 0x50000000
@@ -1103,7 +1089,6 @@ FN mp_open_join
     mov r14d, 18
     mov r15d, 30
     call make_child
-    ; host list
     lea rcx, [mp_listbox]
     lea rdx, [mp_t_empty_w]
     mov r8d, 0x50A10001
@@ -1132,7 +1117,6 @@ FN mp_open_join
     mov r14d, 26
     mov r15d, 12
     call make_child
-    ; manual ip
     lea rcx, [cls_static]
     lea rdx, [mp_t_orip]
     mov r8d, 0x50000000
@@ -1161,7 +1145,6 @@ FN mp_open_join
     mov r14d, 26
     mov r15d, 14
     call make_child
-    ; player number
     lea rcx, [cls_static]
     lea rdx, [mp_t_player]
     mov r8d, 0x50000000
@@ -1181,7 +1164,6 @@ FN mp_open_join
     mov r15d, 15
     call make_child
     mov [h_ed_player], rax
-    ; room code
     lea rcx, [cls_static]
     lea rdx, [mp_t_room]
     mov r8d, 0x50000000
@@ -1201,7 +1183,6 @@ FN mp_open_join
     mov r15d, 16
     call make_child
     mov [h_ed_room], rax
-    ; room password (masked)
     lea rcx, [cls_static]
     lea rdx, [mp_t_pass]
     mov r8d, 0x50000000
@@ -1221,7 +1202,6 @@ FN mp_open_join
     mov r15d, 18
     call make_child
     mov [h_ed_pass], rax
-    ; status line
     lea rcx, [cls_static]
     lea rdx, [mp_s_ready]
     mov r8d, 0x50000000
@@ -1234,7 +1214,6 @@ FN mp_open_join
     mov [h_join_status], rax
     mov rax, [h_wnd]
     mov [cur_parent], rax
-    ; prefill the player number
     call mp_pick_player
     lea rcx, [mp_ascii]
     mov byte [rcx], al
@@ -1251,13 +1230,12 @@ FN mp_open_join
 .d:
 END_FN
 
-; test hook:  updater.exe --scan <file>   writes "<ip> <port> <flags> <name>" per host found
 FN mp_dump_scan
     mov r14, rcx
     lea rax, [http_buf]
     mov byte [rax], 0
     xor r12d, r12d
-    xor r13d, r13d                  ; bytes used
+    xor r13d, r13d
 .l: cmp r12d, [mp_host_count]
     jae .write
     lea rax, [mp_host_ip]
@@ -1289,9 +1267,7 @@ FN mp_dump_scan
     call write_file
 END_FN
 
-; Used by the launcher's in-game menu:  MistriMulti.exe --addrs <file>  writes this PC's addresses, one per line
-; (the Tailscale address first, self-assigned 169.254.x.x ones left out).
-FN mp_emit_addr                 ; ecx = IPv4: appends "a.b.c.d" CR LF to http_buf at [mp_dump_len]
+FN mp_emit_addr
     lea rdx, [mp_ascii]
     call mp_ip_text
     lea rcx, [http_buf]
@@ -1323,7 +1299,7 @@ FN mp_dump_addrs
     mov ecx, [rax+r12*4]
     mov eax, ecx
     and eax, 0xFFFF
-    cmp eax, 0xFEA9                 ; 169.254.x.x
+    cmp eax, 0xFEA9
     je .nx
     cmp ecx, [mp_ts_self]
     je .nx

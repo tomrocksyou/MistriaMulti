@@ -1,5 +1,5 @@
-; Internal ABI: Windows x64 registers on both OSes.
-; Every routine preserves nonvolatile registers and reserves outgoing arguments.
+; Internal ABI
+
 %macro FN 1
 %xdefine current_fn %1
 global %1
@@ -16,7 +16,7 @@ global %1
     sub rsp, 104
 %endmacro
 %macro END_FN 0
-    lea rsp, [rsp+104] ; preserve flags (parsers return failure in CF)
+    lea rsp, [rsp+104]
     pop r15
     pop r14
     pop r13
@@ -35,7 +35,6 @@ section .pdata rdata align=4
 section .xdata rdata align=4
 current_fn %+ _unwind:
     db 1, 19, 9, 0
-    ; ALLOC_SMALL 104 and saved registers, in reverse prologue order.
     db 19, 0xc2, 15, 0xf0, 13, 0xe0, 11, 0xd0, 9, 0xc0
     db 7, 0x70, 6, 0x60, 5, 0x30, 1, 0x50, 0, 0
 section .text

@@ -1,7 +1,5 @@
-; Text and number helpers shared by the Windows and Linux programs (NASM, x86-64, ASCII only; no operating-system calls).
-; Included by common/winutil.inc (Windows) and linux/lib.inc (Linux). Uses the FN/END_FN macros from abi.inc.
+; Text and number helpers
 
-; returns rax = pointer to first occurrence of needle in hay, or 0. rcx=hay, rdx=hay_len, r8=needle, r9=needle_len
 FN find_bytes
     mov rsi, rcx
     mov rbx, rdx
@@ -32,7 +30,7 @@ FN find_bytes
 .done:
 END_FN
 
-FN a_equal                      ; rcx, rdx ASCII strings -> eax 1 if equal
+FN a_equal
 .l: mov al, [rcx]
     cmp al, [rdx]
     jne .no
@@ -49,7 +47,7 @@ FN a_equal                      ; rcx, rdx ASCII strings -> eax 1 if equal
 .d:
 END_FN
 
-FN a2i                          ; rcx ASCII decimal (digits only, 1-6) -> eax, or -1
+FN a2i
     xor eax, eax
     xor edx, edx
 .l: movzx r8d, byte [rcx]
@@ -72,7 +70,7 @@ FN a2i                          ; rcx ASCII decimal (digits only, 1-6) -> eax, o
 .d:
 END_FN
 
-FN v_ipv4                       ; rcx ASCII -> eax 1 if a.b.c.d with each part 0-255
+FN v_ipv4
     xor r8d, r8d
 .group:
     xor edx, edx
@@ -113,7 +111,7 @@ FN v_ipv4                       ; rcx ASCII -> eax 1 if a.b.c.d with each part 0
 .d:
 END_FN
 
-FN v_room                       ; rcx ASCII -> eax 1 if exactly 8 hex digits
+FN v_room
     xor edx, edx
 .l: movzx eax, byte [rcx+rdx]
     test al, al
@@ -141,7 +139,7 @@ FN v_room                       ; rcx ASCII -> eax 1 if exactly 8 hex digits
 .d:
 END_FN
 
-FN v_pass                       ; rcx ASCII -> eax 1 if empty (no password) or 1 to 64 printable ASCII characters without spaces
+FN v_pass
     xor edx, edx
 .l: movzx eax, byte [rcx+rdx]
     test al, al
@@ -161,7 +159,6 @@ FN v_pass                       ; rcx ASCII -> eax 1 if empty (no password) or 1
 .d:
 END_FN
 
-; rcx = ASCII file name -> eax 1 only for  game-<digits>-(autosave|<digits>).sav  (nothing else: no paths, no ".old.sav")
 FN wf_valid_name
     mov rsi, rcx
     cmp dword [rsi], 'game'
@@ -218,8 +215,6 @@ FN wf_valid_name
 .d:
 END_FN
 
-; rcx = ASCII save name that wf_valid_name accepted -> eax = the game id in it (the digits after "game-"), 0 when it does not fit 31 bits.
-; The id is the game's Game.unique_identifier (SaveManager reads it from this name), so it names the world a save belongs to.
 FN wf_name_id
     lea rsi, [rcx+5]
     xor eax, eax
@@ -241,7 +236,6 @@ FN wf_name_id
 .d:
 END_FN
 
-; rcx = ASCII text of menu/world.txt (NUL ended) -> eax = the number after "id=" at its start (1..2147483647), else 0
 FN wf_parse_world
     xor eax, eax
     cmp byte [rcx], 'i'

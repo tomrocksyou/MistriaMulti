@@ -1,15 +1,11 @@
-; Host-world transfer: shared pieces and the download client (NASM, Windows x64).  Protocol: docs/PROTOCOL.md
-;   client and host first run the challenge and response of worldauth.inc (proof of the join session's key), then
-;   host -> client   144-byte header: "MSWR", version 2, status (0 ok, 1 no world, 2 cannot send, 3 refused),
-;                    file length u32 @8, SHA-256 @12 (32 bytes), file name @48 (64 bytes, NUL padded), tag @112 (32 bytes);
-;                    then the file bytes
-; The including program defines nothing extra but must include winutil.inc first and link ws2_32, bcrypt, kernel32.
+; Host-world transfer
+
 extern ioctlsocket, connect, send, recv, closesocket, socket, WSAPoll, WSAStartup, shutdown
 extern VirtualAlloc, VirtualFree, MoveFileExW, DeleteFileW, wsprintfW
 extern BCryptOpenAlgorithmProvider, BCryptHash, BCryptCloseAlgorithmProvider, BCryptGenRandom
 
-WF_PORT_NET equ 0x5F1E              ; TCP 7775 in network byte order
-WF_MAX_FILE equ 209715200           ; 200 MB
+WF_PORT_NET equ 0x5F1E
+WF_MAX_FILE equ 209715200
 
 section .data
 wf_alg: dw __utf16__("SHA256"), 0
@@ -30,15 +26,14 @@ wf_one resd 1
 wf_halg resq 1
 wf_digest resb 32
 wf_connect_ms resd 1
-wf_host_flags resd 1                   ; from the host's signed header: bit 0 the host named its current world, bit 1 that world is saved
-wf_host_id resd 1                      ; the game id of the host's current world (0 = the host did not say)
-wf_got_id resd 1                       ; the game id in the name of the world file that was downloaded (0 = none)
+wf_host_flags resd 1
+wf_host_id resd 1
+wf_got_id resd 1
 wf_path1 resw 1040
 wf_path2 resw 1040
 
 section .text
 
-; rcx data, rdx length, r8 = 32-byte output -> eax 1 ok
 FN sha256_raw
     mov r12, rcx
     mov r13, rdx
@@ -71,8 +66,6 @@ FN sha256_raw
 .d:
 END_FN
 
-
-; Reads exactly edx bytes from [wf_sock] into rcx; every wait is at most r8d milliseconds. eax 1 ok / 0 fail
 FN wf_recv_exact
     mov rsi, rcx
     mov r12d, edx
@@ -109,7 +102,6 @@ FN wf_recv_exact
 .d:
 END_FN
 
-; Sends exactly edx bytes from rcx on [wf_sock]. eax 1 ok / 0 fail
 FN wf_send_all
     mov rsi, rcx
     mov r12d, edx
@@ -139,19 +131,17 @@ FN wf_send_all
 .d:
 END_FN
 
-; rcx buffer, edx count -> eax 1 filled with system randomness
 FN wf_random
     mov r8, rdx
     mov rdx, rcx
     xor ecx, ecx
-    mov r9d, 2                         ; BCRYPT_USE_SYSTEM_PREFERRED_RNG
+    mov r9d, 2
     call BCryptGenRandom
     test eax, eax
     sete al
     movzx eax, al
 END_FN
 
-; rcx = output (wide, 1040 characters), rdx = bridge folder (wide), r8d = slot: the key file the helper writes for a join session
 FN wf_key_path
     mov r9d, r8d
     mov r8, rdx
@@ -159,7 +149,6 @@ FN wf_key_path
     call wsprintfW
 END_FN
 
-; rcx = bridge folder (wide), edx = this computer's slot (1-7): the download proves the helper's join session in that folder
 FN world_use_session
     mov [wf_slot], edx
     mov r8d, edx
@@ -170,19 +159,13 @@ FN world_use_session
     mov [wf_keypath], rax
 END_FN
 
-; ecx = host IPv4 (network order), rdx = destination folder (wide). Downloads the host's world into that folder; needs
-; world_use_session first (the host releases the world only to a joined player).
-; Returns 0 ok, 1 cannot connect, 2 host has no world to give, 3 invalid reply, 4 checksum mismatch, 5 cannot write, 6 out of memory,
-; 7 refused (no joined session, wrong proof, or a host that does not speak the authenticated protocol),
-; 8 the host is playing a world it has not saved yet (nothing downloadable matches it)
-; Afterwards wf_host_flags / wf_host_id say which world the host plays now and wf_got_id which world was downloaded.
 FN world_fetch
     mov r12d, ecx
     mov r13, rdx
     mov dword [wf_host_flags], 0
     mov dword [wf_host_id], 0
     mov dword [wf_got_id], 0
-    xor r15d, r15d                     ; memory block
+    xor r15d, r15d
     mov qword [wf_sock], 0
     mov rcx, [wf_keypath]
     test rcx, rcx
@@ -202,15 +185,15 @@ FN world_fetch
     mov dword [wf_connect_ms], 3000
 .have_ms:
     mov ecx, 2
-    mov edx, 1                         ; SOCK_STREAM
-    mov r8d, 6                         ; IPPROTO_TCP
+    mov edx, 1
+    mov r8d, 6
     call socket
     cmp rax, -1
     je .noconn
     mov [wf_sock], rax
     mov dword [wf_one], 1
     mov rcx, [wf_sock]
-    mov edx, 0x8004667E                ; FIONBIO: non-blocking, every wait below is a timed poll
+    mov edx, 0x8004667E
     lea r8, [wf_one]
     call ioctlsocket
     lea rdi, [wf_sa]
@@ -226,7 +209,7 @@ FN world_fetch
     call connect
     mov rax, [wf_sock]
     mov [wf_pfd], rax
-    mov word [wf_pfd+8], 0x0010        ; POLLWRNORM
+    mov word [wf_pfd+8], 0x0010
     mov word [wf_pfd+10], 0
     lea rcx, [wf_pfd]
     mov edx, 1
@@ -234,7 +217,7 @@ FN world_fetch
     call WSAPoll
     cmp eax, 1
     jne .noconn
-    test word [wf_pfd+10], 0x0007      ; POLLERR / POLLHUP / POLLNVAL: not connected
+    test word [wf_pfd+10], 0x0007
     jnz .noconn
     call wa_client_hello
     test eax, eax
@@ -251,10 +234,10 @@ FN world_fetch
     jne .refused
     cmp byte [wf_hdr+5], 3
     je .refused
-    call wa_check_header               ; nothing below is believed unless the host proved the session key too
+    call wa_check_header
     test eax, eax
     jz .refused
-    movzx eax, byte [wf_hdr+6]         ; the signed world info of the host (zero from a host that predates it)
+    movzx eax, byte [wf_hdr+6]
     mov [wf_host_flags], eax
     mov eax, [wf_hdr+44]
     mov [wf_host_id], eax
@@ -276,15 +259,15 @@ FN world_fetch
     jz .bad
     cmp r14d, WF_MAX_FILE
     ja .bad
-    mov byte [wf_hdr+111], 0           ; the name must end inside the header
+    mov byte [wf_hdr+111], 0
     lea rcx, [wf_hdr+48]
     call wf_valid_name
     test eax, eax
     jz .bad
     xor ecx, ecx
     mov edx, r14d
-    mov r8d, 0x3000                    ; MEM_COMMIT | MEM_RESERVE
-    mov r9d, 4                         ; PAGE_READWRITE
+    mov r8d, 0x3000
+    mov r9d, 4
     call VirtualAlloc
     test rax, rax
     jz .nomem
@@ -326,7 +309,7 @@ FN world_fetch
     jz .nowrite
     lea rcx, [wf_path1]
     lea rdx, [wf_path2]
-    mov r8d, 1                         ; MOVEFILE_REPLACE_EXISTING
+    mov r8d, 1
     call MoveFileExW
     test eax, eax
     jz .nowrite
@@ -359,7 +342,7 @@ FN world_fetch
     jz .nofree
     mov rcx, r15
     xor edx, edx
-    mov r8d, 0x8000                    ; MEM_RELEASE
+    mov r8d, 0x8000
     call VirtualFree
 .nofree:
     mov rcx, [wf_sock]
