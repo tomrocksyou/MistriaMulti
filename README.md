@@ -4,9 +4,11 @@ A Fields of Mistria multiplayer mod. One person hosts their farm, friends join i
 
 Made for fun to play with friends, so expect the odd bug.
 
-**Early test version.** It has been played by two people over Tailscale (movement, clock and sleep, farming, chests, shipping bin, gold,
-leaving and rejoining), but plenty of it, such as the mines, animals and the building interiors, has not been tried in the real game yet.
-Issues and bug reports are welcome. Your solo saves are kept separate and backed up before every launch.
+**Early test version.** Two people have played it over Tailscale: movement, clock and sleep, farming, chests, the shipping bin, shared
+gold and town rank, story cutscenes, the mines, characters per world, and leaving and rejoining all worked. Animals and the building
+interiors have not been tried in the real game yet. Bug reports are welcome. Your solo saves are kept separate and backed up before every launch.
+
+Works with Fields of Mistria **1.0.6 and 1.0.8**. Everybody in a game needs the same MistriaMulti version (and the same other mods).
 
 ## Setup
 
@@ -27,7 +29,8 @@ Then grab the latest download from **Releases** (on the right).
 **Linux / Steam Deck**
 1. Unpack `MistriaMulti-<version>-Linux.tar.gz` (Steam Deck: in Desktop Mode).
 2. Close Steam and run `./install.sh` in that folder.
-3. In MOMI, tick MistriaMulti and click Install. (MOMI might try to find a .exe automatically in the selection box, i had that at least, just remove it and you should see the normal executable) 
+3. In MOMI, tick MistriaMulti and click Install. (If MOMI's game picker pre-fills a `.exe` path, clear it and choose the game's normal
+   program instead.)
 
 **Updating:** close the game, then Windows: open `MistriMulti.exe` and press **Update MistriMulti**; Linux / Steam Deck:
 `./install.sh --update` (or `mistrimulti-manager update`). It downloads the newest release, verifies it and replaces the mod files
@@ -37,10 +40,13 @@ Details: [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md#update), [docs/RELEASES.md](d
 ## Playing
 
 Start the game from Steam like normal, then New Game (or Load Game) > **Multiplayer**:
-- **Host a game**: share the address that starts with `100.` with your friends. Sleep once first, so they get your latest save.
-- **Join a game**: pick the host from the list or type their address.
+- **Host a game**: share the address that starts with `100.` with your friends. A new world saves itself once you can move at home, so
+  friends can join straight away. For an older world, friends get your last save.
+- **Join a game**: pick the host from the list or type their address. On **New Game** you make a new character for that world; on
+  **Load Game** you carry on with the character you already have there.
 
-Your singleplayer saves stay separate. Press F8 to see if you're connected.
+Your singleplayer saves stay separate: a guest never brings a solo character in, and multiplayer never touches your solo saves.
+The badge at the bottom right shows whether you're connected.
 
 The title screen shows your MistriaMulti version bottom left; when a newer release exists an **Update** button appears next to it (the daily check can be switched off, see [docs/HOW-TO-PLAY.md](docs/HOW-TO-PLAY.md)).
 

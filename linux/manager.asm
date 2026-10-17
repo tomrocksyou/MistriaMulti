@@ -1,12 +1,5 @@
-; MistriaMulti manager for Linux and the Steam Deck: the console twin of the Windows manager window (updater/mp.inc).
-;   mistrimulti-manager host [--password TEXT]   write the host setup (optionally with a room password) and show the addresses to give to friends
-;   mistrimulti-manager join [IP]            find hosts (broadcast + Tailscale peers) and choose one, or join an IP directly
-;                            [--player N] [--room CODE] [--port N] [--password TEXT]
-;   mistrimulti-manager scan                 only list the hosts that can be found
-;   mistrimulti-manager steam-setup          print the Steam launch option for the launcher
-;   mistrimulti-manager save-solo            copy the solo saves to ~/Documents/MistriMulti Backups
-; Test hooks (like the Windows manager): --scan <file>, --fetch <ip> <folder> <result file> [<bridge folder> <slot>], --targets <file>, --stamp <seconds>.
-; NASM x86-64 ELF, raw system calls, no C runtime. Shares linux/*.inc with the launcher.
+; manager for Linux and the Steam Deck
+
 bits 64
 default rel
 %include "abi.inc"
@@ -125,8 +118,7 @@ interactive resd 1
 result_buf resb 24
 
 section .text
-; ---------------- small helpers ----------------
-FN say_int                      ; ecx value -> stdout
+FN say_int
     mov r12d, ecx
     lea rcx, [numbuf]
     mov edx, 24
@@ -138,14 +130,14 @@ FN say_int                      ; ecx value -> stdout
     call say
 END_FN
 
-FN say_ip                       ; ecx IPv4 (network order)
+FN say_ip
     lea rdx, [numbuf]
     call ip_text
     lea rcx, [numbuf]
     call say
 END_FN
 
-FN prepare_paths                ; eax 1 ok; otherwise prints why
+FN prepare_paths
     call exe_init
     call find_datadir
     test eax, eax
@@ -162,7 +154,6 @@ FN prepare_paths                ; eax 1 ok; otherwise prints why
 .d:
 END_FN
 
-; player number from an existing launcher.cfg (1-7) or a random one -> eax
 FN pick_player
     lea rcx, [p1]
     lea rdx, [mod_dir]
@@ -199,7 +190,6 @@ FN pick_player
 .d:
 END_FN
 
-; ---------------- host ----------------
 FN do_host
     mov byte [a_pass], 0
     mov r12d, 2
@@ -305,9 +295,9 @@ FN do_host
     mov r13d, [rax+r12*4]
     mov eax, r13d
     and eax, 0xFFFF
-    cmp eax, 0xFEA9                     ; 169.254.x.x (self-assigned)
+    cmp eax, 0xFEA9
     je .nx
-    cmp r13d, [mp_ts_self]              ; the Tailscale address was printed above
+    cmp r13d, [mp_ts_self]
     je .nx
 .show:
     lea rcx, [t_lan]
@@ -332,7 +322,6 @@ FN do_host
 .d:
 END_FN
 
-; ---------------- steam setup ----------------
 FN do_steam
     call exe_init
     test eax, eax
@@ -365,8 +354,6 @@ FN do_steam
 .d:
 END_FN
 
-; ---------------- save solo ----------------
-; Documents folder: $XDG_DOCUMENTS_DIR, else XDG_DOCUMENTS_DIR in ~/.config/user-dirs.dirs, else ~/Documents. docs_dir, eax 1 ok
 FN find_documents
     lea rcx, [s_env_xdg_docs]
     call env_get
@@ -411,7 +398,7 @@ FN find_documents
     mov r13, rax
     lea rcx, [file_buf]
     mov byte [rcx+r13], 0
-    xor r12d, r12d                      ; scan position: lines starting with the key
+    xor r12d, r12d
 .line:
     lea rsi, [file_buf]
     add rsi, r12
@@ -432,7 +419,6 @@ FN find_documents
     inc r12
     jmp .line
 .keyfound:
-    ; rsi points just behind the opening quote
     lea rdi, [p3]
     xor ecx, ecx
 .val:
@@ -448,7 +434,6 @@ FN find_documents
     jmp .val
 .valend:
     mov byte [rdi+rcx], 0
-    ; "$HOME/..." or an absolute path
     cmp byte [p3], '$'
     jne .abs
     cmp qword [home_dir], 0
@@ -499,18 +484,18 @@ FN do_save_solo
     lea rcx, [p1]
     lea rdx, [data_dir]
     lea r8, [s_saves]
-    call path2                          ; p1 = the solo saves
+    call path2
     lea rcx, [stampbuf]
     call time_stamp
     lea rcx, [dest_dir]
     lea rdx, [docs_dir]
     lea r8, [n_backups_dir]
-    call path2                          ; dest_dir = <Documents>/MistriMulti Backups
+    call path2
     lea rcx, [p2]
     lea rdx, [dest_dir]
     lea r8, [s_slash]
     lea r9, [stampbuf]
-    call path3                          ; p2 = dest_dir/<timestamp>
+    call path3
     cmp eax, -1
     je .nodocs
     mov dword [copied], 0
@@ -527,12 +512,12 @@ FN do_save_solo
     lea rdx, [p1]
     lea r8, [s_slash]
     mov r9, r13
-    call path3                          ; p3 = source file
+    call path3
     lea rcx, [cand]
     lea rdx, [p2]
     lea r8, [s_slash]
     mov r9, r13
-    call path3                          ; cand = destination file
+    call path3
     cmp eax, -1
     je .each
     lea rcx, [p3]
@@ -546,7 +531,7 @@ FN do_save_solo
     lea r8, [s_x]
     call path2
     lea rcx, [cand2]
-    call ensure_dirs                    ; creates the backup folder (and the folders above it) on the first file
+    call ensure_dirs
 .copy:
     lea rcx, [p3]
     lea rdx, [cand]
@@ -585,8 +570,7 @@ FN do_save_solo
 .d:
 END_FN
 
-; ---------------- scan and join ----------------
-FN list_hosts                   ; prints the numbered list of mp_host_*
+FN list_hosts
     xor r12d, r12d
 .l: cmp r12d, [mp_host_count]
     jae .d
@@ -643,8 +627,6 @@ FN do_scan_only
 .d:
 END_FN
 
-; Saves the join setup and downloads the host's world. Inputs: join_ip (ASCII), join_port, opt_player (0 = automatic),
-; opt_room ("" = default room). eax 0 ok.
 FN finish_join
     call prepare_paths
     test eax, eax
@@ -711,7 +693,6 @@ FN finish_join
 .d:
 END_FN
 
-; Asks for a room code until it is valid or empty. rcx = prompt. opt_room is set; eax 1 ok, 0 when the input ended
 FN ask_room
     mov r12, rcx
     mov r14d, 5
@@ -749,9 +730,8 @@ FN ask_room
 .d:
 END_FN
 
-; The interactive part of join: scan, list, choose. Fills join_ip/join_port/join_flags. eax 1 chosen, 0 nothing chosen
 FN choose_host
-    mov r15d, 10                        ; attempts
+    mov r15d, 10
 .scan:
     dec r15d
     js .nothing
@@ -809,7 +789,7 @@ FN choose_host
     test eax, eax
     jz .nothing
     cmp byte [opt_room], 0
-    je .ask                              ; a room code is required for this host
+    je .ask
     jmp .chosen
 .typed:
     lea rsi, [ans]
@@ -844,7 +824,7 @@ FN choose_host
     cmp eax, -1
     je .nothing
     test eax, eax
-    jz .nothing                          ; this host cannot be joined without its password
+    jz .nothing
     lea rcx, [host_pass]
     call v_pass
     test eax, eax
@@ -1035,8 +1015,6 @@ FN do_join
 .d:
 END_FN
 
-; ---------------- test hooks ----------------
-; --scan <file>: writes "<ip> <port> <flags> <name>" per host found
 FN hook_scan
     mov ecx, 2
     call arg_n
@@ -1092,7 +1070,6 @@ FN hook_scan
 .d:
 END_FN
 
-; --targets <file>: writes "self <ip>" (this computer's Tailscale address) and "target <ip>" for every address a scan would query
 FN hook_targets
     mov ecx, 2
     call arg_n
@@ -1147,7 +1124,6 @@ FN hook_targets
 .d:
 END_FN
 
-; --stamp <seconds since 1970>: prints the backup folder name for that moment (a test hook for the date arithmetic)
 FN hook_stamp
     mov ecx, 2
     call arg_n
@@ -1181,7 +1157,6 @@ FN hook_stamp
 .e:
 END_FN
 
-; --fetch <ip> <folder> <result file> [<bridge folder> <slot>]: world download; the result code is written to the file
 FN hook_fetch
     mov ecx, 2
     call arg_n
@@ -1207,7 +1182,7 @@ FN hook_fetch
     mov r12d, eax
     mov qword [wf_keypath], 0
     mov ecx, 5
-    call arg_n                          ; optional: <bridge folder> <slot 1-7>, the join session to prove
+    call arg_n
     test rax, rax
     jz .nosession
     mov rbx, rax
@@ -1241,7 +1216,6 @@ FN hook_fetch
 .d:
 END_FN
 
-; mistrimulti-manager update: hands over to sh <program folder>/mistrimulti-update.sh --update (install.sh's copy, which does the download).
 FN do_update_cmd
     call exe_init
     test eax, eax
@@ -1262,7 +1236,7 @@ FN do_update_cmd
     mov [upd_argv+16], rax
     mov qword [upd_argv+24], 0
     mov ecx, 3
-    call arg_n                          ; mistrimulti-manager update --result <file>: no questions, progress in the file
+    call arg_n
     test rax, rax
     jz .exec
     mov r12, rax

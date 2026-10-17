@@ -1,14 +1,5 @@
-; Authenticated world transfer (TCP 7775), the part shared by every program on both systems. Protocol: docs/PROTOCOL.md.
-; The download is released only to a client that proves it holds the key of a join session the host's helper has
-; authenticated (the same HMAC-SHA256 handshake as the UDP join; the helper writes WK = HMAC(SK, "MMWORLD1") for each
-; session into <bridge>/world_<slot>.key). No byte of the world is sent before the proof is checked.
-;   client -> host   REQUEST  64 bytes: "MSWQ", version 2, slot, 10 zero bytes, client nonce @16, zero
-;   host -> client   CHALLENGE 32 bytes: "MSWC", version 2, status 0, 10 zero bytes, host nonce @16 (fresh for every connection)
-;   client -> host   PROOF    48 bytes: "MSWP", version 2, 12 zero bytes, tag @16 = HMAC(WK, "MMWORLDQ1" | slot | client nonce | host nonce)
-;   host -> client   144-byte header: the 112-byte "MSWR" header (version 2; status 0 ok, 1 no world, 2 cannot send, 3 refused)
-;                    then tag @112 = HMAC(WK, "MMWORLDR1" | slot | client nonce | host nonce | header bytes 0..111), then the file
-; The including program provides wf_sock, wf_hdr (160 bytes), wf_req (64 bytes), wf_recv_exact, wf_send_all, wf_random
-; (rcx buffer, edx count -> eax 1) and read_file. The host half (the launchers only) is worldserve.inc.
+; Authenticated world transfer
+
 %include "hmac.inc"
 
 section .data
@@ -23,11 +14,10 @@ wa_slot resd 1
 wa_ok resd 1
 wa_tag resb 32
 wa_msg resb 160
-wf_slot resd 1                         ; the client's own slot (1-7)
-wf_keypath resq 1                      ; the client's key file, or 0: world_fetch then refuses without connecting
+wf_slot resd 1
+wf_keypath resq 1
 
 section .text
-; rcx = path -> eax 1 if wa_key now holds a usable key (exactly 32 bytes, not all zero: the helper writes zeros when there is no session)
 FN wa_load_key
     mov r12, rcx
     lea rdi, [wa_key]
@@ -58,7 +48,6 @@ FN wa_load_key
 .d:
 END_FN
 
-; rcx a, rdx b, r8d length -> eax 1 if equal; the time does not depend on where they differ
 FN wa_ct_equal
     xor eax, eax
     xor r9d, r9d
@@ -76,7 +65,6 @@ FN wa_ct_equal
     movzx eax, al
 END_FN
 
-; ecx 0: proof tag; 1: reply tag (also covers the 112 header bytes in wf_hdr). Fills wa_tag from wa_key, wa_slot and both nonces -> eax 1
 FN wa_make_tag
     mov r12d, ecx
     lea rdi, [wa_msg]
@@ -110,7 +98,6 @@ FN wa_make_tag
     call hmac_sha256
 END_FN
 
-; Client: connected on [wf_sock], wa_key and wf_slot are set. Sends the request, answers the challenge. eax 1 if the proof was sent
 FN wa_client_hello
     mov eax, [wf_slot]
     mov [wa_slot], eax
@@ -176,7 +163,6 @@ FN wa_client_hello
 .d:
 END_FN
 
-; Client: wf_hdr holds a complete 144-byte reply -> eax 1 if it is version 2 and its tag is right
 FN wa_check_header
     cmp dword [wf_hdr], 'MSWR'
     jne .no

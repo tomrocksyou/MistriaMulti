@@ -1,8 +1,4 @@
-; Linux x86-64 runtime shared by mistrimulti-launcher and mistrimulti-manager (NASM, raw syscalls, no libc).
-; Inside the program the Windows x64 register convention of abi.inc is kept (arguments rcx, rdx, r8, r9, then the stack;
-; result in rax), so the logic reads like the Windows launcher. The sys_* wrappers return the raw kernel result:
-; a negative number (-errno) on failure. Every FN routine preserves rbx, rsi, rdi, rbp and r12-r15.
-; Rule from scripts/lint-asm.py: never mix a data label with a register in one address; load it with LEA first.
+; Linux x86-64 runtime
 
 %macro SYSCALL4 2
 %1:
@@ -18,7 +14,6 @@
     pop rdi
     ret
 %endmacro
-; Five and six argument system calls take arguments 5 and 6 where the Windows convention puts them: [rsp+32], [rsp+40] at the call site.
 %macro SYSCALL6 2
 %1:
     push rdi
@@ -85,7 +80,7 @@ SYSCALL4 sys_getrandom, 318
 %define O_CLOEXEC 0x80000
 %define O_NONBLOCK 0x800
 %define O_DIRECTORY 0x10000
-%define O_WRITE_NEW 0x80241            ; O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+%define O_WRITE_NEW 0x80241
 %define POLLIN 1
 %define POLLOUT 4
 %define POLLERR 8
@@ -120,7 +115,6 @@ in_len resd 1
 inbuf resb 256
 
 section .text
-; Program entry: saves argc/argv/envp and calls program_main, which never returns (it ends with sys_exit).
 global _start
 _start:
     mov rax, [rsp]
@@ -133,8 +127,7 @@ _start:
     sub rsp, 8
     jmp program_main
 
-; ---------------- strings and the string builder ----------------
-FN str_len                      ; rcx -> rax
+FN str_len
     xor eax, eax
 .l: cmp byte [rcx+rax], 0
     je .d
@@ -143,7 +136,7 @@ FN str_len                      ; rcx -> rax
 .d:
 END_FN
 
-FN str_copy                     ; rcx dst, rdx src -> rax = address of dst's terminator (caller guarantees room)
+FN str_copy
     mov rdi, rcx
     mov rsi, rdx
 .l: lodsb
@@ -153,7 +146,6 @@ FN str_copy                     ; rcx dst, rdx src -> rax = address of dst's ter
     lea rax, [rdi-1]
 END_FN
 
-; Bounded builder:  pb_start(dst, size), then pb_str / pb_bytes / pb_chr / pb_int, then pb_end -> length, or -1 if anything was cut off.
 FN pb_start
     mov [pb_base], rcx
     mov [pb_cur], rcx
@@ -162,7 +154,7 @@ FN pb_start
     mov dword [pb_over], 0
 END_FN
 
-FN pb_bytes                     ; rcx src, rdx count
+FN pb_bytes
     mov rsi, rcx
     mov rdi, [pb_cur]
     mov r8, [pb_limit]
@@ -181,7 +173,7 @@ FN pb_bytes                     ; rcx src, rdx count
 .d: mov [pb_cur], rdi
 END_FN
 
-FN pb_str                       ; rcx NUL-terminated
+FN pb_str
     mov r12, rcx
     call str_len
     mov rcx, r12
@@ -189,14 +181,14 @@ FN pb_str                       ; rcx NUL-terminated
     call pb_bytes
 END_FN
 
-FN pb_chr                       ; cl
+FN pb_chr
     mov [rsp+48], cl
     lea rcx, [rsp+48]
     mov edx, 1
     call pb_bytes
 END_FN
 
-FN pb_int                       ; rcx unsigned decimal
+FN pb_int
     mov rax, rcx
     lea rdi, [rsp+80]
     xor r8d, r8d
@@ -214,7 +206,7 @@ FN pb_int                       ; rcx unsigned decimal
     call pb_bytes
 END_FN
 
-FN pb_end                       ; NUL-terminates -> eax length, -1 on overflow
+FN pb_end
     mov rdi, [pb_cur]
     mov byte [rdi], 0
     mov rax, rdi
@@ -225,7 +217,6 @@ FN pb_end                       ; NUL-terminates -> eax length, -1 on overflow
 .d:
 END_FN
 
-; Zero-padded decimal: rcx = value, edx = width, r8 = destination (width bytes written)
 FN put_dec_pad
     mov rax, rcx
     mov r9, r8
@@ -242,7 +233,7 @@ FN put_dec_pad
 .d:
 END_FN
 
-FN hex_bytes                    ; rcx out, rdx src, r8 count -> writes 2*count lowercase hex digits and a NUL
+FN hex_bytes
     lea r10, [hex_digits]
     xor r9d, r9d
 .l: cmp r9, r8
@@ -260,7 +251,7 @@ FN hex_bytes                    ; rcx out, rdx src, r8 count -> writes 2*count l
 .e: mov byte [rcx+r9*2], 0
 END_FN
 
-FN a_starts_ci                  ; rcx text, rdx lowercase prefix -> eax 1 if text begins with prefix (ASCII, case-insensitive)
+FN a_starts_ci
 .l: movzx eax, byte [rdx]
     test al, al
     jz .yes
@@ -285,8 +276,7 @@ END_FN
 
 %include "textutil.inc"
 
-; ---------------- environment and arguments ----------------
-FN env_get                      ; rcx NAME -> rax pointer to the value, or 0
+FN env_get
     mov r12, rcx
     mov rsi, [envp_v]
 .next:
@@ -315,7 +305,7 @@ FN env_get                      ; rcx NAME -> rax pointer to the value, or 0
 .d:
 END_FN
 
-FN arg_n                        ; ecx index -> rax pointer to argv[index], 0 if absent
+FN arg_n
     cmp rcx, [argc_v]
     jae .none
     mov rax, [argv_v]
@@ -326,7 +316,7 @@ FN arg_n                        ; ecx index -> rax pointer to argv[index], 0 if 
 .d:
 END_FN
 
-FN cut_last_component           ; rcx path: truncates at the last '/' (the root "/" stays)
+FN cut_last_component
     mov rsi, rcx
     xor r8, r8
     xor r9d, r9d
@@ -349,7 +339,7 @@ FN cut_last_component           ; rcx path: truncates at the last '/' (the root 
 .d:
 END_FN
 
-FN base_name                    ; rcx path -> rax pointer to the part after the last '/'
+FN base_name
     mov rax, rcx
 .l: movzx edx, byte [rcx]
     test dl, dl
@@ -362,8 +352,7 @@ FN base_name                    ; rcx path -> rax pointer to the part after the 
 .d:
 END_FN
 
-; ---------------- files ----------------
-FN file_exists                  ; rcx path -> eax 1/0
+FN file_exists
     xor edx, edx
     call sys_access
     test rax, rax
@@ -371,7 +360,7 @@ FN file_exists                  ; rcx path -> eax 1/0
     movzx eax, al
 END_FN
 
-FN path_kind                    ; rcx path -> eax: 0 missing, 1 regular file, 2 directory, 3 other
+FN path_kind
     lea rdx, [st_buf]
     call sys_stat
     test rax, rax
@@ -395,10 +384,10 @@ FN path_kind                    ; rcx path -> eax: 0 missing, 1 regular file, 2 
 .d:
 END_FN
 
-FN read_file                    ; rcx path, rdx buffer, r8 max bytes -> rax bytes read, -1 on failure. Never reads more than r8.
+FN read_file
     mov r12, rdx
     mov r13, r8
-    mov edx, O_RDONLY | O_CLOEXEC | O_NONBLOCK   ; a FIFO named launcher.cfg must not be able to hang the launcher
+    mov edx, O_RDONLY | O_CLOEXEC | O_NONBLOCK
     xor r8d, r8d
     call sys_open
     test rax, rax
@@ -432,7 +421,7 @@ FN read_file                    ; rcx path, rdx buffer, r8 max bytes -> rax byte
 .d:
 END_FN
 
-FN write_all                    ; rcx fd, rdx data, r8 length -> eax 1 if everything was written
+FN write_all
     mov rbx, rcx
     mov r12, rdx
     mov r13, r8
@@ -457,11 +446,11 @@ FN write_all                    ; rcx fd, rdx data, r8 length -> eax 1 if everyt
 .d:
 END_FN
 
-FN write_plain                  ; rcx path, rdx data, r8 length -> eax 1 ok (creates or truncates the file in place)
+FN write_plain
     mov r12, rdx
     mov r13, r8
     mov edx, O_WRITE_NEW
-    mov r8d, [wf_mode]                  ; 0644o, or 0600o while a file with a password is written
+    mov r8d, [wf_mode]
     call sys_open
     test rax, rax
     js .fail
@@ -480,7 +469,7 @@ FN write_plain                  ; rcx path, rdx data, r8 length -> eax 1 ok (cre
 .d:
 END_FN
 
-FN write_file                   ; rcx path, rdx data, r8 length -> eax 1 ok. Writes <path>.tmp and renames it, so readers never see half a file.
+FN write_file
     mov r12, rcx
     mov r13, rdx
     mov r14, r8
@@ -515,7 +504,7 @@ FN write_file                   ; rcx path, rdx data, r8 length -> eax 1 ok. Wri
 .d:
 END_FN
 
-FN copy_file                    ; rcx source, rdx destination -> eax 1 ok
+FN copy_file
     mov r12, rdx
     mov edx, O_RDONLY | O_CLOEXEC
     xor r8d, r8d
@@ -569,8 +558,7 @@ FN copy_file                    ; rcx source, rdx destination -> eax 1 ok
     mov eax, r15d
 END_FN
 
-; Creates every missing folder in front of the last '/' of the path (the final name itself is not created).
-FN ensure_dirs                  ; rcx path
+FN ensure_dirs
     mov rsi, rcx
     mov r12d, 1
 .l: movzx eax, byte [rsi+r12]
@@ -588,7 +576,7 @@ FN ensure_dirs                  ; rcx path
 .d:
 END_FN
 
-FN dir_open                     ; rcx path -> rax fd (negative on failure)
+FN dir_open
     mov edx, O_RDONLY | O_DIRECTORY | O_CLOEXEC
     xor r8d, r8d
     call sys_open
@@ -597,7 +585,7 @@ FN dir_open                     ; rcx path -> rax fd (negative on failure)
     mov qword [dir_end], 0
 END_FN
 
-FN dir_next                     ; -> rax pointer to the next entry name (skips . and ..), 0 at the end. dir_type = DT_ value.
+FN dir_next
 .again:
     mov rax, [dir_pos]
     cmp rax, [dir_end]
@@ -645,8 +633,7 @@ FN dir_close
 .d:
 END_FN
 
-; ---------------- time ----------------
-FN ticks_ms                     ; -> rax milliseconds on the monotonic clock
+FN ticks_ms
     mov ecx, 1
     lea rdx, [ts_buf]
     call sys_clock_gettime
@@ -660,7 +647,7 @@ FN ticks_ms                     ; -> rax milliseconds on the monotonic clock
     add rax, rcx
 END_FN
 
-FN sleep_ms                     ; ecx milliseconds
+FN sleep_ms
     mov eax, ecx
     xor edx, edx
     mov r8d, 1000
@@ -673,7 +660,6 @@ FN sleep_ms                     ; ecx milliseconds
     call sys_nanosleep
 END_FN
 
-; Writes "YYYYMMDD-HHMMSS" (UTC, 15 characters and a NUL) at rcx. UTC keeps the names sortable across daylight saving changes.
 FN time_stamp
     mov r12, rcx
     xor ecx, ecx
@@ -684,31 +670,30 @@ FN time_stamp
     call time_stamp_at
 END_FN
 
-FN time_stamp_at                ; rcx out buffer, rdx = seconds since 1970-01-01 00:00:00 UTC
+FN time_stamp_at
     mov r12, rcx
     mov rax, rdx
     xor edx, edx
     mov ecx, 86400
     div rcx
-    mov r13, rax                    ; days since 1970-01-01
+    mov r13, rax
     mov rax, rdx
     xor edx, edx
     mov ecx, 3600
     div rcx
-    mov r14, rax                    ; hours
+    mov r14, rax
     mov rax, rdx
     xor edx, edx
     mov ecx, 60
     div rcx
-    mov r15, rax                    ; minutes
-    mov [rsp+48], rdx               ; seconds
-    ; civil date from the day number (proleptic Gregorian, March based years)
+    mov r15, rax
+    mov [rsp+48], rdx
     lea rax, [r13+719468]
     xor edx, edx
     mov ecx, 146097
     div rcx
-    mov rbx, rax                    ; era
-    mov rsi, rdx                    ; day of era
+    mov rbx, rax
+    mov rsi, rdx
     mov rax, rsi
     xor edx, edx
     mov ecx, 1460
@@ -729,10 +714,10 @@ FN time_stamp_at                ; rcx out buffer, rdx = seconds since 1970-01-01
     xor edx, edx
     mov ecx, 365
     div rcx
-    mov rdi, rax                    ; year of era
+    mov rdi, rax
     imul rax, rbx, 400
     add rax, rdi
-    mov [rsp+56], rax               ; year, before the January/February adjustment
+    mov [rsp+56], rax
     imul r8, rdi, 365
     mov rax, rdi
     shr rax, 2
@@ -742,12 +727,12 @@ FN time_stamp_at                ; rcx out buffer, rdx = seconds since 1970-01-01
     mov ecx, 100
     div rcx
     sub r8, rax
-    sub rsi, r8                     ; day of year
+    sub rsi, r8
     lea rax, [rsi+rsi*4+2]
     xor edx, edx
     mov ecx, 153
     div rcx
-    mov rbx, rax                    ; month index, March = 0
+    mov rbx, rax
     imul rax, rbx, 153
     add rax, 2
     xor edx, edx
@@ -755,12 +740,12 @@ FN time_stamp_at                ; rcx out buffer, rdx = seconds since 1970-01-01
     div rcx
     sub rsi, rax
     inc rsi
-    mov [rsp+64], rsi               ; day of month
+    mov [rsp+64], rsi
     lea rax, [rbx+3]
     cmp rbx, 10
     jb .m
     sub rax, 12
-.m: mov [rsp+72], rax               ; month 1..12
+.m: mov [rsp+72], rax
     cmp rax, 2
     ja .y
     inc qword [rsp+56]
@@ -792,8 +777,7 @@ FN time_stamp_at                ; rcx out buffer, rdx = seconds since 1970-01-01
     mov byte [r12+15], 0
 END_FN
 
-; ---------------- random ----------------
-FN random_bytes                 ; rcx buffer, edx count (<= 256)
+FN random_bytes
     mov r12, rcx
     mov r13d, edx
     xor r8d, r8d
@@ -806,7 +790,7 @@ FN random_bytes                 ; rcx buffer, edx count (<= 256)
     call read_file
     cmp rax, r13
     je .d
-    call ticks_ms                   ; last resort: not secret, but the game still starts
+    call ticks_ms
     mov r8, 6364136223846793005
     mov r9, 1442695040888963407
     xor ecx, ecx
@@ -822,7 +806,7 @@ FN random_bytes                 ; rcx buffer, edx count (<= 256)
 .d:
 END_FN
 
-FN guid_hex                     ; rcx -> 32 lowercase hex digits and a NUL (also leaves the 16 random bytes in guid)
+FN guid_hex
     mov r12, rcx
     lea rcx, [guid]
     mov edx, 16
@@ -833,8 +817,7 @@ FN guid_hex                     ; rcx -> 32 lowercase hex digits and a NUL (also
     call hex_bytes
 END_FN
 
-; ---------------- processes ----------------
-FN sigpipe_set                  ; ecx = 1 ignore SIGPIPE, 0 default action
+FN sigpipe_set
     mov [ts_buf], rcx
     mov qword [ts_buf+8], 0
     mov qword [ts_buf+16], 0
@@ -846,8 +829,6 @@ FN sigpipe_set                  ; ecx = 1 ignore SIGPIPE, 0 default action
     call sys_rt_sigaction
 END_FN
 
-; spawn(path, argv, stdin_fd, stdout_fd, [stderr_fd], [flags]) -> rax pid, or -1.  A descriptor of -1 keeps the inherited one.
-; flags: 1 = the child dies with this process (PR_SET_PDEATHSIG SIGKILL), 2 = search PATH when the name has no '/'
 FN spawn
     mov r12, rcx
     mov r13, rdx
@@ -859,17 +840,16 @@ FN spawn
     test rax, rax
     js .fail
     jnz .parent
-    ; ---- child ----
     test dword [rbp+56], 1
     jz .nopdeath
-    mov ecx, 1                      ; PR_SET_PDEATHSIG
-    mov edx, 9                      ; SIGKILL
+    mov ecx, 1
+    mov edx, 9
     xor r8d, r8d
     xor r9d, r9d
     call sys_prctl
     call sys_getppid
     cmp rax, rbx
-    jne .die                        ; the launcher is already gone
+    jne .die
 .nopdeath:
     cmp r14, -1
     je .o
@@ -888,7 +868,7 @@ FN spawn
     call sys_dup2
 .go:
     xor ecx, ecx
-    call sigpipe_set                    ; an ignored SIGPIPE would be inherited by the program started below
+    call sigpipe_set
     mov rcx, r12
     mov rdx, r13
     test dword [rbp+56], 2
@@ -908,7 +888,6 @@ FN spawn
 .d:
 END_FN
 
-; execvp: rcx = program name (argv[0] of rdx), rdx = argv. Returns only when nothing could be executed.
 FN exec_search
     mov r12, rcx
     mov r13, rdx
@@ -972,11 +951,10 @@ FN exec_search
 .d:
 END_FN
 
-; Decodes a wait status into a shell style exit code.
-FN proc_poll                    ; rcx pid -> rax exit code (signals count as 128+n), -1 while the process is still running
+FN proc_poll
     mov r12, rcx
     lea rdx, [status_v]
-    mov r8d, 1                      ; WNOHANG
+    mov r8d, 1
     xor r9d, r9d
     call sys_wait4
     test rax, rax
@@ -1000,7 +978,7 @@ FN proc_poll                    ; rcx pid -> rax exit code (signals count as 128
 .d:
 END_FN
 
-FN proc_wait                    ; rcx pid, edx timeout in milliseconds -> exit code, or -1 if it is still running afterwards
+FN proc_wait
     mov r12, rcx
     mov r13d, edx
     call ticks_ms
@@ -1020,7 +998,7 @@ FN proc_wait                    ; rcx pid, edx timeout in milliseconds -> exit c
 .d:
 END_FN
 
-FN proc_kill                    ; rcx pid: SIGKILL, then reap it
+FN proc_kill
     mov r12, rcx
     mov edx, 9
     call sys_kill
@@ -1031,8 +1009,7 @@ FN proc_kill                    ; rcx pid: SIGKILL, then reap it
     call sys_wait4
 END_FN
 
-; ---------------- console ----------------
-FN say                          ; rcx NUL-terminated text -> stdout
+FN say
     mov r12, rcx
     call str_len
     mov r8, rax
@@ -1050,7 +1027,6 @@ FN say_err
     call write_all
 END_FN
 
-; next input byte -> eax, or -1 at the end of the input (refills from stdin; works for terminals and pipes)
 FN getc
     mov eax, [in_pos]
     cmp eax, [in_len]
@@ -1078,14 +1054,13 @@ FN getc
 .d:
 END_FN
 
-; rcx prompt, rdx out buffer, r8 size -> eax length, -1 at the end of the input. Spaces and the line ending are dropped.
 FN ask
     mov r12, rdx
     mov r13, r8
     dec r13
     call say
-    xor r14d, r14d                  ; characters stored
-    xor r15d, r15d                  ; bytes seen
+    xor r14d, r14d
+    xor r15d, r15d
 .ch:
     call getc
     cmp eax, -1

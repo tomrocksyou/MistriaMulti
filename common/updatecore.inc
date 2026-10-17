@@ -1,30 +1,4 @@
-; Update support of the launchers (Linux: linux/menu.inc, Windows: launcher/menu.inc): the part that does not care about the
-; operating system. docs/SYNC-UPDATE.md describes the whole feature.
-;
-;   1. the update RUN: the in-game Update button sends `cmd=update`; the launcher starts the update program (the manager's
-;      `update --result <file>` on Linux, `MistriMulti.exe --update <file>` on Windows) as a child, reads its result file about once
-;      a second and publishes state / version / message / error code in menu/status.json (fields us, uv, um, ue, ur).
-;   2. the RELEASE CHECK: once a day at most (3 hours after a failed try), a short quiet check of the latest release; the answer
-;      is published as `update` (a version, or "none") and remembered in update_check.txt.
-;
-; Both are driven from sv_poll (chk_step, up_step) which only runs once the game has been started, so neither can delay the game.
-; The operating system supplies the plat_* routines (spawn, poll, kill, files, clocks); everything here is plain ASCII logic.
-;
-; The result file (written by the update program, atomically) is key=value lines:
-;   state=checking|downloading|installing|done|failed|needs_momi   version=<x.y.z>   message=<plain words>   error=<number>
-; Nothing in it is trusted: the state must be one of the six words, the version must parse as a version, the message is reduced to
-; printable ASCII (90 characters, no quote or backslash), the error to 0..999.
-;
-; Expected from the including file: cfg_get, a_equal, a2i, file_buf, cfg_len, sv_session, sv_status_write, and these
-;   plat_ms            -> rax milliseconds (monotonic)
-;   plat_unix          -> rax seconds since 1970 (UTC)
-;   plat_cfg_read      -> eax 1 if update.cfg was read into file_buf / cfg_len (NUL terminated)
-;   plat_cache_read    -> eax 1 if update_check.txt was read into file_buf / cfg_len
-;   plat_cache_write   rcx data, rdx length: writes update_check.txt (atomically)
-;   plat_manifest_read -> eax 1 if <game>/mods/mistrimulti/manifest.toml was read into file_buf / cfg_len
-;   plat_up_limit      -> eax milliseconds replacing the run time limit (tests), 0 for the built-in limits
-;   plat_up_prepare / plat_up_start (eax 1 started) / plat_up_poll (rax -1 running, else exit code) / plat_up_kill / plat_up_read (eax 1)
-;   plat_chk_start (eax 1 started) / plat_chk_poll (rax -1 running, else exit code) / plat_chk_kill / plat_chk_read (eax 1) / plat_chk_clean
+; Update support of the launchers
 
 UP_ST_NONE equ 0
 UP_ST_CHECKING equ 1
@@ -33,13 +7,13 @@ UP_ST_INSTALLING equ 3
 UP_ST_DONE equ 4
 UP_ST_FAILED equ 5
 UP_ST_MOMI equ 6
-UP_ER_BUSY equ 61                    ; hosting or joining: not now
-UP_ER_MISSING equ 62                 ; the update program is not next to the launcher
-UP_ER_NORESULT equ 63                ; it ended without saying how it went
-UP_ER_FAILED equ 64                  ; it ended with a failure it did not describe
-UP_ER_TIMEOUT equ 66                 ; killed after too long
-UP_RUN_LIMIT_MS equ 300000           ; checking / downloading: 5 minutes
-UP_INSTALL_LIMIT_MS equ 900000       ; installing is never cut off earlier
+UP_ER_BUSY equ 61
+UP_ER_MISSING equ 62
+UP_ER_NORESULT equ 63
+UP_ER_FAILED equ 64
+UP_ER_TIMEOUT equ 66
+UP_RUN_LIMIT_MS equ 300000
+UP_INSTALL_LIMIT_MS equ 900000
 CK_TIMEOUT_MS equ 8000
 CK_OK_SECONDS equ 86400
 CK_RETRY_SECONDS equ 10800
@@ -105,7 +79,6 @@ ck_checked resq 1
 ck_ok resd 1
 
 section .text
-; rcx = ASCII "N", "N.N", "N.N.N" or "N.N.N.N" (1-5 digits each), rdx = dword[4] out (missing groups are 0). eax 1 if valid
 FN up_ver_parse
     mov qword [rdx], 0
     mov qword [rdx+8], 0
@@ -146,7 +119,6 @@ FN up_ver_parse
 .d:
 END_FN
 
-; rcx = version a, rdx = version b (ASCII). eax 1 if both are versions and a is higher than b
 FN up_ver_newer
     mov r12, rdx
     lea rdx, [up_pa]
@@ -177,7 +149,6 @@ FN up_ver_newer
 .d:
 END_FN
 
-; rcx = destination (32 bytes), rdx = source ASCII. Copies the source if it is a valid version, else stores "". eax 1 if copied
 FN up_copy_ver
     mov r12, rcx
     mov r13, rdx
@@ -197,7 +168,6 @@ FN up_copy_ver
 .d:
 END_FN
 
-; rcx = destination (96 bytes), rdx = source ASCII. Keeps printable ASCII only, at most 90 characters; " becomes ' and \ becomes /
 FN up_clean_msg
     xor r8d, r8d
 .l: movzx eax, byte [rdx]
@@ -221,7 +191,6 @@ FN up_clean_msg
 .e: mov byte [rcx+r8], 0
 END_FN
 
-; rcx = decimal ASCII (1-12 digits) -> rax value, -1 if it is not a number
 FN up_atoq
     xor eax, eax
     xor edx, edx
@@ -245,7 +214,6 @@ FN up_atoq
 .d:
 END_FN
 
-; rcx = dest, rdx = NUL terminated source -> rax = dest after the copy (no NUL written)
 FN up_put
     mov rax, rcx
 .l: mov r8b, [rdx]
@@ -258,7 +226,6 @@ FN up_put
 .d:
 END_FN
 
-; rcx = dest, edx = unsigned number -> rax = dest after the digits
 FN up_put_int
     mov r8, rcx
     mov eax, edx
@@ -282,7 +249,6 @@ FN up_put_int
     mov rax, r8
 END_FN
 
-; Applies the result file in file_buf / cfg_len. eax 1 if it named a known state (the other fields are taken with it)
 FN up_apply_result
     lea rcx, [uk_state]
     lea rdx, [up_tmp]
@@ -344,7 +310,6 @@ FN up_apply_result
 .d:
 END_FN
 
-; -> rax = the version to publish as `update`: the latest release when it is newer than the installed mod, else "none"
 FN up_update_text
     lea rax, [uj_none]
     cmp byte [up_latest], 0
@@ -362,7 +327,6 @@ FN up_update_text
 .d:
 END_FN
 
-; Builds the update fields of status.json in up_json (no closing brace) -> eax length
 FN up_json_make
     lea rcx, [up_json]
     lea rdx, [uj_a]
@@ -413,9 +377,6 @@ FN up_json_make
     sub rax, rcx
 END_FN
 
-; ---------------- text of latest.txt and manifest.toml ----------------
-; file_buf / cfg_len hold a release list ("version 0.4.7" on its first line, blank lines and # comments allowed before it).
-; eax 1 and the version in up_tmp2 if found and valid
 FN up_parse_latest
     lea rsi, [file_buf]
     mov r12, rsi
@@ -469,7 +430,6 @@ FN up_parse_latest
 .d:
 END_FN
 
-; file_buf / cfg_len hold manifest.toml: the first line  version = "x.y.z"  . eax 1 and the version in up_tmp2 if found and valid
 FN up_parse_manifest
     lea rsi, [file_buf]
     mov r12, rsi
@@ -541,7 +501,6 @@ FN up_parse_manifest
 .d:
 END_FN
 
-; Reads the installed mod's version (manifest.toml in the game folder) into up_installed ("" if unknown)
 FN up_load_installed
     mov byte [up_installed], 0
     call plat_manifest_read
@@ -556,8 +515,6 @@ FN up_load_installed
 .d:
 END_FN
 
-; ---------------- the update run ----------------
-; cmd=update. One run at a time; refused while hosting or joining; answered in status.json either way.
 FN up_cmd_update
     cmp dword [up_active], 0
     jne .publish
@@ -595,7 +552,6 @@ FN up_cmd_update
     call sv_status_write
 END_FN
 
-; cmd=update_cancel. Stops a run that is checking or downloading; an installation is never cut off half way.
 FN up_cmd_cancel
     cmp dword [up_active], 0
     je .publish
@@ -611,7 +567,6 @@ FN up_cmd_cancel
     call sv_status_write
 END_FN
 
-; Called from every sv_poll: follows a running update program.
 FN up_step
     cmp dword [up_active], 0
     je .d
@@ -624,7 +579,7 @@ FN up_step
     cmove ecx, edx
     mov edx, [up_limit]
     test edx, edx
-    cmovnz ecx, edx                          ; a test can shorten the limit (MISTRIMULTI_UPDATE_TIMEOUT_MS)
+    cmovnz ecx, edx
     cmp rax, rcx
     ja .timeout
     call plat_up_poll
@@ -657,14 +612,14 @@ FN up_step
     je .fin
     cmp eax, UP_ST_FAILED
     je .failed_err
-    mov dword [up_state], UP_ST_FAILED       ; exit 0 but no final state in the result file
+    mov dword [up_state], UP_ST_FAILED
     mov dword [up_err], UP_ER_NORESULT
     mov byte [up_msg], 0
     jmp .fin
 .nonzero:
     cmp dword [up_state], UP_ST_FAILED
     je .failed_err
-    mov dword [up_state], UP_ST_FAILED       ; a failure exit code outranks a hopeful state
+    mov dword [up_state], UP_ST_FAILED
     mov dword [up_err], UP_ER_FAILED
     mov byte [up_msg], 0
     jmp .fin
@@ -675,7 +630,7 @@ FN up_step
 .fin:
     cmp dword [up_state], UP_ST_DONE
     jne .publish
-    call up_load_installed                   ; the new mod files are in place: `update` becomes "none" if it is the latest
+    call up_load_installed
 .publish:
     call sv_status_write
     jmp .d
@@ -689,8 +644,6 @@ FN up_step
 .d:
 END_FN
 
-; ---------------- the release check ----------------
-; Writes update_check.txt: checked=<now> ok=<0|1> latest=<known latest or nothing>. ecx = ok
 FN ck_save
     mov r12d, ecx
     lea rcx, [ck_text]
@@ -722,14 +675,13 @@ FN ck_save
     call plat_cache_write
 END_FN
 
-; First call after the game started (from sv_poll), then every call until the check ended.
 FN chk_step
     mov eax, [ck_state]
     cmp eax, 2
     jae .d
     test eax, eax
     jnz .running
-    mov dword [ck_state], 2                 ; ended unless a program is started below
+    mov dword [ck_state], 2
     call up_load_installed
     call plat_cfg_read
     test eax, eax
@@ -740,7 +692,7 @@ FN chk_step
     call cfg_get
     call ck_word
     test eax, eax
-    jnz .publish                            ; the player turned the check off: update stays "none"
+    jnz .publish
 .cache:
     mov byte [up_latest], 0
     mov qword [ck_checked], 0
@@ -775,14 +727,14 @@ FN chk_step
     call plat_unix
     mov rcx, [ck_checked]
     cmp rax, rcx
-    jb .ask                                 ; the clock went back: do not trust the stamp
+    jb .ask
     sub rax, rcx
     mov edx, CK_RETRY_SECONDS
     mov ecx, CK_OK_SECONDS
     cmp dword [ck_ok], 0
     cmovne rdx, rcx
     cmp rax, rdx
-    jb .publish                             ; checked recently: the remembered answer stands
+    jb .publish
 .ask:
     call plat_chk_start
     test eax, eax
@@ -817,7 +769,7 @@ FN chk_step
 .timeout:
     call plat_chk_kill
 .fail:
-    xor ecx, ecx                            ; a failed try is silent: the old answer stays, the next try is in three hours
+    xor ecx, ecx
 .end:
     call ck_save
     call plat_chk_clean
@@ -826,7 +778,6 @@ FN chk_step
 .d:
 END_FN
 
-; up_tmp holds the value of a config line. eax 1 if it says off / no / 0 / false (any case)
 FN ck_word
     lea rsi, [up_tmp]
 .lc:movzx eax, byte [rsi]

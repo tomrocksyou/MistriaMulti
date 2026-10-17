@@ -1,5 +1,5 @@
-; SHA-256 in plain assembly (FIPS 180-4). Linux has no system hash function reachable without libc, so the world
-; transfer checks its files with this one. Windows uses bcrypt for the same job (common/world.inc).
+; SHA-256 in plain assembly
+
 section .data
 align 16
 sha_k:
@@ -20,7 +20,6 @@ sha_w resd 64
 sha_tail resb 128
 
 section .text
-; Compresses the 64 byte block at rcx into sha_h.
 FN sha_block
     mov r11, rcx
     lea rsi, [sha_w]
@@ -31,25 +30,25 @@ FN sha_block
     inc r8d
     cmp r8d, 16
     jb .ld
-.ex:mov eax, [rsi+r8*4-8]           ; W[t-2]
+.ex:mov eax, [rsi+r8*4-8]
     mov edx, eax
     ror edx, 17
     mov ecx, eax
     ror ecx, 19
     xor edx, ecx
     shr eax, 10
-    xor edx, eax                    ; small sigma 1
-    mov eax, [rsi+r8*4-60]          ; W[t-15]
+    xor edx, eax
+    mov eax, [rsi+r8*4-60]
     mov ecx, eax
     ror ecx, 7
     mov r9d, eax
     ror r9d, 18
     xor ecx, r9d
     shr eax, 3
-    xor ecx, eax                    ; small sigma 0
+    xor ecx, eax
     add edx, ecx
-    add edx, [rsi+r8*4-28]          ; W[t-7]
-    add edx, [rsi+r8*4-64]          ; W[t-16]
+    add edx, [rsi+r8*4-28]
+    add edx, [rsi+r8*4-64]
     mov [rsi+r8*4], edx
     inc r8d
     cmp r8d, 64
@@ -63,36 +62,36 @@ FN sha_block
     mov r13d, [r9+20]
     mov r14d, [r9+24]
     mov r15d, [r9+28]
-    mov r9d, [r9+4]                 ; a=r8 b=r9 c=r10 d=r11 e=r12 f=r13 g=r14 h=r15
+    mov r9d, [r9+4]
     xor ebx, ebx
-.rd:mov eax, r12d                   ; big sigma 1 of e: ror6(e ^ ror5(e ^ ror14(e)))
+.rd:mov eax, r12d
     ror eax, 14
     xor eax, r12d
     ror eax, 5
     xor eax, r12d
     ror eax, 6
     add eax, r15d
-    mov ecx, r13d                   ; Ch(e,f,g) = g ^ (e & (f ^ g))
+    mov ecx, r13d
     xor ecx, r14d
     and ecx, r12d
     xor ecx, r14d
     add eax, ecx
     add eax, [rdi+rbx*4]
     add eax, [rsi+rbx*4]
-    mov [rsp+48], eax               ; T1
-    mov ecx, r8d                    ; big sigma 0 of a: ror2(a ^ ror11(a ^ ror9(a)))
+    mov [rsp+48], eax
+    mov ecx, r8d
     ror ecx, 9
     xor ecx, r8d
     ror ecx, 11
     xor ecx, r8d
     ror ecx, 2
-    mov eax, r8d                    ; Maj(a,b,c) = b ^ ((a ^ b) & (b ^ c))
+    mov eax, r8d
     xor eax, r9d
     mov edx, r9d
     xor edx, r10d
     and eax, edx
     xor eax, r9d
-    add ecx, eax                    ; T2
+    add ecx, eax
     mov eax, [rsp+48]
     mov r15d, r14d
     mov r14d, r13d
@@ -116,7 +115,6 @@ FN sha_block
     add [rax+28], r15d
 END_FN
 
-; rcx data, rdx length, r8 = 32 byte output -> eax 1 (cannot fail)
 FN sha256_raw
     mov r12, rcx
     mov r13, rdx
@@ -126,7 +124,7 @@ FN sha256_raw
     mov ecx, 8
     rep movsd
     mov r15, r13
-    shr r15, 6                      ; full blocks
+    shr r15, 6
 .blocks:
     test r15, r15
     jz .tail
@@ -137,11 +135,11 @@ FN sha256_raw
     jmp .blocks
 .tail:
     mov rcx, r13
-    and ecx, 63                     ; bytes left over
+    and ecx, 63
     mov ebx, ecx
     lea rdi, [sha_tail]
     mov rsi, r12
-    rep movsb                       ; rcx = leftover count (set above)
+    rep movsb
     lea rdi, [sha_tail]
     mov byte [rdi+rbx], 0x80
     lea rcx, [rbx+1]
@@ -152,7 +150,7 @@ FN sha256_raw
     sub edx, ecx
     mov ecx, edx
     rep stosb
-    mov r15d, 64                    ; blocks in the tail: one if the length fits behind the 0x80 byte, else two
+    mov r15d, 64
     cmp ebx, 56
     jb .one
     mov r15d, 128

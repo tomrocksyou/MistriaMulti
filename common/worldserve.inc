@@ -1,12 +1,10 @@
-; Host half of the authenticated world transfer (the launchers only; the protocol is described in worldauth.inc and docs/PROTOCOL.md).
-; The including program provides wf_key_for_slot (ecx slot -> eax 1 with that slot's session key in wa_key, 0 if it has none).
+; Host half of the authenticated world transfer
 
 section .data
 wa_msg_old db 'Update MistriaMulti: the world download now needs a login',0
 wa_msg_old_len equ $ - wa_msg_old
 
 section .text
-; Server: signs the reply header in wf_hdr (version 2 set by the caller): the tag goes to bytes 112..143
 FN wa_sign_header
     mov ecx, 1
     call wa_make_tag
@@ -17,7 +15,6 @@ FN wa_sign_header
     rep movsb
 END_FN
 
-; Server: a refusal in the 144-byte format (status 3, no tag) or, for an old client, the 112-byte format. ecx 2 or 1 = version
 FN wa_refuse
     mov r12d, ecx
     lea rdi, [wf_hdr]
@@ -31,7 +28,7 @@ FN wa_refuse
     mov edx, 144
     cmp r12d, 2
     je .send
-    lea rsi, [wa_msg_old]              ; an old client cannot read it, but it shows up in a packet capture or log
+    lea rsi, [wa_msg_old]
     lea rdi, [wf_hdr+48]
     mov ecx, wa_msg_old_len
     rep movsb
@@ -41,9 +38,6 @@ FN wa_refuse
     call wf_send_all
 END_FN
 
-; Server: a connection was accepted on [wf_sock] (its timeouts are set). Runs the whole challenge and response.
-; eax 1: the client proved the session key (wa_key, wa_slot and both nonces are set: send a header and call wa_sign_header)
-; eax 0: refused (the refusal was sent) or the connection broke; the caller just closes it
 FN wa_serve_auth
     lea rcx, [wf_req]
     mov edx, 16
@@ -76,7 +70,7 @@ FN wa_serve_auth
     call wf_random
     test eax, eax
     jz .drop
-    lea rdi, [wf_hdr]                  ; CHALLENGE
+    lea rdi, [wf_hdr]
     xor eax, eax
     mov ecx, 4
     rep stosq
@@ -104,7 +98,7 @@ FN wa_serve_auth
     jne .check
     mov eax, [wa_slot]
     dec eax
-    cmp eax, 6                         ; slot 1..7 only: slot 0 is the host itself
+    cmp eax, 6
     ja .check
     mov ecx, [wa_slot]
     call wf_key_for_slot
@@ -112,7 +106,7 @@ FN wa_serve_auth
 .check:
     cmp dword [wa_ok], 0
     jne .have_key
-    lea rdi, [wa_key]                  ; no session for this slot: the tag is still computed (with a zero key) and then refused
+    lea rdi, [wa_key]
     xor eax, eax
     mov ecx, 4
     rep stosq
@@ -133,10 +127,9 @@ FN wa_serve_auth
     xor eax, eax
     jmp .d
 .old:
-    mov ecx, 1                         ; an old client sent 16 bytes and waits for 112: answer at once
+    mov ecx, 1
     call wa_refuse
 .drop:
     xor eax, eax
 .d:
 END_FN
-

@@ -16,3 +16,7 @@ Things that are wanted or might be nice, in no particular order. Nothing here is
   shared gold is correct afterwards. Make the guest's summary show the host's total.
 - **Cutscenes.** Every player now watches the world-story scenes themselves (docs/SYNC-STORY.md, "Cutscenes that every player
   watches"); they are not shown at the same time. Seeing one together, in step, is still open (needs a safe way to avoid soft-locks).
+
+## Decided against
+- **Bringing an existing singleplayer character into a hosted world.** A guest always makes a new character per world, so nothing in
+  anyone's singleplayer saves is ever read or changed by multiplayer (solo saves stay in their own folder and are backed up at launch).

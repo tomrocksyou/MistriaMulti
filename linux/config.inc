@@ -1,15 +1,4 @@
-; Where the game keeps its files on Linux, and the launcher.cfg shared by the launcher and the manager.
-;
-; The game's CONFIG_DIRECTORY is GameMaker's game_save_id (scripts/Serialization/Serde/SerdeUtils.gml). On Windows that is
-; %LOCALAPPDATA%\FieldsOfMistria. For Linux the game files do not say where the runtime puts it, so find_datadir looks in
-; every place it can plausibly be and takes the first folder that already holds the game's "saves" (or this mod's "mod_data"):
-;   1. $MISTRIMULTI_DATA_DIR                   (explicit; always wins, no search)
-;   2. $STEAM_COMPAT_DATA_PATH/pfx/drive_c/users/steamuser/AppData/Local/FieldsOfMistria   (Steam sets it for Proton games)
-;   3. ${XDG_CONFIG_HOME:-~/.config}/FieldsOfMistria                  (GameMaker's native Linux runner convention)
-;   4. ${XDG_DATA_HOME:-~/.local/share}/FieldsOfMistria
-;   5. <Steam library>/steamapps/compatdata/<any app id>/pfx/.../AppData/Local/FieldsOfMistria  (Steam Deck, Proton)
-; If nothing exists yet but STEAM_COMPAT_DATA_PATH is set, entry 2 is used. Otherwise find_datadir fails and the caller
-; falls back to the plain game launch (launcher) or says so (manager).
+; Linux game paths and launcher.cfg
 
 section .data
 k_mode db 5,'mode='
@@ -72,7 +61,7 @@ a_room resb 16
 a_pass resb 72
 
 section .text
-FN path2                        ; rcx destination (1100 bytes), rdx first part, r8 second part -> eax length, -1 if too long
+FN path2
     mov r12, rdx
     mov r13, r8
     mov edx, 1100
@@ -84,7 +73,7 @@ FN path2                        ; rcx destination (1100 bytes), rdx first part, 
     call pb_end
 END_FN
 
-FN path3                        ; rcx destination, rdx, r8, r9 parts
+FN path3
     mov r12, rdx
     mov r13, r8
     mov r14, r9
@@ -99,7 +88,6 @@ FN path3                        ; rcx destination, rdx, r8, r9 parts
     call pb_end
 END_FN
 
-; Finds the program's own folder through /proc/self/exe. eax 1 ok.
 FN exe_init
     lea rcx, [s_proc_exe]
     lea rdx, [exe_path]
@@ -107,7 +95,7 @@ FN exe_init
     call sys_readlink
     test rax, rax
     jg .have
-    xor ecx, ecx                        ; no /proc: fall back to the name the program was started with
+    xor ecx, ecx
     call arg_n
     test rax, rax
     jz .bad
@@ -133,8 +121,7 @@ FN exe_init
 .d:
 END_FN
 
-; A folder name is acceptable when it is absolute, short, and can sit inside JSON text and a command line unchanged.
-FN valid_dir                    ; rcx path -> eax 1/0
+FN valid_dir
     cmp byte [rcx], '/'
     jne .no
     xor edx, edx
@@ -161,8 +148,6 @@ FN valid_dir                    ; rcx path -> eax 1/0
 .d:
 END_FN
 
-; rcx = candidate game folder. A folder holding "saves" is taken at once (eax 1, data_dir set); one that only holds
-; "mod_data" is remembered in dd_alt for the case that nothing better turns up.
 FN dd_try
     mov r12, rcx
     lea rcx, [p3]
@@ -201,7 +186,6 @@ FN dd_try
 .d:
 END_FN
 
-; Fills data_dir. eax 1 ok, 0 if the game folder could not be determined.
 FN find_datadir
     mov byte [data_dir], 0
     mov byte [dd_alt], 0
@@ -224,7 +208,7 @@ FN find_datadir
     call str_copy
     jmp .trim
 .search:
-    xor r15d, r15d                     ; STEAM_COMPAT_DATA_PATH, kept for the last resort
+    xor r15d, r15d
     lea rcx, [s_env_compat]
     call env_get
     test rax, rax
@@ -301,7 +285,6 @@ FN find_datadir
     mov r12, rax
     cmp byte [rax], '.'
     je .entry
-    ; cand = cand2 + "/" + name + proton sub folder
     lea rcx, [cand]
     mov edx, 1100
     call pb_start
@@ -365,7 +348,6 @@ FN find_datadir
 .fail:
     xor eax, eax
     jmp .d
-; local helper: rcx = name of an XDG variable, rdx = fallback below $HOME -> rax pointer to a base folder, 0 if none
 .base:
     push rdx
     call env_get
@@ -393,7 +375,6 @@ FN find_datadir
 .d:
 END_FN
 
-; Fills mod_dir and creates it. eax 1 ok.
 FN mod_dir_init
     lea rcx, [mod_dir]
     lea rdx, [data_dir]
@@ -415,8 +396,6 @@ FN mod_dir_init
 .d:
 END_FN
 
-; ---------------- launcher.cfg ----------------
-; rcx = key (length-prefixed), rdx = out ASCII buffer, r8 = out size. Value of the "key=..." line in file_buf -> eax length (0 if absent)
 FN cfg_get
     movzx r9d, byte [rcx]
     lea r10, [rcx+1]
@@ -480,8 +459,6 @@ FN cfg_get
 .end:
 END_FN
 
-; Reads and validates launcher.cfg. eax 1 valid. Sets cfg_mode (1 host, 2 join), cfg_port, cfg_player, cfg_local, a_mode, a_host, a_room.
-; The checks are the Windows launcher's, one for one: every value is validated before it reaches a command line or a file.
 FN load_config
     lea rcx, [p1]
     lea rdx, [mod_dir]
@@ -536,7 +513,7 @@ FN load_config
     call cfg_get
     test eax, eax
     jnz .haveRoom
-    lea rsi, [room_default]            ; no room code configured: everyone uses the built-in default
+    lea rsi, [room_default]
     lea rdi, [a_room]
     mov ecx, 9
     rep movsb
@@ -545,7 +522,7 @@ FN load_config
     call v_room
     test eax, eax
     jz .bad
-    lea rcx, [k_pass]                  ; optional room password; an unusable one stops multiplayer, never opens the room
+    lea rcx, [k_pass]
     lea rdx, [a_pass]
     mov r8d, 72
     call cfg_get
@@ -592,7 +569,6 @@ FN load_config
 .d:
 END_FN
 
-; Writes launcher.cfg from cfg_mode, a_host, cfg_port, cfg_player, a_room (same text as the Windows launcher: CRLF line ends). eax 1 ok.
 FN cfg_save
     lea rcx, [out_buf]
     mov edx, 512
@@ -643,7 +619,7 @@ FN cfg_save
     mov dword [wf_mode], 0644o
     cmp byte [a_pass], 0
     je .write
-    mov dword [wf_mode], 0600o         ; a stored password is for this user only
+    mov dword [wf_mode], 0600o
 .write:
     call write_file
     mov dword [wf_mode], 0644o

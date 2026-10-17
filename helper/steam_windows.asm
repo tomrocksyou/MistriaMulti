@@ -1,4 +1,5 @@
-; Windows Steam ID probe; loads the installed game DLL.
+; Windows Steam ID probe
+
 bits 64
 default rel
 %define WINDOWS 1
@@ -33,7 +34,7 @@ FN si_load
     mov rax, [steam_argv]
     mov rcx, [rax+8]
     xor edx, edx
-    mov r8d, 0x1100 ; DLL_LOAD_DIR | DEFAULT_DIRS; no working-directory search
+    mov r8d, 0x1100
     call LoadLibraryExW
     jmp .done
 .bad:
