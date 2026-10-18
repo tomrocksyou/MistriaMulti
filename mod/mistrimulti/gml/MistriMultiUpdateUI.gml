@@ -10,7 +10,7 @@
 // next to its "tools" text), so it sits right after it whatever its width; the button is a nine-slice child of the label with a
 // text child. If the game's node cannot be found, a plain text slot (MistriMultiHudText.gml) at a fixed place shows the label
 // without a button. Everything is guarded: a failure drops the nodes, logs once and the game goes on.
-function mistrimulti_mod_version() { return "0.4.7"; }
+function mistrimulti_mod_version() { return "0.4.8"; }
 
 // Fixed place of the fallback label (GUI pixels from the left edge), used only when the game's version text node is missing.
 function mistrimulti_updateui_fallback_x() { return 112; }
